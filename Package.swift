@@ -20,6 +20,14 @@ let package = Package(
                 .apt(["libsdl3-dev"])
             ]
         ),
+        .systemLibrary(
+            name: "CSDL3TTF",
+            pkgConfig: "sdl3-ttf",
+            providers: [
+                .brew(["sdl3_ttf"]),
+                .apt(["libsdl3-ttf-dev"])
+            ]
+        ),
         .target(
             name: "SDLKit",
             dependencies: ["CSDL3"],
@@ -45,6 +53,11 @@ let package = Package(
                 flags.append(.unsafeFlags(["-L/usr/local/lib"]))
                 return flags
             }()
+        ),
+        .target(
+            name: "SDLKitTTF",
+            dependencies: ["SDLKit", "CSDL3TTF"],
+            path: "Sources/SDLKitTTF"
         ),
         .testTarget(
             name: "SDLKitTests",
