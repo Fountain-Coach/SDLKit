@@ -28,6 +28,10 @@ This package is designed to work with the Fountain‑Coach SDL3 fork:
 - Repo: https://github.com/Fountain-Coach/SDL
 - Follow that repo’s instructions to build/install SDL3 for your platform.
 - SDLKit discovers SDL3 via `pkg-config` name `sdl3` and links `SDL3`.
+- If you install the fork to a nonstandard prefix, set:
+  - `SDL3_INCLUDE_DIR` to the SDL include directory (e.g., `/opt/sdl/include`)
+  - `SDL3_LIB_DIR` to the SDL lib directory (e.g., `/opt/sdl/lib`)
+  These are picked up by `Package.swift` to pass `-I`/`-L` to the build.
 
 ## Install SDL3
 
@@ -39,6 +43,8 @@ This package is designed to work with the Fountain‑Coach SDL3 fork:
 
 - Build: `swift build`
 - Test: `swift test`
+
+CI builds will clone and build the SDL fork and run tests on macOS and Ubuntu (see `.github/workflows/ci.yml:1`).
 
 ## Quick Start (pre‑alpha)
 
@@ -68,4 +74,3 @@ See `AGENTS.md:1` for the `sdlkit.gui.v1` tool definitions, error codes, event s
 - Start with `AGENTS.md:1` for repo conventions and the agent schema.
 - Keep changes focused; update docs when adding/changing public API.
 - Platform notes and SDL build guidance live in the SDL fork and will be referenced here as wiring progresses.
-

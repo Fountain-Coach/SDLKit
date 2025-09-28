@@ -1,5 +1,6 @@
 // swift-tools-version: 5.9
 import PackageDescription
+import Foundation
 
 let package = Package(
     name: "SDLKit",
@@ -21,7 +22,23 @@ let package = Package(
         .target(
             name: "SDLKit",
             dependencies: ["CSDL3"],
-            path: "Sources/SDLKit"
+            path: "Sources/SDLKit",
+            cSettings: {
+                var flags: [CSetting] = []
+                let env = ProcessInfo.processInfo.environment
+                if let inc = env["SDL3_INCLUDE_DIR"], !inc.isEmpty {
+                    flags.append(.unsafeFlags(["-I\(inc)"]))
+                }
+                return flags
+            }(),
+            linkerSettings: {
+                var flags: [LinkerSetting] = []
+                let env = ProcessInfo.processInfo.environment
+                if let lib = env["SDL3_LIB_DIR"], !lib.isEmpty {
+                    flags.append(.unsafeFlags(["-L\(lib)"]))
+                }
+                return flags
+            }()
         ),
         .testTarget(
             name: "SDLKitTests",
@@ -30,4 +47,3 @@ let package = Package(
         )
     ]
 )
-
