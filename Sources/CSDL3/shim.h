@@ -1,33 +1,116 @@
-/*
- Minimal FFI surface for the functions we use, with a resilient strategy:
- - If real SDL3 headers are available, include them to provide full types.
- - Otherwise, fall back to lightweight typedefs so Swift can still compile
-   (linking will require libSDL3 at runtime/CI where it exists).
- */
+// Resilient FFI surface that stays stable across SDL3 changes.
+// Expose SDLKit_* wrapper functions that call into the real SDL3 API when
+// headers are available; otherwise, provide lightweight types for headless CI.
 
 #pragma once
 #include <stdint.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// Normalized event kinds for Swift side (independent of SDL numeric codes)
+enum {
+  SDLKIT_EVENT_NONE = 0,
+  SDLKIT_EVENT_KEY_DOWN = 1,
+  SDLKIT_EVENT_KEY_UP = 2,
+  SDLKIT_EVENT_MOUSE_DOWN = 3,
+  SDLKIT_EVENT_MOUSE_UP = 4,
+  SDLKIT_EVENT_MOUSE_MOVE = 5,
+  SDLKIT_EVENT_QUIT = 6,
+  SDLKIT_EVENT_WINDOW_CLOSED = 7
+};
+
+typedef struct SDLKit_Event {
+  uint32_t type;   // one of SDLKIT_EVENT_*
+  int32_t x;       // mouse position if applicable
+  int32_t y;       // mouse position if applicable
+  int32_t keycode; // platform keycode if applicable
+  int32_t button;  // mouse button if applicable
+} SDLKit_Event;
+
 #if __has_include(<SDL3/SDL.h>)
   #include <SDL3/SDL.h>
+  static inline const char *SDLKit_GetError(void) { return SDL_GetError(); }
+  static inline int SDLKit_Init(uint32_t flags) { return SDL_Init(flags); }
+  static inline SDL_Window *SDLKit_CreateWindow(const char *title, int32_t width, int32_t height, uint32_t flags) {
+    return SDL_CreateWindow(title, width, height, flags);
+  }
+  static inline void SDLKit_DestroyWindow(SDL_Window *window) { SDL_DestroyWindow(window); }
+  // Renderer creation API evolves; accept a flags arg but ignore when not needed.
+  static inline SDL_Renderer *SDLKit_CreateRenderer(SDL_Window *window, uint32_t flags) {
+    (void)flags;
+    // Prefer default renderer (NULL name) on SDL3
+    return SDL_CreateRenderer(window, NULL);
+  }
+  static inline int SDLKit_SetRenderDrawColor(SDL_Renderer *renderer, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+    return SDL_SetRenderDrawColor(renderer, r, g, b, a);
+  }
+  static inline int SDLKit_RenderClear(SDL_Renderer *renderer) { return SDL_RenderClear(renderer); }
+  static inline int SDLKit_RenderFillRect(SDL_Renderer *renderer, const struct SDL_FRect *rect) {
+    return SDL_RenderFillRect(renderer, rect);
+  }
+  static inline void SDLKit_RenderPresent(SDL_Renderer *renderer) { SDL_RenderPresent(renderer); }
+
+  static inline void SDLKit__FillEvent(SDLKit_Event *out, const SDL_Event *ev) {
+    out->type = SDLKIT_EVENT_NONE;
+    out->x = out->y = 0;
+    out->keycode = out->button = 0;
+    switch (ev->type) {
+      case SDL_EVENT_QUIT:
+        out->type = SDLKIT_EVENT_QUIT; break;
+      case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
+        out->type = SDLKIT_EVENT_WINDOW_CLOSED; break;
+      case SDL_EVENT_KEY_DOWN:
+        out->type = SDLKIT_EVENT_KEY_DOWN;
+        out->keycode = (int32_t)ev->key.keysym.sym; break;
+      case SDL_EVENT_KEY_UP:
+        out->type = SDLKIT_EVENT_KEY_UP;
+        out->keycode = (int32_t)ev->key.keysym.sym; break;
+      case SDL_EVENT_MOUSE_MOTION:
+        out->type = SDLKIT_EVENT_MOUSE_MOVE;
+        out->x = (int32_t)ev->motion.x;
+        out->y = (int32_t)ev->motion.y; break;
+      case SDL_EVENT_MOUSE_BUTTON_DOWN:
+        out->type = SDLKIT_EVENT_MOUSE_DOWN;
+        out->x = (int32_t)ev->button.x;
+        out->y = (int32_t)ev->button.y;
+        out->button = (int32_t)ev->button.button; break;
+      case SDL_EVENT_MOUSE_BUTTON_UP:
+        out->type = SDLKIT_EVENT_MOUSE_UP;
+        out->x = (int32_t)ev->button.x;
+        out->y = (int32_t)ev->button.y;
+        out->button = (int32_t)ev->button.button; break;
+      default:
+        break;
+    }
+  }
+
+  static inline int SDLKit_PollEvent(SDLKit_Event *out) {
+    SDL_Event ev; if (!SDL_PollEvent(&ev)) return 0; SDLKit__FillEvent(out, &ev); return 1;
+  }
+  static inline int SDLKit_WaitEventTimeout(SDLKit_Event *out, int timeout_ms) {
+    SDL_Event ev; if (!SDL_WaitEventTimeout(&ev, timeout_ms)) return 0; SDLKit__FillEvent(out, &ev); return 1;
+  }
 #else
-  // Fallback minimal declarations that match the ABI we use.
-  // Define concrete (non-opaque) structs so Swift sees the names.
+  // Headless CI or no headers: provide minimal types so Swift can compile,
+  // but no symbol definitions (and Swift code compiles them out in HEADLESS_CI).
   typedef struct SDL_Window { int _unused_window; } SDL_Window;
   typedef struct SDL_Renderer { int _unused_renderer; } SDL_Renderer;
   typedef struct SDL_FRect { float x; float y; float w; float h; } SDL_FRect;
+  const char *SDLKit_GetError(void);
+  int SDLKit_Init(uint32_t flags);
+  SDL_Window *SDLKit_CreateWindow(const char *title, int32_t width, int32_t height, uint32_t flags);
+  void SDLKit_DestroyWindow(SDL_Window *window);
+  SDL_Renderer *SDLKit_CreateRenderer(SDL_Window *window, uint32_t flags);
+  int SDLKit_SetRenderDrawColor(SDL_Renderer *renderer, uint8_t r, uint8_t g, uint8_t b, uint8_t a);
+  int SDLKit_RenderClear(SDL_Renderer *renderer);
+  int SDLKit_RenderFillRect(SDL_Renderer *renderer, const struct SDL_FRect *rect);
+  void SDLKit_RenderPresent(SDL_Renderer *renderer);
+  int SDLKit_PollEvent(SDLKit_Event *out);
+  int SDLKit_WaitEventTimeout(SDLKit_Event *out, int timeout_ms);
+#endif
 
-  // Core
-  extern const char *SDL_GetError(void);
-  extern int SDL_Init(uint32_t flags);
-
-  // Window
-  extern SDL_Window *SDL_CreateWindow(const char *title, int32_t width, int32_t height, uint32_t flags);
-  extern void SDL_DestroyWindow(SDL_Window *window);
-
-  // Renderer
-  extern SDL_Renderer *SDL_CreateRenderer(SDL_Window *window, const char *driver, uint32_t flags);
-  extern int SDL_SetRenderDrawColor(SDL_Renderer *renderer, uint8_t r, uint8_t g, uint8_t b, uint8_t a);
-  extern int SDL_RenderFillRect(SDL_Renderer *renderer, const SDL_FRect *rect);
-  extern void SDL_RenderPresent(SDL_Renderer *renderer);
+#ifdef __cplusplus
+} // extern "C"
 #endif

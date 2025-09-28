@@ -25,7 +25,7 @@ public final class SDLWindow {
         #if canImport(CSDL3) && !HEADLESS_CI
         try SDLCore.shared.ensureInitialized()
         let flags: UInt32 = 0 // e.g., SDL_WINDOW_HIDDEN
-        guard let win = SDL_CreateWindow(config.title, Int32(config.width), Int32(config.height), flags) else {
+        guard let win = SDLKit_CreateWindow(config.title, Int32(config.width), Int32(config.height), flags) else {
             throw AgentError.internalError(SDLCore.lastError())
         }
         handle = win
@@ -37,7 +37,7 @@ public final class SDLWindow {
     public func close() {
         #if canImport(CSDL3) && !HEADLESS_CI
         if let win = handle {
-            SDL_DestroyWindow(win)
+            SDLKit_DestroyWindow(win)
         }
         handle = nil
         #endif
@@ -57,7 +57,7 @@ enum SDLCore {
         if !Self.initialized {
             // Initialize core and video; if video is unavailable (headless), this may fail at runtime.
             // Callers should handle errors gracefully.
-            if SDL_Init(0) != 0 { // 0 => initialize nothing explicitly; subsystems init lazily
+            if SDLKit_Init(0) != 0 { // 0 => initialize nothing explicitly; subsystems init lazily
                 throw AgentError.internalError(SDLCore.lastError())
             }
             Self.initialized = true
@@ -68,7 +68,7 @@ enum SDLCore {
     }
 
     #if canImport(CSDL3) && !HEADLESS_CI
-    static func lastError() -> String { String(cString: SDL_GetError()) }
+    static func lastError() -> String { String(cString: SDLKit_GetError()) }
     #else
     static func lastError() -> String { "SDL unavailable" }
     #endif

@@ -1,4 +1,7 @@
 import Foundation
+#if !HEADLESS_CI && canImport(CSDL3)
+import CSDL3
+#endif
 
 @MainActor
 public final class SDLKitGUIAgent {
@@ -55,7 +58,27 @@ public final class SDLKitGUIAgent {
 
     public func captureEvent(windowId: Int, timeoutMs: Int? = nil) throws -> Event? {
         guard windows[windowId] != nil else { throw AgentError.windowNotFound }
-        // TODO: block/poll for event with timeout
-        throw AgentError.notImplemented
+        #if !HEADLESS_CI && canImport(CSDL3)
+        var out = SDLKit_Event(type: 0, x: 0, y: 0, keycode: 0, button: 0)
+        let got: Int32
+        if let t = timeoutMs, t > 0 {
+            got = Int32(SDLKit_WaitEventTimeout(&out, Int32(t)))
+        } else {
+            got = Int32(SDLKit_PollEvent(&out))
+        }
+        if got == 0 { return nil }
+        switch out.type {
+        case SDLKIT_EVENT_KEY_DOWN: return Event(type: .keyDown, key: String(out.keycode))
+        case SDLKIT_EVENT_KEY_UP: return Event(type: .keyUp, key: String(out.keycode))
+        case SDLKIT_EVENT_MOUSE_DOWN: return Event(type: .mouseDown, x: Int(out.x), y: Int(out.y), button: Int(out.button))
+        case SDLKIT_EVENT_MOUSE_UP: return Event(type: .mouseUp, x: Int(out.x), y: Int(out.y), button: Int(out.button))
+        case SDLKIT_EVENT_MOUSE_MOVE: return Event(type: .mouseMove, x: Int(out.x), y: Int(out.y))
+        case SDLKIT_EVENT_QUIT: return Event(type: .quit)
+        case SDLKIT_EVENT_WINDOW_CLOSED: return Event(type: .windowClosed)
+        default: return nil
+        }
+        #else
+        return nil
+        #endif
     }
 }

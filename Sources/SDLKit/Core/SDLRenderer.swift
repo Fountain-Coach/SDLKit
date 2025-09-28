@@ -16,14 +16,14 @@ public final class SDLRenderer {
         self.height = height
         #if canImport(CSDL3) && !HEADLESS_CI
         guard let win = window.handle else { throw AgentError.internalError("Window not opened") }
-        handle = SDL_CreateRenderer(win, nil, 0)
+        handle = SDLKit_CreateRenderer(win, 0)
         if handle == nil { throw AgentError.internalError(SDLCore.lastError()) }
         #endif
     }
 
     public func present() {
         #if canImport(CSDL3) && !HEADLESS_CI
-        if let r = handle { SDL_RenderPresent(r) }
+        if let r = handle { SDLKit_RenderPresent(r) }
         #endif
     }
 
@@ -34,14 +34,33 @@ public final class SDLRenderer {
         let rr = UInt8((color >> 16) & 0xFF)
         let gg = UInt8((color >> 8) & 0xFF)
         let bb = UInt8(color & 0xFF)
-        if SDL_SetRenderDrawColor(r, rr, gg, bb, a) != 0 {
+        if SDLKit_SetRenderDrawColor(r, rr, gg, bb, a) != 0 {
             throw AgentError.internalError(SDLCore.lastError())
         }
         var rect = SDL_FRect(x: Float(x), y: Float(y), w: Float(width), h: Float(height))
-        if SDL_RenderFillRect(r, &rect) != 0 {
+        if SDLKit_RenderFillRect(r, &rect) != 0 {
             throw AgentError.internalError(SDLCore.lastError())
         }
-        if SDLKitConfig.presentPolicy == .auto { SDL_RenderPresent(r) }
+        if SDLKitConfig.presentPolicy == .auto { SDLKit_RenderPresent(r) }
+        #else
+        throw AgentError.sdlUnavailable
+        #endif
+    }
+
+    public func clear(color: UInt32) throws {
+        #if canImport(CSDL3) && !HEADLESS_CI
+        guard let r = handle else { throw AgentError.internalError("Renderer not created") }
+        let a = UInt8((color >> 24) & 0xFF)
+        let rr = UInt8((color >> 16) & 0xFF)
+        let gg = UInt8((color >> 8) & 0xFF)
+        let bb = UInt8(color & 0xFF)
+        if SDLKit_SetRenderDrawColor(r, rr, gg, bb, a) != 0 {
+            throw AgentError.internalError(SDLCore.lastError())
+        }
+        if SDLKit_RenderClear(r) != 0 {
+            throw AgentError.internalError(SDLCore.lastError())
+        }
+        if SDLKitConfig.presentPolicy == .auto { SDLKit_RenderPresent(r) }
         #else
         throw AgentError.sdlUnavailable
         #endif
