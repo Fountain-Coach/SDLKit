@@ -1,5 +1,8 @@
 import Foundation
 import SDLKit
+#if canImport(SDLKitTTF)
+import SDLKitTTF
+#endif
 
 #if os(macOS)
 @main
@@ -12,9 +15,24 @@ struct DemoApp {
         let agent = SDLKitGUIAgent()
         do {
             let win = try agent.openWindow(title: "SDLKit Demo", width: 640, height: 480)
-            // Clear background and draw a rectangle
-            // Use explicit draw via renderer by leveraging agent conveniences.
+            // Clear background
+            try agent.clear(windowId: win, color: "#0F0F13")
+            // Draw a rectangle
             try agent.drawRectangle(windowId: win, x: 40, y: 40, width: 200, height: 120, color: "#3366FF")
+            // Draw a line
+            try agent.drawLine(windowId: win, x1: 0, y1: 0, x2: 639, y2: 479, color: "#FFCC00")
+            // Draw a filled circle
+            try agent.drawCircleFilled(windowId: win, cx: 320, cy: 240, radius: 60, color: "#55FFAA")
+            // Try text if TTF is available
+            #if !HEADLESS_CI
+            do {
+                try agent.drawText(windowId: win, text: "SDLKit ✓", x: 20, y: 200, font: "/System/Library/Fonts/Supplemental/Arial Unicode.ttf", size: 22, color: 0xFFFFFFFF)
+            } catch AgentError.notImplemented {
+                print("SDL_ttf not available; skipping text rendering")
+            } catch {
+                print("Text draw error: \(error)")
+            }
+            #endif
             try agent.present(windowId: win)
 
             print("Demo running. Press any key or close window to exit...")
@@ -46,4 +64,3 @@ struct DemoApp {
     static func main() { print("SDLKitDemo: unsupported platform for this demo") }
 }
 #endif
-

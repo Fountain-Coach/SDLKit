@@ -55,6 +55,12 @@ This package is designed to work with the Fountain‑Coach SDL3 fork:
 ### Consumer builds (with autolink)
 
 - The system module `CSDL3` autolinks `SDL3` for consumer builds. Install SDL3 via your platform’s package manager or the Fountain‑Coach fork and ensure headers/libs are discoverable. See Install SDL3 above.
+- For text rendering (SDL_ttf), use the `SDLKitTTF` product to autolink `SDL3_ttf`:
+  - Package.swift dependency example:
+    - `.package(url: "https://github.com/your-org/SDLKit.git", from: "0.1.0")`
+    - target deps: `[ .product(name: "SDLKitTTF", package: "SDLKit") ]`
+  - Then in Swift: `import SDLKitTTF` (this also re‑exports `SDLKit`).
+  - Without `SDLKitTTF`, `drawText` remains available but returns `notImplemented` if SDL_ttf isn’t present at build/link time.
 
 macOS CI: not enabled by default. If you need macOS validation, set up a self‑hosted macOS runner and add a job targeting `runs-on: [self-hosted, macOS]`.
 
@@ -68,6 +74,11 @@ let windowId = try agent.openWindow(title: "SDLKit", width: 800, height: 600)
 // drawText/drawRectangle/present currently throw notImplemented until wired
 agent.closeWindow(windowId: windowId)
 ```
+
+### Demo (macOS)
+
+- Run: `swift run SDLKitDemo`
+- Shows clear, rectangle, line, circle; attempts text if SDL_ttf is available. To enable autolink for text, the demo depends on `SDLKitTTF`.
 
 ## Agent Contract
 
@@ -86,3 +97,45 @@ See `AGENTS.md:1` for the `sdlkit.gui.v1` tool definitions, error codes, event s
 - Start with `AGENTS.md:1` for repo conventions and the agent schema.
 - Keep changes focused; update docs when adding/changing public API.
 - Platform notes and SDL build guidance live in the SDL fork and will be referenced here as wiring progresses.
+
+## JSON Tool Layer
+
+This package provides a simple JSON routing helper for the agent: `SDLKitJSONAgent`. You can embed it in your own HTTP server or IPC layer.
+
+Example usage:
+
+```swift
+import SDLKit
+
+let router = SDLKitJSONAgent()
+
+// Open
+let openReq = #"{ "title":"Demo", "width":640, "height":480 }"#.data(using: .utf8)!
+let openRes = router.handle(path: "/agent/gui/window/open", body: openReq)
+// { "window_id": 1 }
+
+// Draw rectangle with color string
+let rectReq = #"{ "window_id":1, "x":40, "y":40, "width":200, "height":120, "color":"#3366FF" }"#.data(using: .utf8)!
+_ = router.handle(path: "/agent/gui/drawRectangle", body: rectReq)
+
+// Clear background
+let clearReq = #"{ "window_id":1, "color":"#0F0F13" }"#.data(using: .utf8)!
+_ = router.handle(path: "/agent/gui/clear", body: clearReq)
+
+// Present
+let presentReq = #"{ "window_id":1 }"#.data(using: .utf8)!
+_ = router.handle(path: "/agent/gui/present", body: presentReq)
+```
+
+Endpoints (paths):
+- `/agent/gui/window/open` → `{ window_id }`
+- `/agent/gui/window/close` → `{ ok }`
+- `/agent/gui/present` → `{ ok }`
+- `/agent/gui/drawRectangle` → `{ ok }` (color as string or integer ARGB)
+- `/agent/gui/clear` → `{ ok }` (color as string or integer ARGB)
+- `/agent/gui/drawLine` → `{ ok }`
+- `/agent/gui/drawCircleFilled` → `{ ok }`
+- `/agent/gui/drawText` → `{ ok }` (requires SDL_ttf)
+- `/agent/gui/captureEvent` → `{ event?: { ... } }`
+
+Errors are returned as `{ "error": { "code": string, "details"?: string } }` with canonical codes defined in `AGENTS.md`.

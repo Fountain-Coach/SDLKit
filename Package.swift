@@ -66,7 +66,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "SDLKitDemo",
-            dependencies: ["SDLKit"],
+            dependencies: ["SDLKit", "SDLKitTTF"],
             path: "Sources/SDLKitDemo"
         )
     ]
