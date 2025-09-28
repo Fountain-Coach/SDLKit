@@ -30,11 +30,12 @@ final class HTTPHandler: ChannelInboundHandler {
         let responseHead: HTTPResponseHead
         var responseBody = context.channel.allocator.buffer(capacity: 0)
 
-        if head.method == .POST {
+        if head.method == .POST || (head.method == .GET && (head.uri == "/openapi.yaml" || head.uri == "/openapi.json")) {
             let path = head.uri
             let data = bodyBuffer.flatMap { Data($0.readableBytesView) } ?? Data()
             let res = agent.handle(path: path, body: data)
-            responseHead = HTTPResponseHead(version: head.version, status: .ok, headers: ["Content-Type": "application/json"])
+            let contentType = path.hasSuffix(".yaml") ? "application/yaml" : "application/json"
+            responseHead = HTTPResponseHead(version: head.version, status: .ok, headers: ["Content-Type": contentType])
             responseBody.writeBytes(res)
         } else {
             responseHead = HTTPResponseHead(version: head.version, status: .ok, headers: ["Content-Type": "text/plain; charset=utf-8"])
@@ -75,4 +76,3 @@ enum Main {
         try channel.closeFuture.wait()
     }
 }
-

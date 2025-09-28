@@ -16,12 +16,19 @@ public struct SDLKitJSONAgent {
         case drawCircleFilled = "/agent/gui/drawCircleFilled"
         case drawText = "/agent/gui/drawText"
         case captureEvent = "/agent/gui/captureEvent"
+        case openapiYAML = "/openapi.yaml"
+        case openapiJSON = "/openapi.json" // YAML served for now
     }
 
     public func handle(path: String, body: Data) -> Data {
         guard let ep = Endpoint(rawValue: path) else { return Self.errorJSON(code: "invalid_endpoint", details: path) }
         do {
             switch ep {
+            case .openapiYAML:
+                return Data(SDLKitOpenAPI.yaml.utf8)
+            case .openapiJSON:
+                // Minimal conversion: embed YAML as JSON string for now
+                return try JSONEncoder().encode(["openapi": SDLKitOpenAPI.yaml])
             case .open:
                 let req = try JSONDecoder().decode(OpenWindowReq.self, from: body)
                 let id = try agent.openWindow(title: req.title, width: req.width, height: req.height)
