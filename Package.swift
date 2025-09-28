@@ -29,6 +29,9 @@ let package = Package(
                 if let inc = env["SDL3_INCLUDE_DIR"], !inc.isEmpty {
                     flags.append(.unsafeFlags(["-I\(inc)"]))
                 }
+                // Fallback common include roots
+                flags.append(.unsafeFlags(["-I/usr/local/include"]))
+                flags.append(.unsafeFlags(["-I/usr/include"]))
                 return flags
             }(),
             linkerSettings: {
@@ -37,6 +40,8 @@ let package = Package(
                 if let lib = env["SDL3_LIB_DIR"], !lib.isEmpty {
                     flags.append(.unsafeFlags(["-L\(lib)"]))
                 }
+                // Fallback common lib roots
+                flags.append(.unsafeFlags(["-L/usr/local/lib"]))
                 return flags
             }()
         ),
