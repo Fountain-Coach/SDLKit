@@ -68,20 +68,20 @@ jobs:
               # As a last resort for headless unit tests: if we still cannot find the library, build a tiny stub
               if [[ ! -e "$LIBDIR/libSDL3.so" ]]; then
                 echo "libSDL3.so not found after build; creating stub for headless tests"
-                cat > "$LIBDIR/sdl3_stub.c" <<'EOF'
-                #include <stdint.h>
-                typedef struct SDL_Window { int _; } SDL_Window;
-                typedef struct SDL_Renderer { int _; } SDL_Renderer;
-                typedef struct SDL_FRect { float x; float y; float w; float h; } SDL_FRect;
-                const char *SDL_GetError(void) { return "stub"; }
-                int SDL_Init(uint32_t flags) { return 0; }
-                SDL_Window *SDL_CreateWindow(const char *title, int32_t width, int32_t height, uint32_t flags) { return 0; }
-                void SDL_DestroyWindow(SDL_Window *window) { }
-                SDL_Renderer *SDL_CreateRenderer(SDL_Window *window, const char *driver, uint32_t flags) { return 0; }
-                int SDL_SetRenderDrawColor(SDL_Renderer *renderer, uint8_t r, uint8_t g, uint8_t b, uint8_t a) { return 0; }
-                int SDL_RenderFillRect(SDL_Renderer *renderer, const SDL_FRect *rect) { return 0; }
-                void SDL_RenderPresent(SDL_Renderer *renderer) { }
-EOF
+                printf '%s\n' \
+                  '#include <stdint.h>' \
+                  'typedef struct SDL_Window { int _; } SDL_Window;' \
+                  'typedef struct SDL_Renderer { int _; } SDL_Renderer;' \
+                  'typedef struct SDL_FRect { float x; float y; float w; float h; } SDL_FRect;' \
+                  'const char *SDL_GetError(void) { return "stub"; }' \
+                  'int SDL_Init(uint32_t flags) { return 0; }' \
+                  'SDL_Window *SDL_CreateWindow(const char *title, int32_t width, int32_t height, uint32_t flags) { return 0; }' \
+                  'void SDL_DestroyWindow(SDL_Window *window) { }' \
+                  'SDL_Renderer *SDL_CreateRenderer(SDL_Window *window, const char *driver, uint32_t flags) { return 0; }' \
+                  'int SDL_SetRenderDrawColor(SDL_Renderer *renderer, uint8_t r, uint8_t g, uint8_t b, uint8_t a) { return 0; }' \
+                  'int SDL_RenderFillRect(SDL_Renderer *renderer, const SDL_FRect *rect) { return 0; }' \
+                  'void SDL_RenderPresent(SDL_Renderer *renderer) { }' \
+                  > "$LIBDIR/sdl3_stub.c"
                 clang -shared -fPIC -o "$LIBDIR/libSDL3.so" "$LIBDIR/sdl3_stub.c" || true
               fi
 
