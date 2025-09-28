@@ -1,135 +1,191 @@
-# SDLKit – SDLKitGUIAgent (Interactive GUI Agent)
+# AGENTS.md — SDLKit Repo Guidelines and GUI Agent Contract (v1)
 
-This document defines the root AI agent interface exposed by SDLKit to the FountainAI platform. It formalizes what the AI can do in a GUI through SDLKit and how those capabilities are invoked and implemented.
+This document serves two purposes:
 
-## Role and Scope
+1) Repository guidance for humans and coding agents working here.
+2) The public SDLKit GUI Agent contract used by FountainAI planners/tools.
 
-- Purpose: Bridge high‑level AI plans and the low‑level SDLKit API for interactive graphics.
-- Responsibilities: Open/close windows, draw/update content, present frames, and optionally capture user events.
-- Non‑goals: No AI planning/logic. The agent only exposes safe, bounded GUI operations.
+---
 
-## Capabilities (Agent Tools)
+## 1. Repo Overview
 
-These functions are presented to the planner (e.g., via OpenAI function calling or a Tools/OpenAPI layer). Arguments are JSON‑serializable. Errors are returned as structured failures.
+- Module: SDLKit — Swift Package wrapping SDL3 with a Swift‑friendly API.
+- System bindings: CSDL3 — SwiftPM system‑library target binding to native SDL3.
+- Agent layer: SDLKitGUIAgent — exposes bounded GUI tools to FountainAI.
 
-- openWindow(title: string, width: int, height: int) -> windowId
-  - Opens a window, returning a handle used by subsequent calls. If opening fails, returns an error.
+### 1.1 Project Layout (skeleton)
 
-- closeWindow(windowId: int) -> void
-  - Closes/destroys the window and associated rendering resources. No‑op or error if not found.
+- Package.swift
+- Sources/
+  - CSDL3/
+    - module.modulemap
+    - shim.h
+  - SDLKit/
+    - SDLKit.swift
+    - Agent/SDLKitGUIAgent.swift
+    - Core/SDLWindow.swift
+    - Core/SDLRenderer.swift
+    - Support/Errors.swift
+- Tests/
+  - SDLKitTests/SDLKitTests.swift
 
-- drawText(windowId: int, text: string, x: int, y: int, font?: string, size?: int, color?: string|int) -> void
-  - Renders text at coordinates. Requires SDL_ttf for real text; before that, may be unimplemented or fall back to a placeholder. Should present or be followed by `present`.
+---
 
-- drawRectangle(windowId: int, x: int, y: int, width: int, height: int, color: string|int) -> void
-  - Draws a filled rectangle (and is a model for future primitives like lines/circles). Uses SDLKit’s renderer.
+## 2. Setup & Build
 
-- present(windowId: int) -> void
-  - Presents the back buffer to screen. Kept explicit so callers can batch multiple draw calls before a single present to reduce flicker.
+- macOS: `brew install sdl3`
+- Linux (Debian/Ubuntu): `sudo apt-get install -y libsdl3-dev`
+- Windows: use vcpkg: `vcpkg install sdl3` and ensure headers/libs are discoverable.
+- Build: `swift build`
+- Test: `swift test`
+- Note: `CSDL3` relies on system SDL3 being present at compile/link time.
 
-- captureEvent(windowId: int, timeoutMs?: int) -> Event? (potential/optional)
-  - Lets the AI wait for a user event. May require a “pending”/resume mechanism in the function‑caller, or be deferred until after one‑way calls are stable. Event would be a small structured object (e.g., `{ type: "keyDown", key: "A" }`).
+---
 
-## Implementation Notes
+## 3. Coding Conventions
 
-- Registration: Implemented in SDLKit, registered with FountainKit’s tool registry. Exposed via internal function‑caller or local tool server.
-- Resource model: Maintain maps from `windowId` to `SDLWindow`/`SDLRenderer` for multi‑window support.
-- Threading: Perform SDL calls on the main thread where required (especially on macOS). Dispatch work accordingly.
-- Present policy: Either auto‑present in draw calls or require explicit `present`. Keeping `present` explicit grants more control; choose one policy and document it.
-- Cleanup: On user‑initiated close (e.g., SDL_QUIT), auto‑cleanup resources and inform callers/planner so they don’t render to a dead window.
+- Follow Swift API Design Guidelines; keep public API Swift‑idiomatic.
+- Contain C interop in `CSDL3` and internal wrappers; don’t leak raw pointers publicly.
+- Use typed `Error` enums with stable cases and user‑actionable messages.
+- Execute SDL calls on the main thread when required (especially on Apple platforms).
+- Document public APIs; keep docs and code synchronized.
 
-## Event Model
+---
 
-- Pull: `captureEvent` blocks (with optional timeout) and returns a single event; suitable for simple flows.
-- Push (optional): The agent may push events to the system (e.g., via telemetry or a stream) such as `window_closed` or key presses. Start with pull; consider push as interactivity grows.
+## 4. Testing & CI
 
-## Integration in Plans
+- Use XCTest in `Tests/SDLKitTests`.
+- Headless friendliness: Prefer rendering paths that can no‑op or skip in headless CI.
+- If SDL3 is missing, skip integration tests with a clear reason rather than failing hard.
 
-Agent functions appear as tools the planner can choose. Example plan: get data → `openWindow` → `drawText`/`drawImage` → `present` → optionally loop on `captureEvent` → `closeWindow`.
+---
 
-## Security and Permissions
+## 5. Security & Permissions
 
-- The agent opens windows on the local machine. Enable only in appropriate contexts (desktop/dev), disabled on locked‑down servers by default.
-- Provide a configuration toggle to enable/disable GUI features in FountainKit.
+- GUI features are disabled by default in server/headless contexts.
+- Expose explicit configuration flags to enable local GUI actions.
 
-## Pseudo‑code Sketch (illustrative)
+---
 
-```swift
-final class SDLKitGUIAgent: ToolAgent {
-    private var windows: [Int: SDLWindow] = [:]
-    private var renderers: [Int: SDLRenderer] = [:]
-    private var nextID: Int = 1
+## 6. Observability
 
-    func openWindow(title: String, width: Int, height: Int) throws -> Int {
-        let id = nextID; nextID += 1
-        let window = SDLWindow(config: .init(title: title, width: width, height: height))
-        try window.open()
-        let renderer = SDLRenderer(width: width, height: height, for: window)
-        windows[id] = window
-        renderers[id] = renderer
-        return id
-    }
+- Logging: info/warn/error with component tags (e.g., `SDLKit.Agent`, `SDLKit.Window`).
+- Metrics: counts for opens/closes, presents, and error types.
+- Tracing: include correlation IDs in agent responses when routed through a gateway.
 
-    func closeWindow(windowId: Int) {
-        guard let window = windows.removeValue(forKey: windowId) else { return }
-        renderers.removeValue(forKey: windowId)
-        window.close()
-    }
+---
 
-    func drawText(windowId: Int, text: String, x: Int, y: Int, font: String?, size: Int?, color: UInt32?) throws {
-        guard let renderer = renderers[windowId] else { throw AgentError.windowNotFound }
-        let fontName = font ?? "Arial"
-        let fontSize = size ?? 16
-        if SDLKit.isTextRenderingEnabled {
-            let fontObj = try SDLFont(name: fontName, size: fontSize)
-            renderer.drawText(fontObj, text: text, x: x, y: y, color: color ?? 0xFFFFFFFF)
-        } else {
-            // Optional: draw placeholder or no‑op
-        }
-        renderer.present()
-    }
+## 7. Versioning
 
-    // drawRectangle, present, captureEvent, …
-}
-```
+- Agent version: `sdlkit.gui.v1`.
+- Additive evolution only for minor versions; avoid breaking existing tools.
+- Deprecations: add warnings and grace periods before removal.
 
-## OpenAPI Sketch (illustrative)
+---
 
-```yaml
-paths:
-  /agent/gui/window/open:
-    post:
-      summary: Open a GUI window
-      operationId: guiOpenWindow
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                title:  { type: string }
-                width:  { type: integer }
-                height: { type: integer }
-      responses:
-        "200":
-          description: Window opened
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  window_id: { type: integer }
-```
+## 8. Configuration (env vars)
 
-## Future Extensions
+- `SDLKIT_GUI_ENABLED` (default true on desktop, false on server): enable/disable GUI tools.
+- `SDLKIT_PRESENT_POLICY` = `auto|explicit` (default `explicit`): draw batching vs implicit present.
+- `SDLKIT_MAX_WINDOWS` (default 8): soft cap on concurrent windows.
+- `SDLKIT_LOG_LEVEL` = `debug|info|warn|error` (default `info`).
 
-- drawImage(texture/image)
-- Primitive shapes (lines, circles), text layout
-- Event streaming/telemetry integration
-- Multi‑window management helpers
+---
 
-## References
+## 9. Limits & Lifecycle
 
-- Teatro AGENTS.md: https://github.com/Fountain-Coach/Teatro/blob/21d080f70b2c238469bbb0133a5f14b20afdd0ab/AGENTS.md
-- Related GUI backend sources (TeatroGUI, SDL components) as cited in the design document.
+- Main‑thread policy: All SDL calls hop to the main thread when required.
+- Cleanup: User‑initiated window close triggers resource cleanup and a `window_closed` signal.
+- Timeouts: Tool calls should complete promptly; planners may retry on `timeout`.
+
+---
+
+## 10. GUI Agent Contract (sdlkit.gui.v1)
+
+Purpose: Provide bounded, safe GUI actions via JSON tools. No arbitrary drawing beyond declared tools.
+
+### 10.1 Capabilities
+
+- openWindow
+  - Request JSON: `{ "title": string, "width": integer >= 1, "height": integer >= 1 }`
+  - Response JSON: `{ "window_id": integer }`
+
+- closeWindow
+  - Request: `{ "window_id": integer }`
+  - Response: `{ "ok": boolean }`
+
+- drawText
+  - Request: `{ "window_id": integer, "text": string, "x": integer, "y": integer, "font"?: string, "size"?: integer, "color"?: string|integer }`
+  - Response: `{ "ok": boolean }`
+  - Notes: Real text requires SDL_ttf; otherwise may be unimplemented or draw a placeholder.
+
+- drawRectangle
+  - Request: `{ "window_id": integer, "x": integer, "y": integer, "width": integer, "height": integer, "color": string|integer }`
+  - Response: `{ "ok": boolean }`
+
+- present
+  - Request: `{ "window_id": integer }`
+  - Response: `{ "ok": boolean }`
+
+- captureEvent (optional)
+  - Request: `{ "window_id": integer, "timeout_ms"?: integer }`
+  - Response: `{ "event"?: Event }`
+
+### 10.2 Errors (canonical)
+
+- `window_not_found`: specified window does not exist.
+- `sdl_unavailable`: SDL not installed/initialized.
+- `not_implemented`: capability not available on this build.
+- `invalid_argument`: failed validation (e.g., negative size, bad color).
+- `timeout`: no event within requested time.
+- `internal_error`: unexpected failure; include `details` field.
+
+### 10.3 Event Schema
+
+- Event (object):
+  - `type`: `key_down|key_up|mouse_down|mouse_up|mouse_move|quit|window_closed`
+  - Additional fields per type, e.g., `key`, `button`, `x`, `y`.
+
+### 10.4 OpenAPI Sketch
+
+- `POST /agent/gui/window/open` → `{ window_id }`
+- Similar endpoints for `close`, `drawText`, `drawRectangle`, `present`, `captureEvent`.
+
+### 10.5 Threading & Present Policy
+
+- Threading: Calls can arrive from any thread; the agent serializes effects on the main thread.
+- Present policy: `explicit` (default) favors batching; `auto` presents after each draw.
+
+---
+
+## 11. Contributor Workflow (for humans and coding agents)
+
+- Build with `swift build`; test with `swift test`.
+- Keep patches focused; avoid unrelated refactors.
+- Update docs when changing public APIs or behavior.
+- To add a new tool:
+  - Extend the schema in this file.
+  - Implement in `Sources/SDLKit/Agent` with validation and error mapping.
+  - Add tests in `Tests/SDLKitTests` and sample usage.
+
+---
+
+## 12. Appendix — Code Skeleton
+
+See the files in this repository for a minimal, compilable skeleton:
+
+- `Package.swift:1`
+- `Sources/CSDL3/module.modulemap:1`, `Sources/CSDL3/shim.h:1`
+- `Sources/SDLKit/SDLKit.swift:1`
+- `Sources/SDLKit/Agent/SDLKitGUIAgent.swift:1`
+- `Sources/SDLKit/Core/SDLWindow.swift:1`, `Sources/SDLKit/Core/SDLRenderer.swift:1`
+- `Sources/SDLKit/Support/Errors.swift:1`
+- `Tests/SDLKitTests/SDLKitTests.swift:1`
+
+---
+
+## 13. References
+
+- Teatro AGENTS.md (context): https://github.com/Fountain-Coach/Teatro/blob/21d080f70b2c238469bbb0133a5f14b20afdd0ab/AGENTS.md
+- SDL3 installation docs per platform; see Setup.
 
