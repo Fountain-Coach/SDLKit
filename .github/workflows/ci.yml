@@ -19,87 +19,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install build tools
+      # No SDL provisioning needed for headless tests
+      - name: Prepare build env (headless)
         run: |
-          apt-get update
-          apt-get install -y --no-install-recommends git cmake ninja-build pkg-config ca-certificates
-      - name: Install Linux build dependencies
-        run: |
-          apt-get install -y --no-install-recommends \
-            libdrm-dev libgbm-dev libdbus-1-dev libibus-1.0-dev \
-            liburing-dev libunwind-dev libgl1-mesa-dev
-      - name: Install or provision SDL3
-        run: |
-          set -exo pipefail
-          # Ensure PKG_CONFIG_PATH has a sane default within this step
-          export PKG_CONFIG_PATH="${PKG_CONFIG_PATH:-/usr/lib/pkgconfig:/usr/share/pkgconfig}"
-
-          have_pkg=false
-          if pkg-config --exists sdl3; then
-            echo "SDL3 found via pkg-config (pre-existing)"
-            have_pkg=true
-          else
-            if apt-get install -y --no-install-recommends libsdl3-dev; then
-              echo "Installed libsdl3-dev from apt"
-              have_pkg=true
-            else
-              echo "libsdl3-dev not available; building SDL fork (console mode)"
-              git clone --depth 1 https://github.com/Fountain-Coach/SDL.git SDL-fork
-              cmake -S SDL-fork -B SDL-fork/build \
-                -DCMAKE_BUILD_TYPE=Release \
-                -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/local \
-                -DSDL_TESTS=OFF -DSDL_INSTALL_TESTS=OFF \
-                -DSDL_SHARED=ON -DSDL_STATIC=OFF \
-                -DSDL_UNIX_CONSOLE_BUILD=ON \
-                -G Ninja
-              cmake --build SDL-fork/build --target install
-
-              PREFIX="${{ github.workspace }}/local"
-              # Find actual installed library path (handles lib, lib64, multiarch, versioned names)
-              FOUND=$(find "$PREFIX" -type f \( -name 'libSDL3*.so*' -o -name 'libSDL3*.a' \) -print | head -n1 || true)
-              LIBDIR="${FOUND:+$(dirname "$FOUND")}"
-              if [[ -z "$LIBDIR" ]]; then LIBDIR="$PREFIX/lib"; fi
-              mkdir -p "$LIBDIR"
-              # Ensure devel symlink exists so -lSDL3 resolves
-              if [[ -n "$FOUND" && ! -e "$LIBDIR/libSDL3.so" ]]; then
-                ln -s "$(basename "$FOUND")" "$LIBDIR/libSDL3.so" || true
-              fi
-
-              # As a last resort for headless unit tests: if we still cannot find the library, build a tiny stub
-              if [[ ! -e "$LIBDIR/libSDL3.so" ]]; then
-                echo "libSDL3.so not found after build; creating stub for headless tests"
-                printf '%s\n' \
-                  '#include <stdint.h>' \
-                  'typedef struct SDL_Window { int _; } SDL_Window;' \
-                  'typedef struct SDL_Renderer { int _; } SDL_Renderer;' \
-                  'typedef struct SDL_FRect { float x; float y; float w; float h; } SDL_FRect;' \
-                  'const char *SDL_GetError(void) { return "stub"; }' \
-                  'int SDL_Init(uint32_t flags) { return 0; }' \
-                  'SDL_Window *SDL_CreateWindow(const char *title, int32_t width, int32_t height, uint32_t flags) { return 0; }' \
-                  'void SDL_DestroyWindow(SDL_Window *window) { }' \
-                  'SDL_Renderer *SDL_CreateRenderer(SDL_Window *window, const char *driver, uint32_t flags) { return 0; }' \
-                  'int SDL_SetRenderDrawColor(SDL_Renderer *renderer, uint8_t r, uint8_t g, uint8_t b, uint8_t a) { return 0; }' \
-                  'int SDL_RenderFillRect(SDL_Renderer *renderer, const SDL_FRect *rect) { return 0; }' \
-                  'void SDL_RenderPresent(SDL_Renderer *renderer) { }' \
-                  > "$LIBDIR/sdl3_stub.c"
-                clang -shared -fPIC -o "$LIBDIR/libSDL3.so" "$LIBDIR/sdl3_stub.c" || true
-              fi
-
-              echo "PKG_CONFIG_PATH=$PREFIX/lib/pkgconfig:${PKG_CONFIG_PATH:-}" >> $GITHUB_ENV
-              echo "SDL3_INCLUDE_DIR=$PREFIX/include" >> $GITHUB_ENV
-              echo "SDL3_LIB_DIR=$LIBDIR" >> $GITHUB_ENV
-              echo "LD_LIBRARY_PATH=$LIBDIR:${LD_LIBRARY_PATH:-}" >> $GITHUB_ENV
-            fi
-          fi
-
-          # If pkg-config is available (pre or post apt), export include/lib via pkg-config
-          if $have_pkg; then
-            incdir=$(pkg-config --variable=includedir sdl3 || echo /usr/include)
-            libdir=$(pkg-config --variable=libdir sdl3 || echo /usr/lib)
-            echo "SDL3_INCLUDE_DIR=$incdir" >> $GITHUB_ENV
-            echo "SDL3_LIB_DIR=$libdir" >> $GITHUB_ENV
-            echo "LD_LIBRARY_PATH=$libdir:${LD_LIBRARY_PATH:-}" >> $GITHUB_ENV
-          fi
+          echo "Preparing headless CI build (no SDL install)"
       - name: Cache Swift build artifacts
         uses: actions/cache@v4
         with:
@@ -110,36 +33,10 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-swift-6.1-jammy-build-
 
-      # Build SDL fork with minimal features into a local prefix (no sudo)
       - name: Build and test
         env:
           SDLKIT_GUI_ENABLED: 'false'
-          SDL3_INCLUDE_DIR: ${{ env.SDL3_INCLUDE_DIR }}
-          SDL3_LIB_DIR: ${{ env.SDL3_LIB_DIR }}
-          PKG_CONFIG_PATH: ${{ env.PKG_CONFIG_PATH }}
-          LD_LIBRARY_PATH: ${{ env.LD_LIBRARY_PATH }}
-          CPATH: ${{ env.SDL3_INCLUDE_DIR }}:${{ env.SDL3_INCLUDE_DIR }}/SDL3:${{ env.CPATH }}
-          LIBRARY_PATH: ${{ env.SDL3_LIB_DIR }}:${{ env.LIBRARY_PATH }}
         run: |
-          echo "Using SDL3 include dir: ${SDL3_INCLUDE_DIR}"
-          echo "Using SDL3 lib dir: ${SDL3_LIB_DIR}"
-          if [[ -d "${SDL3_LIB_DIR}" ]]; then
-            echo "Listing ${SDL3_LIB_DIR}:"; ls -la "${SDL3_LIB_DIR}" || true
-            # Create libSDL3.so symlink if a versioned SO exists but unversioned is missing
-            if [[ ! -e "${SDL3_LIB_DIR}/libSDL3.so" ]]; then
-              cand=$(find "${SDL3_LIB_DIR}" -maxdepth 1 -type f -name 'libSDL3*.so*' -print | head -n1 || true)
-              if [[ -n "$cand" ]]; then ln -s "$(basename "$cand")" "${SDL3_LIB_DIR}/libSDL3.so" || true; fi
-            fi
-          fi
-          # Pass explicit include/lib flags to ensure module importer finds SDL3
-          EXTRA_CC=()
-          if [[ -n "${SDL3_INCLUDE_DIR}" ]]; then
-            EXTRA_CC+=( -Xcc -I"${SDL3_INCLUDE_DIR}" -Xcc -I"${SDL3_INCLUDE_DIR}/SDL3" )
-          fi
-          EXTRA_LINK=()
-          if [[ -n "${SDL3_LIB_DIR}" ]]; then
-            EXTRA_LINK+=( -Xlinker -L"${SDL3_LIB_DIR}" )
-            EXTRA_LINK+=( -Xlinker -rpath -Xlinker "${SDL3_LIB_DIR}" )
-          fi
-          swift build -v ${EXTRA_CC[@]} ${EXTRA_LINK[@]}
-          swift test -v ${EXTRA_CC[@]} ${EXTRA_LINK[@]}
+          # Build and test with HEADLESS_CI to avoid linking SDL3
+          swift build -v -Xswiftc -DHEADLESS_CI
+          swift test -v -Xswiftc -DHEADLESS_CI

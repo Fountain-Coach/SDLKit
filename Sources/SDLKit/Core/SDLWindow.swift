@@ -15,16 +15,15 @@ public final class SDLWindow {
     }
 
     public let config: Config
-    #if canImport(CSDL3)
+    #if canImport(CSDL3) && !HEADLESS_CI
     var handle: UnsafeMutablePointer<SDL_Window>?
     #endif
 
     public init(config: Config) { self.config = config }
 
     public func open() throws {
-        #if canImport(CSDL3)
+        #if canImport(CSDL3) && !HEADLESS_CI
         try SDLCore.shared.ensureInitialized()
-        // Create a simple hidden window; presentation is controlled by the renderer.
         let flags: UInt32 = 0 // e.g., SDL_WINDOW_HIDDEN
         guard let win = SDL_CreateWindow(config.title, Int32(config.width), Int32(config.height), flags) else {
             throw AgentError.internalError(SDLCore.lastError())
@@ -36,7 +35,7 @@ public final class SDLWindow {
     }
 
     public func close() {
-        #if canImport(CSDL3)
+        #if canImport(CSDL3) && !HEADLESS_CI
         if let win = handle {
             SDL_DestroyWindow(win)
         }
@@ -49,12 +48,12 @@ public final class SDLWindow {
 enum SDLCore {
     case shared
 
-    #if canImport(CSDL3)
+    #if canImport(CSDL3) && !HEADLESS_CI
     private static var initialized = false
     #endif
 
     func ensureInitialized() throws {
-        #if canImport(CSDL3)
+        #if canImport(CSDL3) && !HEADLESS_CI
         if !Self.initialized {
             // Initialize core and video; if video is unavailable (headless), this may fail at runtime.
             // Callers should handle errors gracefully.
@@ -68,10 +67,9 @@ enum SDLCore {
         #endif
     }
 
-    #if canImport(CSDL3)
+    #if canImport(CSDL3) && !HEADLESS_CI
     static func lastError() -> String { String(cString: SDL_GetError()) }
     #else
     static func lastError() -> String { "SDL unavailable" }
     #endif
 }
-
