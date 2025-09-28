@@ -1,4 +1,9 @@
-// Placeholder for future SDL window wrapper
+import Foundation
+#if canImport(CSDL3)
+import CSDL3
+#endif
+
+@MainActor
 public final class SDLWindow {
     public struct Config {
         public var title: String
@@ -10,9 +15,63 @@ public final class SDLWindow {
     }
 
     public let config: Config
+    #if canImport(CSDL3)
+    var handle: UnsafeMutablePointer<SDL_Window>?
+    #endif
+
     public init(config: Config) { self.config = config }
 
-    public func open() throws { /* TODO: call SDL_CreateWindow */ }
-    public func close() { /* TODO: call SDL_DestroyWindow */ }
+    public func open() throws {
+        #if canImport(CSDL3)
+        try SDLCore.shared.ensureInitialized()
+        // Create a simple hidden window; presentation is controlled by the renderer.
+        let flags: UInt32 = 0 // e.g., SDL_WINDOW_HIDDEN
+        guard let win = SDL_CreateWindow(config.title, Int32(config.width), Int32(config.height), flags) else {
+            throw AgentError.internalError(SDLCore.lastError())
+        }
+        handle = win
+        #else
+        throw AgentError.sdlUnavailable
+        #endif
+    }
+
+    public func close() {
+        #if canImport(CSDL3)
+        if let win = handle {
+            SDL_DestroyWindow(win)
+        }
+        handle = nil
+        #endif
+    }
+}
+
+@MainActor
+enum SDLCore {
+    case shared
+
+    #if canImport(CSDL3)
+    private static var initialized = false
+    #endif
+
+    func ensureInitialized() throws {
+        #if canImport(CSDL3)
+        if !Self.initialized {
+            // Initialize core and video; if video is unavailable (headless), this may fail at runtime.
+            // Callers should handle errors gracefully.
+            if SDL_Init(0) != 0 { // 0 => initialize nothing explicitly; subsystems init lazily
+                throw AgentError.internalError(SDLCore.lastError())
+            }
+            Self.initialized = true
+        }
+        #else
+        throw AgentError.sdlUnavailable
+        #endif
+    }
+
+    #if canImport(CSDL3)
+    static func lastError() -> String { String(cString: SDL_GetError()) }
+    #else
+    static func lastError() -> String { "SDL unavailable" }
+    #endif
 }
 

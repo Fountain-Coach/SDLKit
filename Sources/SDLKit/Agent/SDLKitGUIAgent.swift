@@ -1,8 +1,10 @@
 import Foundation
 
+@MainActor
 public final class SDLKitGUIAgent {
     private var nextID: Int = 1
-    private var windows: [Int: Any] = [:] // Placeholder until real SDLWindow exists
+    private struct WindowBundle { let window: SDLWindow; let renderer: SDLRenderer }
+    private var windows: [Int: WindowBundle] = [:]
 
     public init() {}
 
@@ -10,15 +12,20 @@ public final class SDLKitGUIAgent {
     public func openWindow(title: String, width: Int, height: Int) throws -> Int {
         guard width > 0, height > 0 else { throw AgentError.invalidArgument("width/height must be > 0") }
         guard SDLKitConfig.guiEnabled else { throw AgentError.sdlUnavailable }
-        // TODO: create SDLWindow + SDLRenderer
+
+        let window = SDLWindow(config: .init(title: title, width: width, height: height))
+        try window.open()
+        let renderer = try SDLRenderer(width: width, height: height, window: window)
+
         let id = nextID; nextID += 1
-        windows[id] = ()
+        windows[id] = WindowBundle(window: window, renderer: renderer)
         return id
     }
 
     public func closeWindow(windowId: Int) {
-        // TODO: destroy SDL resources
-        windows.removeValue(forKey: windowId)
+        guard let bundle = windows.removeValue(forKey: windowId) else { return }
+        bundle.window.close()
+        // Renderer destroyed with window by SDL; nothing further here.
     }
 
     public func drawText(windowId: Int, text: String, x: Int, y: Int, font: String? = nil, size: Int? = nil, color: UInt32? = nil) throws {
@@ -28,15 +35,13 @@ public final class SDLKitGUIAgent {
     }
 
     public func drawRectangle(windowId: Int, x: Int, y: Int, width: Int, height: Int, color: UInt32) throws {
-        guard windows[windowId] != nil else { throw AgentError.windowNotFound }
-        // TODO: draw primitive rectangle
-        throw AgentError.notImplemented
+        guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }
+        try bundle.renderer.drawRectangle(x: x, y: y, width: width, height: height, color: color)
     }
 
     public func present(windowId: Int) throws {
-        guard windows[windowId] != nil else { throw AgentError.windowNotFound }
-        // TODO: present renderer
-        throw AgentError.notImplemented
+        guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }
+        bundle.renderer.present()
     }
 
     public struct Event: Equatable {
@@ -54,4 +59,3 @@ public final class SDLKitGUIAgent {
         throw AgentError.notImplemented
     }
 }
-
