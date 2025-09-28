@@ -137,4 +137,58 @@ public final class SDLRenderer {
         throw AgentError.sdlUnavailable
         #endif
     }
+
+    public func drawText(_ text: String, x: Int, y: Int, color: UInt32, fontPath: String, size: Int) throws {
+        #if canImport(CSDL3) && !HEADLESS_CI
+        guard let r = handle else { throw AgentError.internalError("Renderer not created") }
+        guard SDLKit_TTF_Available() != 0 else { throw AgentError.notImplemented }
+        try Self.ensureTTFInited()
+        let font = try Self.getFont(path: fontPath, size: size)
+        let a = UInt8((color >> 24) & 0xFF)
+        let rr = UInt8((color >> 16) & 0xFF)
+        let gg = UInt8((color >> 8) & 0xFF)
+        let bb = UInt8(color & 0xFF)
+        let tex: UnsafeMutablePointer<SDL_Texture>? = text.withCString { cstr in
+            guard let surf = SDLKit_TTF_RenderUTF8_Blended(font, cstr, rr, gg, bb, a) else { return nil }
+            defer { SDLKit_DestroySurface(surf) }
+            return SDLKit_CreateTextureFromSurface(r, surf)
+        }
+        guard let texture = tex else { throw AgentError.internalError(SDLCore.lastError()) }
+        defer { SDLKit_DestroyTexture(texture) }
+        var tw: Int32 = 0, th: Int32 = 0
+        SDLKit_GetTextureSize(texture, &tw, &th)
+        var dst = SDL_FRect(x: Float(x), y: Float(y), w: Float(tw), h: Float(th))
+        if SDLKit_RenderTexture(r, texture, nil, &dst) != 0 {
+            throw AgentError.internalError(SDLCore.lastError())
+        }
+        if SDLKitConfig.presentPolicy == .auto { SDLKit_RenderPresent(r) }
+        #else
+        throw AgentError.sdlUnavailable
+        #endif
+    }
+
+    #if canImport(CSDL3) && !HEADLESS_CI
+    private struct FontKey: Hashable { let path: String; let size: Int }
+    private static var ttfInitialized = false
+    private static var fontCache: [FontKey: UnsafeMutableRawPointer] = [:]
+
+    private static func ensureTTFInited() throws {
+        if !ttfInitialized {
+            if SDLKit_TTF_Init() != 0 { throw AgentError.internalError(SDLCore.lastError()) }
+            ttfInitialized = true
+        }
+    }
+
+    private static func getFont(path: String, size: Int) throws -> UnsafeMutablePointer<SDLKit_TTF_Font> {
+        let key = FontKey(path: path, size: size)
+        if let cached = fontCache[key] {
+            return cached.bindMemory(to: SDLKit_TTF_Font.self, capacity: 1)
+        }
+        guard let f = SDLKit_TTF_OpenFont(path, Int32(size)) else {
+            throw AgentError.internalError(SDLCore.lastError())
+        }
+        fontCache[key] = UnsafeMutableRawPointer(f)
+        return f
+    }
+    #endif
 }

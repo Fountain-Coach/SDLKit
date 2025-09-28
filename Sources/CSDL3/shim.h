@@ -97,8 +97,27 @@ typedef struct SDLKit_Event {
   #if __has_include(<SDL3_ttf/SDL_ttf.h>)
     #include <SDL3_ttf/SDL_ttf.h>
     static inline int SDLKit_TTF_Available(void) { return 1; }
+    static inline int SDLKit_TTF_Init(void) { return TTF_Init(); }
+    typedef TTF_Font SDLKit_TTF_Font;
+    static inline SDLKit_TTF_Font *SDLKit_TTF_OpenFont(const char *path, int ptsize) { return TTF_OpenFont(path, ptsize); }
+    static inline void SDLKit_TTF_CloseFont(SDLKit_TTF_Font *font) { if (font) TTF_CloseFont(font); }
+    static inline SDL_Surface *SDLKit_TTF_RenderUTF8_Blended(SDLKit_TTF_Font *font, const char *text,
+                                                             uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+      SDL_Color c = { r, g, b, a };
+      return TTF_RenderUTF8_Blended(font, text, c);
+    }
+    static inline SDL_Texture *SDLKit_CreateTextureFromSurface(SDL_Renderer *renderer, SDL_Surface *surface) {
+      return SDL_CreateTextureFromSurface(renderer, surface);
+    }
+    static inline void SDLKit_DestroySurface(SDL_Surface *surface) { SDL_DestroySurface(surface); }
+    static inline void SDLKit_DestroyTexture(SDL_Texture *tex) { SDL_DestroyTexture(tex); }
+    static inline void SDLKit_GetTextureSize(SDL_Texture *tex, int *w, int *h) { SDL_GetTextureSize(tex, w, h); }
+    static inline int SDLKit_RenderTexture(SDL_Renderer *renderer, SDL_Texture *tex, const SDL_FRect *src, const SDL_FRect *dst) {
+      return SDL_RenderTexture(renderer, tex, src, dst);
+    }
   #else
     static inline int SDLKit_TTF_Available(void) { return 0; }
+    typedef void SDLKit_TTF_Font;
   #endif
 #else
   // Headless CI or no headers: provide minimal types so Swift can compile,
@@ -118,6 +137,20 @@ typedef struct SDLKit_Event {
   int SDLKit_PollEvent(SDLKit_Event *out);
   int SDLKit_WaitEventTimeout(SDLKit_Event *out, int timeout_ms);
   static inline int SDLKit_TTF_Available(void) { return 0; }
+  typedef void SDLKit_TTF_Font;
+  int SDLKit_TTF_Init(void);
+  SDLKit_TTF_Font *SDLKit_TTF_OpenFont(const char *path, int ptsize);
+  void SDLKit_TTF_CloseFont(SDLKit_TTF_Font *font);
+  struct SDL_Surface;
+  struct SDL_Texture;
+  SDL_Surface *SDLKit_TTF_RenderUTF8_Blended(SDLKit_TTF_Font *font, const char *text,
+                                             uint8_t r, uint8_t g, uint8_t b, uint8_t a);
+  struct SDL_Renderer;
+  SDL_Texture *SDLKit_CreateTextureFromSurface(struct SDL_Renderer *renderer, struct SDL_Surface *surface);
+  void SDLKit_DestroySurface(struct SDL_Surface *surface);
+  void SDLKit_DestroyTexture(struct SDL_Texture *tex);
+  void SDLKit_GetTextureSize(struct SDL_Texture *tex, int *w, int *h);
+  int SDLKit_RenderTexture(struct SDL_Renderer *renderer, struct SDL_Texture *tex, const struct SDL_FRect *src, const struct SDL_FRect *dst);
 #endif
 
 #ifdef __cplusplus

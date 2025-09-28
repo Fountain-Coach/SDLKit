@@ -34,9 +34,17 @@ public final class SDLKitGUIAgent {
     }
 
     public func drawText(windowId: Int, text: String, x: Int, y: Int, font: String? = nil, size: Int? = nil, color: UInt32? = nil) throws {
-        guard windows[windowId] != nil else { throw AgentError.windowNotFound }
-        // TODO: render text if SDL_ttf available
+        guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }
+        #if !HEADLESS_CI && canImport(CSDL3)
+        guard let fontPath = font, let size = size, size > 0 else {
+            throw AgentError.invalidArgument("font and positive size are required for drawText")
+        }
+        let argb = color ?? 0xFFFFFFFF
+        SDLLogger.debug("SDLKit.Agent", "drawText id=\(windowId) at (\(x),\(y)) font=\(fontPath) size=\(size) color=\(String(format: "%08X", argb)) text=\(text)")
+        try bundle.renderer.drawText(text, x: x, y: y, color: argb, fontPath: fontPath, size: size)
+        #else
         throw AgentError.notImplemented
+        #endif
     }
 
     public func drawRectangle(windowId: Int, x: Int, y: Int, width: Int, height: Int, color: UInt32) throws {
