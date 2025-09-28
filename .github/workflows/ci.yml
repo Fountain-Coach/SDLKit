@@ -30,6 +30,7 @@ jobs:
             -DSDL_TESTS=OFF -DSDL_INSTALL_TESTS=OFF -DSDL_DISABLE_INSTALL_DOCS=ON \
             -DSDL_SHARED=ON -DSDL_STATIC=OFF \
             -DSDL_VIDEO=OFF -DSDL_AUDIO=OFF -DSDL_RENDER=OFF -DSDL_SAMPLES=OFF \
+            -DSDL_UNIX_CONSOLE_BUILD=ON \
             -G Ninja
           cmake --build SDL-fork/build --target install
 
@@ -39,6 +40,7 @@ jobs:
           SDL3_INCLUDE_DIR: ${{ github.workspace }}/local/include
           SDL3_LIB_DIR: ${{ github.workspace }}/local/lib
           PKG_CONFIG_PATH: ${{ github.workspace }}/local/lib/pkgconfig
+          LD_LIBRARY_PATH: ${{ github.workspace }}/local/lib:${{ env.LD_LIBRARY_PATH }}
         run: |
           swift build -v
           swift test -v

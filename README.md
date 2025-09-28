@@ -38,13 +38,14 @@ This package is designed to work with the Fountain‑Coach SDL3 fork:
 - macOS: `brew install sdl3` (or build/install the Fountain‑Coach fork if preferred).
 - Linux (Debian/Ubuntu): `sudo apt-get install -y libsdl3-dev` (or build from the fork).
 - Windows: install via vcpkg (`vcpkg install sdl3`) and ensure headers/libs are discoverable.
+  - If using a custom prefix, export `LD_LIBRARY_PATH=/path/to/prefix/lib:$LD_LIBRARY_PATH` when running binaries so the dynamic linker can find `libSDL3.so`.
 
 ## Build & Test
 
 - Build: `swift build`
 - Test: `swift test`
 
-CI builds the SDL fork with minimal features in a local prefix (no sudo) and runs `swift build`/`swift test` on Linux using the official Swift Docker image (see `.github/workflows/ci.yml:1`).
+CI builds the SDL fork with minimal features and console mode (no window backends) in a local prefix and runs `swift build`/`swift test` on Linux using the official Swift Docker image (see `.github/workflows/ci.yml:1`). Runtime linking note: the workflow adds `LD_LIBRARY_PATH` to include the local SDL install for test execution.
 
 macOS CI: not enabled by default. If you need macOS validation, set up a self‑hosted macOS runner and add a job targeting `runs-on: [self-hosted, macOS]`.
 
