@@ -13,12 +13,8 @@ defaults:
 jobs:
   linux:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        swift: [ '6.1-jammy' ]
     container:
-      image: swift:${{ matrix.swift }}
+      image: swift:6.1-jammy
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -110,9 +106,9 @@ EOF
           path: |
             .build
             /github/home/.swiftpm
-          key: ${{ runner.os }}-swift-${{ matrix.swift }}-build-${{ hashFiles('Package.swift', 'Sources/**', 'Tests/**') }}
+          key: ${{ runner.os }}-swift-6.1-jammy-build-${{ hashFiles('Package.swift', 'Sources/**', 'Tests/**') }}
           restore-keys: |
-            ${{ runner.os }}-swift-${{ matrix.swift }}-build-
+            ${{ runner.os }}-swift-6.1-jammy-build-
 
       # Build SDL fork with minimal features into a local prefix (no sudo)
       - name: Build and test
