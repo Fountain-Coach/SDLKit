@@ -38,7 +38,18 @@ public enum SDLColor {
         "grey":  0xFF808080,
         "yellow":0xFFFFFF00,
         "cyan":  0xFF00FFFF,
-        "magenta":0xFFFF00FF
+        "magenta":0xFFFF00FF,
+        "orange": 0xFFFFA500,
+        "purple": 0xFF800080,
+        "pink":   0xFFFFC0CB,
+        "brown":  0xFFA52A2A,
+        "lime":   0xFF00FF00,
+        "navy":   0xFF000080,
+        "teal":   0xFF008080,
+        "olive":  0xFF808000,
+        "maroon": 0xFF800000,
+        "silver": 0xFFC0C0C0,
+        "aqua":   0xFF00FFFF,
+        "fuchsia":0xFFFF00FF
     ]
 }
-

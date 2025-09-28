@@ -22,11 +22,13 @@ public final class SDLKitGUIAgent {
 
         let id = nextID; nextID += 1
         windows[id] = WindowBundle(window: window, renderer: renderer)
+        SDLLogger.info("SDLKit.Agent", "Opened window id=\(id) \(width)x\(height) title=\(title)")
         return id
     }
 
     public func closeWindow(windowId: Int) {
         guard let bundle = windows.removeValue(forKey: windowId) else { return }
+        SDLLogger.info("SDLKit.Agent", "Closing window id=\(windowId)")
         bundle.window.close()
         // Renderer destroyed with window by SDL; nothing further here.
     }
@@ -39,6 +41,7 @@ public final class SDLKitGUIAgent {
 
     public func drawRectangle(windowId: Int, x: Int, y: Int, width: Int, height: Int, color: UInt32) throws {
         guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }
+        SDLLogger.debug("SDLKit.Agent", "drawRectangle id=\(windowId) x=\(x) y=\(y) w=\(width) h=\(height) color=\(String(format: "%08X", color))")
         try bundle.renderer.drawRectangle(x: x, y: y, width: width, height: height, color: color)
     }
 
@@ -51,6 +54,7 @@ public final class SDLKitGUIAgent {
 
     public func present(windowId: Int) throws {
         guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }
+        SDLLogger.debug("SDLKit.Agent", "present id=\(windowId)")
         bundle.renderer.present()
     }
 
