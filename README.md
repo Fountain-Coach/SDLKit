@@ -153,3 +153,20 @@ Endpoints (paths):
 - `/agent/gui/captureEvent` → `{ event?: { ... } }`
 
 Errors are returned as `{ "error": { "code": string, "details"?: string } }` with canonical codes defined in `AGENTS.md`.
+
+### Example HTTP Server (separate)
+
+- A minimal HTTP server sample is provided under `Examples/SDLKitJSONServer` to avoid cluttering the main package.
+- It uses SwiftNIO and routes POST JSON bodies to `SDLKitJSONAgent`.
+
+Run:
+- `cd Examples/SDLKitJSONServer`
+- `swift run SDLKitJSONServer`
+- Default bind: `127.0.0.1:8080`. Configure via env: `SDLKIT_SERVER_HOST`, `SDLKIT_SERVER_PORT`.
+
+Curl examples:
+- Open: `curl -sX POST localhost:8080/agent/gui/window/open -d '{"title":"Demo","width":640,"height":480}' -H 'Content-Type: application/json'`
+- Draw: `curl -sX POST localhost:8080/agent/gui/drawRectangle -d '{"window_id":1,"x":40,"y":40,"width":200,"height":120,"color":"#3366FF"}' -H 'Content-Type: application/json'`
+- Present: `curl -sX POST localhost:8080/agent/gui/present -d '{"window_id":1}' -H 'Content-Type: application/json'`
+
+Note: GUI requires SDL3 installed and `SDLKIT_GUI_ENABLED=1` in your environment.
