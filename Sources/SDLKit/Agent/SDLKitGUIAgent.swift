@@ -58,6 +58,43 @@ public final class SDLKitGUIAgent {
         bundle.renderer.present()
     }
 
+    // New tools: clear, line, circle
+    public func clear(windowId: Int, color: UInt32) throws {
+        guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }
+        SDLLogger.debug("SDLKit.Agent", "clear id=\(windowId) color=\(String(format: "%08X", color))")
+        try bundle.renderer.clear(color: color)
+    }
+
+    public func clear(windowId: Int, color: String) throws {
+        let argb: UInt32
+        do { argb = try SDLColor.parse(color) } catch { throw AgentError.invalidArgument("Invalid color: \(color)") }
+        try clear(windowId: windowId, color: argb)
+    }
+
+    public func drawLine(windowId: Int, x1: Int, y1: Int, x2: Int, y2: Int, color: UInt32) throws {
+        guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }
+        SDLLogger.debug("SDLKit.Agent", "drawLine id=\(windowId) (\(x1),\(y1))->(\(x2),\(y2)) color=\(String(format: "%08X", color))")
+        try bundle.renderer.drawLine(x1: x1, y1: y1, x2: x2, y2: y2, color: color)
+    }
+
+    public func drawLine(windowId: Int, x1: Int, y1: Int, x2: Int, y2: Int, color: String) throws {
+        let argb: UInt32
+        do { argb = try SDLColor.parse(color) } catch { throw AgentError.invalidArgument("Invalid color: \(color)") }
+        try drawLine(windowId: windowId, x1: x1, y1: y1, x2: x2, y2: y2, color: argb)
+    }
+
+    public func drawCircleFilled(windowId: Int, cx: Int, cy: Int, radius: Int, color: UInt32) throws {
+        guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }
+        SDLLogger.debug("SDLKit.Agent", "drawCircleFilled id=\(windowId) c=(\(cx),\(cy)) r=\(radius) color=\(String(format: "%08X", color))")
+        try bundle.renderer.drawCircleFilled(cx: cx, cy: cy, radius: radius, color: color)
+    }
+
+    public func drawCircleFilled(windowId: Int, cx: Int, cy: Int, radius: Int, color: String) throws {
+        let argb: UInt32
+        do { argb = try SDLColor.parse(color) } catch { throw AgentError.invalidArgument("Invalid color: \(color)") }
+        try drawCircleFilled(windowId: windowId, cx: cx, cy: cy, radius: radius, color: argb)
+    }
+
     public struct Event: Equatable {
         public enum Kind { case keyDown, keyUp, mouseDown, mouseUp, mouseMove, quit, windowClosed }
         public var type: Kind

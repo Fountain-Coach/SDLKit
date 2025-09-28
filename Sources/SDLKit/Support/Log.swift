@@ -1,6 +1,6 @@
 import Foundation
 
-public enum SDLLogLevel: Int, Comparable {
+public enum SDLLogLevel: Int, Comparable, Sendable {
     case debug = 0
     case info = 1
     case warn = 2
@@ -20,6 +20,7 @@ public enum SDLLogLevel: Int, Comparable {
     }
 }
 
+@MainActor
 public enum SDLLogger {
     private static let level = SDLLogLevel.fromEnv()
 
@@ -42,4 +43,3 @@ public enum SDLLogger {
         print("[\(ts)] [\(lvl)] \(component): \(msg())")
     }
 }
-

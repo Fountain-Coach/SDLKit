@@ -92,6 +92,14 @@ typedef struct SDLKit_Event {
   static inline int SDLKit_WaitEventTimeout(SDLKit_Event *out, int timeout_ms) {
     SDL_Event ev; if (!SDL_WaitEventTimeout(&ev, timeout_ms)) return 0; SDLKit__FillEvent(out, &ev); return 1;
   }
+
+  // Optional: SDL_ttf availability probe
+  #if __has_include(<SDL3_ttf/SDL_ttf.h>)
+    #include <SDL3_ttf/SDL_ttf.h>
+    static inline int SDLKit_TTF_Available(void) { return 1; }
+  #else
+    static inline int SDLKit_TTF_Available(void) { return 0; }
+  #endif
 #else
   // Headless CI or no headers: provide minimal types so Swift can compile,
   // but no symbol definitions (and Swift code compiles them out in HEADLESS_CI).
@@ -109,6 +117,7 @@ typedef struct SDLKit_Event {
   void SDLKit_RenderPresent(SDL_Renderer *renderer);
   int SDLKit_PollEvent(SDLKit_Event *out);
   int SDLKit_WaitEventTimeout(SDLKit_Event *out, int timeout_ms);
+  static inline int SDLKit_TTF_Available(void) { return 0; }
 #endif
 
 #ifdef __cplusplus

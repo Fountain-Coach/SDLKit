@@ -123,6 +123,18 @@ Purpose: Provide bounded, safe GUI actions via JSON tools. No arbitrary drawing 
   - Request: `{ "window_id": integer, "x": integer, "y": integer, "width": integer, "height": integer, "color": string|integer }`
   - Response: `{ "ok": boolean }`
 
+- clear (new)
+  - Request: `{ "window_id": integer, "color": string|integer }`
+  - Response: `{ "ok": boolean }`
+
+- drawLine (new)
+  - Request: `{ "window_id": integer, "x1": integer, "y1": integer, "x2": integer, "y2": integer, "color": string|integer }`
+  - Response: `{ "ok": boolean }`
+
+- drawCircleFilled (new)
+  - Request: `{ "window_id": integer, "cx": integer, "cy": integer, "radius": integer >= 0, "color": string|integer }`
+  - Response: `{ "ok": boolean }`
+
 - present
   - Request: `{ "window_id": integer }`
   - Response: `{ "ok": boolean }`
@@ -150,6 +162,7 @@ Purpose: Provide bounded, safe GUI actions via JSON tools. No arbitrary drawing 
 
 - `POST /agent/gui/window/open` → `{ window_id }`
 - Similar endpoints for `close`, `drawText`, `drawRectangle`, `present`, `captureEvent`.
+- New endpoints: `clear`, `drawLine`, `drawCircleFilled`.
 
 ### 10.5 Threading & Present Policy
 
@@ -167,6 +180,7 @@ Purpose: Provide bounded, safe GUI actions via JSON tools. No arbitrary drawing 
   - Extend the schema in this file.
   - Implement in `Sources/SDLKit/Agent` with validation and error mapping.
   - Add tests in `Tests/SDLKitTests` and sample usage.
+  - For text rendering (SDL_ttf): optional inclusion is scaffolded. When available at build/link time, enable `drawText`; otherwise return `not_implemented`.
 
 ---
 
@@ -188,4 +202,3 @@ See the files in this repository for a minimal, compilable skeleton:
 
 - Teatro AGENTS.md (context): https://github.com/Fountain-Coach/Teatro/blob/21d080f70b2c238469bbb0133a5f14b20afdd0ab/AGENTS.md
 - SDL3 installation docs per platform; see Setup.
-
