@@ -27,9 +27,16 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends git cmake ninja-build pkg-config ca-certificates
+      - name: Install Linux build dependencies
+        run: |
+          apt-get install -y --no-install-recommends \
+            libdrm-dev libgbm-dev libdbus-1-dev libibus-1.0-dev \
+            liburing-dev libunwind-dev libgl1-mesa-dev
       - name: Install or provision SDL3
         run: |
-          set -euxo pipefail
+          set -exo pipefail
+          # Ensure PKG_CONFIG_PATH has a sane default within this step
+          export PKG_CONFIG_PATH="${PKG_CONFIG_PATH:-/usr/lib/pkgconfig:/usr/share/pkgconfig}"
           if pkg-config --exists sdl3; then
             echo "SDL3 found via pkg-config"
           else
@@ -46,7 +53,7 @@ jobs:
                 -DSDL_UNIX_CONSOLE_BUILD=ON \
                 -G Ninja
               cmake --build SDL-fork/build --target install
-              echo "PKG_CONFIG_PATH=${{ github.workspace }}/local/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
+              echo "PKG_CONFIG_PATH=${{ github.workspace }}/local/lib/pkgconfig:${PKG_CONFIG_PATH:-}" >> $GITHUB_ENV
               echo "SDL3_INCLUDE_DIR=${{ github.workspace }}/local/include" >> $GITHUB_ENV
               echo "SDL3_LIB_DIR=${{ github.workspace }}/local/lib" >> $GITHUB_ENV
               echo "LD_LIBRARY_PATH=${{ github.workspace }}/local/lib:${LD_LIBRARY_PATH:-}" >> $GITHUB_ENV
