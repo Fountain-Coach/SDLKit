@@ -53,10 +53,24 @@ jobs:
                 -DSDL_UNIX_CONSOLE_BUILD=ON \
                 -G Ninja
               cmake --build SDL-fork/build --target install
+              # Make sure the linker can resolve -lSDL3 even if only a SONAME exists
+              PREFIX="${{ github.workspace }}/local"
+              # Detect actual lib directory (handles lib, lib64, or multiarch)
+              LIBDIR="$PREFIX/lib"
+              if [[ ! -d "$LIBDIR" || -z $(ls -A "$LIBDIR" 2>/dev/null) ]]; then
+                LIBDIR=$(dirname "$(find "$PREFIX" -type f -name 'libSDL3*.so*' -print -quit || echo "$PREFIX/lib")")
+              fi
+              mkdir -p "$LIBDIR"
+              # If we have a SONAME but no devel symlink, create libSDL3.so
+              CANDIDATE=$(find "$LIBDIR" -maxdepth 1 -type f -name 'libSDL3*.so*' -print | head -n1 || true)
+              if [[ -n "$CANDIDATE" && ! -f "$LIBDIR/libSDL3.so" ]]; then
+                ln -s "$(basename "$CANDIDATE")" "$LIBDIR/libSDL3.so"
+              fi
+              echo "Resolved SDL3 lib dir: $LIBDIR"
               echo "PKG_CONFIG_PATH=${{ github.workspace }}/local/lib/pkgconfig:${PKG_CONFIG_PATH:-}" >> $GITHUB_ENV
               echo "SDL3_INCLUDE_DIR=${{ github.workspace }}/local/include" >> $GITHUB_ENV
-              echo "SDL3_LIB_DIR=${{ github.workspace }}/local/lib" >> $GITHUB_ENV
-              echo "LD_LIBRARY_PATH=${{ github.workspace }}/local/lib:${LD_LIBRARY_PATH:-}" >> $GITHUB_ENV
+              echo "SDL3_LIB_DIR=$LIBDIR" >> $GITHUB_ENV
+              echo "LD_LIBRARY_PATH=$LIBDIR:${LD_LIBRARY_PATH:-}" >> $GITHUB_ENV
             fi
           fi
       - name: Cache Swift build artifacts
@@ -88,6 +102,7 @@ jobs:
           EXTRA_LINK=()
           if [[ -n "${SDL3_LIB_DIR}" ]]; then
             EXTRA_LINK+=( -Xlinker -L"${SDL3_LIB_DIR}" )
+            EXTRA_LINK+=( -Xlinker -rpath -Xlinker "${SDL3_LIB_DIR}" )
           fi
           swift build -v ${EXTRA_CC[@]} ${EXTRA_LINK[@]}
           swift test -v ${EXTRA_CC[@]} ${EXTRA_LINK[@]}
