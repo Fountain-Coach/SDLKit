@@ -77,6 +77,8 @@ jobs:
           SDL3_LIB_DIR: ${{ env.SDL3_LIB_DIR }}
           PKG_CONFIG_PATH: ${{ env.PKG_CONFIG_PATH }}
           LD_LIBRARY_PATH: ${{ env.LD_LIBRARY_PATH }}
+          CPATH: ${{ env.SDL3_INCLUDE_DIR }}:${{ env.SDL3_INCLUDE_DIR }}/SDL3:${{ env.CPATH }}
+          LIBRARY_PATH: ${{ env.SDL3_LIB_DIR }}:${{ env.LIBRARY_PATH }}
         run: |
           swift build -v
           swift test -v
