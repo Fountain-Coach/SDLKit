@@ -8,7 +8,8 @@ let package = Package(
         .macOS(.v13)
     ],
     products: [
-        .library(name: "SDLKit", targets: ["SDLKit"])
+        .library(name: "SDLKit", targets: ["SDLKit"]),
+        .executable(name: "SDLKitDemo", targets: ["SDLKitDemo"])
     ],
     targets: [
         .systemLibrary(
@@ -49,6 +50,11 @@ let package = Package(
             name: "SDLKitTests",
             dependencies: ["SDLKit"],
             path: "Tests/SDLKitTests"
+        ),
+        .executableTarget(
+            name: "SDLKitDemo",
+            dependencies: ["SDLKit"],
+            path: "Sources/SDLKitDemo"
         )
     ]
 )

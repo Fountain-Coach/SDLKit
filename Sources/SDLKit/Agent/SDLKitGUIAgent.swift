@@ -42,6 +42,13 @@ public final class SDLKitGUIAgent {
         try bundle.renderer.drawRectangle(x: x, y: y, width: width, height: height, color: color)
     }
 
+    // Convenience overload: color as string (e.g., "#RRGGBB", "#AARRGGBB", or a name like "red").
+    public func drawRectangle(windowId: Int, x: Int, y: Int, width: Int, height: Int, color: String) throws {
+        let argb: UInt32
+        do { argb = try SDLColor.parse(color) } catch { throw AgentError.invalidArgument("Invalid color: \(color)") }
+        try drawRectangle(windowId: windowId, x: x, y: y, width: width, height: height, color: argb)
+    }
+
     public func present(windowId: Int) throws {
         guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }
         bundle.renderer.present()
