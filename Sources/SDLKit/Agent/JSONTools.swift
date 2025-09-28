@@ -17,7 +17,9 @@ public struct SDLKitJSONAgent {
         case drawText = "/agent/gui/drawText"
         case captureEvent = "/agent/gui/captureEvent"
         case openapiYAML = "/openapi.yaml"
-        case openapiJSON = "/openapi.json" // YAML served for now
+        case openapiJSON = "/openapi.json"
+        case health = "/health"
+        case version = "/version"
     }
 
     public func handle(path: String, body: Data) -> Data {
@@ -27,8 +29,11 @@ public struct SDLKitJSONAgent {
             case .openapiYAML:
                 return Data(SDLKitOpenAPI.yaml.utf8)
             case .openapiJSON:
-                // Minimal conversion: embed YAML as JSON string for now
-                return try JSONEncoder().encode(["openapi": SDLKitOpenAPI.yaml])
+                return SDLKitOpenAPI.json
+            case .health:
+                return try JSONEncoder().encode(["ok": true])
+            case .version:
+                return try JSONEncoder().encode(["agent": SDLKitOpenAPI.agentVersion, "openapi": SDLKitOpenAPI.specVersion])
             case .open:
                 let req = try JSONDecoder().decode(OpenWindowReq.self, from: body)
                 let id = try agent.openWindow(title: req.title, width: req.width, height: req.height)

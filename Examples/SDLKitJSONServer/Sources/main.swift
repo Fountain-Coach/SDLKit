@@ -30,9 +30,10 @@ final class HTTPHandler: ChannelInboundHandler {
         let responseHead: HTTPResponseHead
         var responseBody = context.channel.allocator.buffer(capacity: 0)
 
-        if head.method == .POST || (head.method == .GET && (head.uri == "/openapi.yaml" || head.uri == "/openapi.json")) {
+        if head.method == .POST || (head.method == .GET && (head.uri == "/openapi.yaml" || head.uri == "/openapi.json" || head.uri == "/health" || head.uri == "/version")) {
             let path = head.uri
             let data = bodyBuffer.flatMap { Data($0.readableBytesView) } ?? Data()
+            if let addr = context.remoteAddress { print("[HTTP] \(head.method) \(path) from \(addr) bytes=\(data.count)") } else { print("[HTTP] \(head.method) \(path) bytes=\(data.count)") }
             let res = agent.handle(path: path, body: data)
             let contentType = path.hasSuffix(".yaml") ? "application/yaml" : "application/json"
             responseHead = HTTPResponseHead(version: head.version, status: .ok, headers: ["Content-Type": contentType])

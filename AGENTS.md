@@ -81,6 +81,19 @@ This document serves two purposes:
 - Additive evolution only for minor versions; avoid breaking existing tools.
 - Deprecations: add warnings and grace periods before removal.
 
+### 7.1 OpenAPI & Stability
+
+- The root agent maintains the canonical OpenAPI 3.1 spec for the GUI tools.
+- Served endpoints (read-only):
+  - `GET /openapi.yaml` (YAML)
+  - `GET /openapi.json` (JSON)
+- The `info.version` field of the spec tracks the spec document’s version. The agent’s own protocol version is exposed via `sdlkit.gui.v1` and returned by `GET /version`.
+- Stability policy:
+  - Endpoints are stable; new capabilities are added additively.
+  - Breaking changes require a new agent minor/major and clear deprecation windows.
+  - Error codes remain canonical and stable. New error codes may be added additively.
+  - Schemas evolve additively with optional fields; required field changes require new versions.
+
 ---
 
 ## 8. Configuration (env vars)
@@ -163,6 +176,12 @@ Purpose: Provide bounded, safe GUI actions via JSON tools. No arbitrary drawing 
 - `POST /agent/gui/window/open` → `{ window_id }`
 - Similar endpoints for `close`, `drawText`, `drawRectangle`, `present`, `captureEvent`.
 - New endpoints: `clear`, `drawLine`, `drawCircleFilled`.
+- Doc discovery:
+  - `GET /openapi.yaml` (YAML 3.1)
+  - `GET /openapi.json` (JSON 3.1)
+  - Health/version:
+    - `GET /health` → `{ ok: true }`
+    - `GET /version` → `{ agent: string, openapi: string }`
 
 ### 10.5 Threading & Present Policy
 
