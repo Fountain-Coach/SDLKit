@@ -23,6 +23,31 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends git cmake ninja-build pkg-config ca-certificates
+      - name: Install or provision SDL3
+        run: |
+          set -euxo pipefail
+          if pkg-config --exists sdl3; then
+            echo "SDL3 found via pkg-config"
+          else
+            if apt-get install -y --no-install-recommends libsdl3-dev; then
+              echo "Installed libsdl3-dev from apt"
+            else
+              echo "libsdl3-dev not available; building SDL fork (console mode)"
+              git clone --depth 1 https://github.com/Fountain-Coach/SDL.git SDL-fork
+              cmake -S SDL-fork -B SDL-fork/build \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/local \
+                -DSDL_TESTS=OFF -DSDL_INSTALL_TESTS=OFF \
+                -DSDL_SHARED=ON -DSDL_STATIC=OFF \
+                -DSDL_UNIX_CONSOLE_BUILD=ON \
+                -G Ninja
+              cmake --build SDL-fork/build --target install
+              echo "PKG_CONFIG_PATH=${{ github.workspace }}/local/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
+              echo "SDL3_INCLUDE_DIR=${{ github.workspace }}/local/include" >> $GITHUB_ENV
+              echo "SDL3_LIB_DIR=${{ github.workspace }}/local/lib" >> $GITHUB_ENV
+              echo "LD_LIBRARY_PATH=${{ github.workspace }}/local/lib:${LD_LIBRARY_PATH:-}" >> $GITHUB_ENV
+            fi
+          fi
       - name: Cache Swift build artifacts
         uses: actions/cache@v4
         with:
@@ -34,26 +59,13 @@ jobs:
             ${{ runner.os }}-swift-${{ matrix.swift }}-build-
 
       # Build SDL fork with minimal features into a local prefix (no sudo)
-      - name: Build SDL fork (minimal)
-        run: |
-          git clone --depth 1 https://github.com/Fountain-Coach/SDL.git SDL-fork
-          cmake -S SDL-fork -B SDL-fork/build \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/local \
-            -DSDL_TESTS=OFF -DSDL_INSTALL_TESTS=OFF -DSDL_DISABLE_INSTALL_DOCS=ON \
-            -DSDL_SHARED=ON -DSDL_STATIC=OFF \
-            -DSDL_VIDEO=OFF -DSDL_AUDIO=OFF -DSDL_RENDER=OFF -DSDL_SAMPLES=OFF \
-            -DSDL_UNIX_CONSOLE_BUILD=ON \
-            -G Ninja
-          cmake --build SDL-fork/build --target install
-
       - name: Build and test
         env:
           SDLKIT_GUI_ENABLED: 'false'
-          SDL3_INCLUDE_DIR: ${{ github.workspace }}/local/include
-          SDL3_LIB_DIR: ${{ github.workspace }}/local/lib
-          PKG_CONFIG_PATH: ${{ github.workspace }}/local/lib/pkgconfig
-          LD_LIBRARY_PATH: ${{ github.workspace }}/local/lib:${{ env.LD_LIBRARY_PATH }}
+          SDL3_INCLUDE_DIR: ${{ env.SDL3_INCLUDE_DIR }}
+          SDL3_LIB_DIR: ${{ env.SDL3_LIB_DIR }}
+          PKG_CONFIG_PATH: ${{ env.PKG_CONFIG_PATH }}
+          LD_LIBRARY_PATH: ${{ env.LD_LIBRARY_PATH }}
         run: |
           swift build -v
           swift test -v
