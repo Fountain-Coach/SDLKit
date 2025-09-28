@@ -46,7 +46,15 @@ This package is designed to work with the Fountain‑Coach SDL3 fork:
 - Build: `swift build`
 - Test: `swift test`
 
-CI builds the SDL fork with minimal features and console mode (no window backends) in a local prefix and runs `swift build`/`swift test` on Linux using the official Swift 6.1 Docker image (see `.github/workflows/ci.yml:1`). Runtime linking note: the workflow adds `LD_LIBRARY_PATH` to include the local SDL install for test execution.
+### Headless CI mode
+
+- CI runs without installing SDL3 and compiles in headless mode using a build define.
+- To mirror CI locally: `swift test -Xswiftc -DHEADLESS_CI`
+- In `HEADLESS_CI` builds, SDL interop and linking are compiled out. GUI calls return `sdlUnavailable`.
+
+### Consumer builds (with autolink)
+
+- The system module `CSDL3` autolinks `SDL3` for consumer builds. Install SDL3 via your platform’s package manager or the Fountain‑Coach fork and ensure headers/libs are discoverable. See Install SDL3 above.
 
 macOS CI: not enabled by default. If you need macOS validation, set up a self‑hosted macOS runner and add a job targeting `runs-on: [self-hosted, macOS]`.
 

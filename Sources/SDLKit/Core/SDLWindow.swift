@@ -1,5 +1,5 @@
 import Foundation
-#if canImport(CSDL3)
+#if !HEADLESS_CI && canImport(CSDL3)
 import CSDL3
 #endif
 
