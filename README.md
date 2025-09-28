@@ -62,6 +62,20 @@ This package is designed to work with the Fountain‑Coach SDL3 fork:
   - Then in Swift: `import SDLKitTTF` (this also re‑exports `SDLKit`).
   - Without `SDLKitTTF`, `drawText` remains available but returns `notImplemented` if SDL_ttf isn’t present at build/link time.
 
+### Colors
+
+- Colors accept integer ARGB (0xAARRGGBB) or strings.
+- String formats: `#RRGGBB`, `#AARRGGBB`, `0xRRGGBB`, `0xAARRGGBB`, and CSS color names (e.g., `aliceblue`, `tomato`, `rebeccapurple`).
+
+### Fonts
+
+- `drawText` accepts a `font` string that can be:
+  - A filesystem path to a `.ttf` file
+  - `system:default` (macOS: tries common system fonts like Arial Unicode)
+  - `name:<id>` where `<id>` was previously registered via `SDLFontRegistry.register(name:path:)`
+- If `font` is omitted, the agent tries `system:default`.
+- If `size` is omitted, the agent uses `16`.
+
 macOS CI: not enabled by default. If you need macOS validation, set up a self‑hosted macOS runner and add a job targeting `runs-on: [self-hosted, macOS]`.
 
 ## Quick Start (pre‑alpha)

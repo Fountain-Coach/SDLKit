@@ -27,6 +27,9 @@ final class SDLKitTests: XCTestCase {
         // Named colors
         XCTAssertEqual(try SDLColor.parse("red"), 0xFFFF0000)
         XCTAssertEqual(try SDLColor.parse("white"), 0xFFFFFFFF)
+        // CSS names
+        XCTAssertEqual(try SDLColor.parse("aliceblue"), 0xFFF0F8FF)
+        XCTAssertEqual(try SDLColor.parse("rebeccapurple"), 0xFF663399)
         // Invalid
         XCTAssertThrowsError(try SDLColor.parse("#XYZ"))
         XCTAssertThrowsError(try SDLColor.parse("#12345"))

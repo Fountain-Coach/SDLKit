@@ -7,6 +7,7 @@ public enum SDLColor {
     // or named colors (limited set). Returns ARGB as 0xAARRGGBB.
     public static func parse(_ value: String) throws -> UInt32 {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if let css = CSSColors.map[trimmed] { return css }
         if let named = namedColors[trimmed] { return named }
 
         var hex = trimmed

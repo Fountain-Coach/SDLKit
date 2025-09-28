@@ -36,12 +36,13 @@ public final class SDLKitGUIAgent {
     public func drawText(windowId: Int, text: String, x: Int, y: Int, font: String? = nil, size: Int? = nil, color: UInt32? = nil) throws {
         guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }
         #if !HEADLESS_CI && canImport(CSDL3)
-        guard let fontPath = font, let size = size, size > 0 else {
-            throw AgentError.invalidArgument("font and positive size are required for drawText")
+        let fontPath = SDLFontResolver.resolve(fontSpec: font)
+        guard let fontPath, let s = (size ?? 16) as Int?, s > 0 else {
+            throw AgentError.invalidArgument("No usable font (set font path or use 'system:default') or invalid size")
         }
         let argb = color ?? 0xFFFFFFFF
-        SDLLogger.debug("SDLKit.Agent", "drawText id=\(windowId) at (\(x),\(y)) font=\(fontPath) size=\(size) color=\(String(format: "%08X", argb)) text=\(text)")
-        try bundle.renderer.drawText(text, x: x, y: y, color: argb, fontPath: fontPath, size: size)
+        SDLLogger.debug("SDLKit.Agent", "drawText id=\(windowId) at (\(x),\(y)) font=\(fontPath) size=\(s) color=\(String(format: "%08X", argb)) text=\(text)")
+        try bundle.renderer.drawText(text, x: x, y: y, color: argb, fontPath: fontPath, size: s)
         #else
         throw AgentError.notImplemented
         #endif
