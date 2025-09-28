@@ -80,5 +80,14 @@ jobs:
           CPATH: ${{ env.SDL3_INCLUDE_DIR }}:${{ env.SDL3_INCLUDE_DIR }}/SDL3:${{ env.CPATH }}
           LIBRARY_PATH: ${{ env.SDL3_LIB_DIR }}:${{ env.LIBRARY_PATH }}
         run: |
-          swift build -v
-          swift test -v
+          # Pass explicit include/lib flags to ensure module importer finds SDL3
+          EXTRA_CC=()
+          if [[ -n "${SDL3_INCLUDE_DIR}" ]]; then
+            EXTRA_CC+=( -Xcc -I"${SDL3_INCLUDE_DIR}" -Xcc -I"${SDL3_INCLUDE_DIR}/SDL3" )
+          fi
+          EXTRA_LINK=()
+          if [[ -n "${SDL3_LIB_DIR}" ]]; then
+            EXTRA_LINK+=( -Xlinker -L"${SDL3_LIB_DIR}" )
+          fi
+          swift build -v ${EXTRA_CC[@]} ${EXTRA_LINK[@]}
+          swift test -v ${EXTRA_CC[@]} ${EXTRA_LINK[@]}
