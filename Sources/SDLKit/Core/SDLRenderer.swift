@@ -1,5 +1,5 @@
 import Foundation
-#if !HEADLESS_CI && canImport(CSDL3)
+#if canImport(CSDL3)
 import CSDL3
 #endif
 #if !HEADLESS_CI && canImport(CSDL3IMAGE)

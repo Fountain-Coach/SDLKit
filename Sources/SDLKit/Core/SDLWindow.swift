@@ -1,5 +1,5 @@
 import Foundation
-#if !HEADLESS_CI && canImport(CSDL3)
+#if canImport(CSDL3)
 import CSDL3
 #endif
 
@@ -196,7 +196,7 @@ enum SDLCore {
     }
 
     func shutdown() {
-        #if canImport(CSDL3) && !HEADLESS_CI
+        #if canImport(CSDL3)
         if Self.initialized {
             SDLKit_Quit()
         }
