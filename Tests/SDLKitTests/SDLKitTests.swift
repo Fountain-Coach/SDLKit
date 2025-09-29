@@ -15,6 +15,20 @@ final class SDLKitTests: XCTestCase {
             // If not set, we only assert that guiEnabled returns a Bool (no crash)
             _ = SDLKitConfig.guiEnabled
         }
+
+        let key = "SDLKIT_MAX_WINDOWS"
+        let prior = getenv(key).map { String(cString: $0) }
+        setenv(key, "12", 1)
+        XCTAssertEqual(SDLKitConfig.maxWindows, 12)
+        setenv(key, "0", 1)
+        XCTAssertEqual(SDLKitConfig.maxWindows, 8)
+        setenv(key, "not-a-number", 1)
+        XCTAssertEqual(SDLKitConfig.maxWindows, 8)
+        if let prior {
+            setenv(key, prior, 1)
+        } else {
+            unsetenv(key)
+        }
     }
 
     func testColorParsing() throws {

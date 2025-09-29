@@ -25,6 +25,15 @@ public final class SDLRenderer {
         #endif
     }
 
+    internal init(testingWidth: Int, testingHeight: Int) {
+        self.width = testingWidth
+        self.height = testingHeight
+        #if canImport(CSDL3) && !HEADLESS_CI
+        handle = nil
+        textures = [:]
+        #endif
+    }
+
     public func present() {
         #if canImport(CSDL3) && !HEADLESS_CI
         if let r = handle { SDLKit_RenderPresent(r) }

@@ -62,6 +62,12 @@ This package is designed to work with the Fountain‑Coach SDL3 fork:
   - Then in Swift: `import SDLKitTTF` (this also re‑exports `SDLKit`).
   - Without `SDLKitTTF`, `drawText` remains available but returns `notImplemented` if SDL_ttf isn’t present at build/link time.
 
+## Configuration
+
+The agent reads several environment variables at runtime. Key options include:
+
+- `SDLKIT_MAX_WINDOWS` — soft cap on concurrently open windows. Defaults to `8`. Set to any positive integer to raise or lower the cap. Non-positive or non-numeric values fall back to the default.
+
 ### Colors
 
 - Colors accept integer ARGB (0xAARRGGBB) or strings.
