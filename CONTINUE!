@@ -1,0 +1,87 @@
+SDLKit — Linux Continuation Plan (for Online Codex)
+
+Summary (what’s in place)
+- OpenAPI-first: canonical spec at `sdlkit.gui.v1.yaml:1`; agent serves `GET /openapi.yaml` and JSON mirror `GET /openapi.json`.
+- YAML→JSON converter: enabled by default via Yams; opt out with `SDLKIT_NO_YAMS=1`. `/version` reports `info.version` from external spec when present.
+- JSON router (`Sources/SDLKit/Agent/JSONTools.swift`):
+  - Health/version: `/health`, `/version`.
+  - Window: open/close/show/hide/resize/setTitle/setPosition/maximize/minimize/restore/setFullscreen/setAlwaysOnTop/center/getInfo.
+  - Renderer state: get/set scale, draw color, viewport, clip rect; disable clip.
+  - Primitives: `clear`, `drawRectangle`, `drawLine`, `drawCircleFilled`.
+  - Geometry batches: `drawPoints`, `drawLines`, `drawRects`.
+  - Textures: `load` (BMP via SDL, others via SDL_image), `draw`, `drawRotated`, `drawTiled`, `free`.
+  - Text (optional, SDL_ttf): `drawText` returns `not_implemented` when TTF is unavailable.
+  - Events/Clipboard/Input/Display/Screenshot (raw ABGR8888): implemented; unknown `/agent/gui/*` returns `not_implemented` by contract.
+- Headless CI: `-DHEADLESS_CI` compiles out SDL calls; tests run without SDL. Deep-compare tests verify `/openapi.json` mirrors YAML conversion when Yams is enabled.
+- System libs (SwiftPM): `CSDL3` (`pkg-config: sdl3`), `CSDL3IMAGE` (`sdl3-image`), `CSDL3TTF` (`sdl3-ttf`).
+
+Linux setup (Debian/Ubuntu)
+- Install deps:
+  - `sudo apt-get update && sudo apt-get install -y libsdl3-dev libsdl3-image-dev libsdl3-ttf-dev`
+  - Ensure Swift 6.1+ is installed and on PATH.
+- Build/test:
+  - `swift build`
+  - `swift test`
+  - Headless: `swift test -Xswiftc -DHEADLESS_CI`
+- Optional flags/env:
+  - Disable Yams/converter: `SDLKIT_NO_YAMS=1 swift build`
+  - Point to external spec: `export SDLKIT_OPENAPI_PATH=/path/to/sdlkit.gui.v1.yaml` (or JSON)
+  - Control GUI: `SDLKIT_GUI_ENABLED=0|1` (default true if unset)
+  - Present policy: `SDLKIT_PRESENT_POLICY=explicit|auto` (default explicit)
+  - If SDL is in a nonstandard prefix: `SDL3_INCLUDE_DIR`, `SDL3_LIB_DIR`, and possibly `LD_LIBRARY_PATH` at run time.
+- Runtime display: a Wayland/X11 session is required for real windows/rendering; in headless shells, prefer `-DHEADLESS_CI`. Do not rely on SDL’s dummy driver for tests.
+
+Immediate tasks (prioritized for Linux)
+1) Screenshot PNG export (keep raw fallback)
+   - Add a PNG variant to screenshot (schema-first in `sdlkit.gui.v1.yaml`), e.g., `format: raw|png` and respond with `{ png_base64 }` using SDL_image when available; fall back to `raw_base64`.
+   - Implement in `SDLRenderer` via SDL3_image (RWops) if available; otherwise choose a tiny in-process encoder gated by a flag.
+   - Add tests that verify schema/shape; skip pixel assertions in `HEADLESS_CI`.
+
+2) OpenAPI conversion caching
+   - Implement a simple in-memory cache in `JSONTools.swift` for: external YAML bytes and converted JSON, invalidated when file mtime/size changes.
+   - Address TODOs at `Sources/SDLKit/Agent/JSONTools.swift:310` and nearby.
+
+3) Router tests (error paths and fallbacks)
+   - Add tests covering: unknown `/agent/gui/...` → `not_implemented`; non-agent paths → `invalid_endpoint`.
+   - Add test: “external JSON only” (no YAML) ensures `/openapi.json` serves the external JSON and `/version` reads its `info.version`.
+   - Add test: `/version` returns embedded spec version when no external spec is found.
+
+4) Fonts on Linux (system:default)
+   - Implement/verify `SDLFontResolver` on Linux to resolve `system:default` (e.g., `/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf`).
+   - Add a small unit to test resolver behavior (no SDL required).
+
+5) OpenAPI doc polish
+   - Continue adding concise `summary` and `description` fields across new/changed paths. Keep the YAML as the source of truth.
+
+Guardrails (please honor)
+- OpenAPI-first: edit `sdlkit.gui.v1.yaml` first; keep `/openapi.yaml` and `/openapi.json` behavior in sync.
+- Do not add duplicate OpenAPI files. Canonical remains `sdlkit.gui.v1.yaml` at repo root.
+- Error mapping must follow `AGENTS.md` canonical codes. Unknown `/agent/gui/*` must return `not_implemented`.
+- Keep SDL work behind `!HEADLESS_CI` and `canImport(CSDL3)` checks; tests should remain headless-friendly.
+- Respect main-thread policy (`@MainActor`) for agent and core wrappers.
+
+Linux notes and quick validation
+- Build + run tests: `swift build && swift test`.
+- Validate OpenAPI endpoints without SDL:
+  - `swift run SDLKitJSONServer` (adjust example package manifest to support Linux; see note below).
+  - `curl localhost:8080/openapi.yaml` and `curl localhost:8080/openapi.json`.
+  - `curl localhost:8080/version` should report the spec’s `info.version`.
+
+Example server portability
+- `Examples/SDLKitJSONServer/Package.swift` currently pins `.platforms` to macOS. For Linux, remove the `platforms` line or add Linux to allow building on Linux.
+- Content-type for docs is based on suffix; adjust if your hosting environment requires explicit response headers.
+
+Open TODOs carried forward (from code comments)
+- Add conversion cache in `JSONTools.swift` to avoid repeated YAML parse on each `/openapi.json`.
+- Replace regex fallback for YAML `info.version` when Yams is disabled with a tiny scalar extractor.
+- Add “external JSON only” test scenario using `SDLKIT_OPENAPI_PATH`.
+
+Deep-compare is default
+- The deep comparison test between converted YAML and served JSON is present and enabled by default (auto-skips when `SDLKIT_NO_YAMS=1`). Keep this behavior.
+
+Next steps after PNG and cache
+- Consider textured geometry (RenderGeometry) with a compact schema; update the spec first and add unit tests.
+- Add lightweight metrics/log counters (opens/closes/presents/errors) via `SDLLogger`.
+
+Thank you! Please proceed cautiously, keep patches tight, and avoid spec drift or duplicate files.
+
