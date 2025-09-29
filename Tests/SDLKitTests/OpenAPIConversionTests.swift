@@ -46,6 +46,47 @@ final class OpenAPIConversionTests: XCTestCase {
         throw XCTSkip("Yams disabled; skipping conversion test")
         #endif
     }
+
+    func testOpenAPIJSONConversionCachesBetweenCalls() async throws {
+        let tmpDir = FileManager.default.temporaryDirectory.appendingPathComponent("SDLKitOpenAPICacheTest-")
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let yamlURL = tmpDir.appendingPathComponent("spec.yaml")
+        let yaml = """
+        openapi: 3.1.0
+        info:
+          title: Cache Test
+          version: 1.0.0
+        paths: {}
+        """
+        try yaml.write(to: yamlURL, atomically: true, encoding: .utf8)
+
+        setenv("SDLKIT_OPENAPI_PATH", yamlURL.path, 1)
+        defer { unsetenv("SDLKIT_OPENAPI_PATH") }
+
+        var conversions = 0
+        await MainActor.run {
+            SDLKitJSONAgent.resetOpenAPICacheForTesting()
+            SDLKitJSONAgent._openAPIConversionObserver = { conversions += 1 }
+        }
+
+        await MainActor.run {
+            let agent = SDLKitJSONAgent()
+            for _ in 0..<3 {
+                let data = agent.handle(path: "/openapi.json", body: Data())
+                XCTAssertFalse(data.isEmpty)
+            }
+        }
+
+        XCTAssertEqual(conversions, 1, "YAML to JSON conversion should run only once for repeated requests")
+
+        await MainActor.run {
+            SDLKitJSONAgent._openAPIConversionObserver = nil
+            SDLKitJSONAgent.resetOpenAPICacheForTesting()
+        }
+    }
 }
 
 // MARK: - Helpers
