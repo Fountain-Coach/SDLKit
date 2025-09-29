@@ -14,6 +14,11 @@ open class SDLKitGUIAgent {
     @discardableResult
     public func openWindow(title: String, width: Int, height: Int) throws -> Int {
         guard width > 0, height > 0 else { throw AgentError.invalidArgument("width/height must be > 0") }
+        let limit = SDLKitConfig.maxWindows
+        guard windows.count < limit else {
+            SDLLogger.warn("SDLKit.Agent", "Refusing to open window: limit=\(limit) current=\(windows.count)")
+            throw AgentError.invalidArgument("Window limit of \(limit) reached")
+        }
         guard SDLKitConfig.guiEnabled else { throw AgentError.sdlUnavailable }
 
         let window = SDLWindow(config: .init(title: title, width: width, height: height))
@@ -24,6 +29,18 @@ open class SDLKitGUIAgent {
         windows[id] = WindowBundle(window: window, renderer: renderer)
         SDLLogger.info("SDLKit.Agent", "Opened window id=\(id) \(width)x\(height) title=\(title)")
         return id
+    }
+
+    internal func _testingPopulateWindows(count: Int) {
+        windows.removeAll()
+        nextID = 1
+        guard count > 0 else { return }
+        for _ in 0..<count {
+            let id = nextID; nextID += 1
+            let window = SDLWindow(config: .init(title: "test-\(id)", width: 1, height: 1))
+            let renderer = SDLRenderer(testingWidth: 1, testingHeight: 1)
+            windows[id] = WindowBundle(window: window, renderer: renderer)
+        }
     }
 
     public func closeWindow(windowId: Int) {

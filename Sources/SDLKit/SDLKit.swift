@@ -12,6 +12,18 @@ public enum SDLKitConfig {
         return env == "auto" ? .auto : .explicit
     }
 
+    public static var maxWindows: Int {
+        let defaultValue = 8
+        guard let raw = ProcessInfo.processInfo.environment["SDLKIT_MAX_WINDOWS"] else {
+            return defaultValue
+        }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let parsed = Int(trimmed), parsed > 0 else {
+            return defaultValue
+        }
+        return parsed
+    }
+
     public enum PresentPolicy { case auto, explicit }
 }
 
