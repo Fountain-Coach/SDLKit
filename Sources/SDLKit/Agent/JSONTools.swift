@@ -60,6 +60,50 @@ public struct SDLKitJSONAgent {
         case drawRects = "/agent/gui/drawRects"
     }
 
+    private struct CacheSignature: Equatable {
+        let path: String
+        let mtime: Date?
+        let size: UInt64?
+
+        func matches(_ other: CacheSignature) -> Bool {
+            guard path == other.path else { return false }
+            switch (mtime, other.mtime) {
+            case (nil, nil): break
+            case let (lhs?, rhs?) where lhs == rhs: break
+            default: return false
+            }
+            switch (size, other.size) {
+            case (nil, nil): break
+            case let (lhs?, rhs?) where lhs == rhs: break
+            default: return false
+            }
+            return true
+        }
+    }
+
+    private struct CachedFile {
+        let signature: CacheSignature
+        let data: Data
+    }
+
+    private struct CachedConversion {
+        let data: Data
+        let sourceSignature: CacheSignature
+        let sourceData: Data
+
+        func matches(_ file: CachedFile) -> Bool {
+            if sourceSignature.matches(file.signature) { return true }
+            guard sourceSignature.path == file.signature.path else { return false }
+            return sourceData == file.data
+        }
+    }
+
+    private static var cachedOpenAPIEnvPath: String?
+    private static var externalYAMLCache: CachedFile?
+    private static var externalJSONCache: CachedFile?
+    private static var yamlConversionCache: CachedConversion?
+    internal static var _openAPIConversionObserver: (() -> Void)?
+
     public func handle(path: String, body: Data) -> Data {
         guard let ep = Endpoint(rawValue: path) else {
             if path.hasPrefix("/agent/gui/") { return Self.errorJSON(code: "not_implemented", details: path) }
@@ -72,7 +116,7 @@ public struct SDLKitJSONAgent {
                 return Data(SDLKitOpenAPI.yaml.utf8)
             case .openapiJSON:
                 // Prefer converting an external YAML to JSON for exact mirroring
-                if let y = Self.loadExternalOpenAPIYAML(), let converted = OpenAPIConverter.yamlToJSON(y) { return converted }
+                if let converted = Self.cachedJSONFromExternalYAML() { return converted }
                 if let ext = Self.loadExternalOpenAPIJSON() { return ext }
                 return SDLKitOpenAPI.json
             case .health:
@@ -321,34 +365,56 @@ public struct SDLKitJSONAgent {
         }
     }
 
+    private static func cachedJSONFromExternalYAML() -> Data? {
+        guard let yamlEntry = loadExternalOpenAPIYAMLCacheEntry() else { return nil }
+        if let cached = yamlConversionCache, cached.matches(yamlEntry) { return cached.data }
+        guard let converted = OpenAPIConverter.yamlToJSON(yamlEntry.data) else { return nil }
+        yamlConversionCache = CachedConversion(data: converted, sourceSignature: yamlEntry.signature, sourceData: yamlEntry.data)
+        _openAPIConversionObserver?()
+        return converted
+    }
+
     private static func loadExternalOpenAPIYAML() -> Data? {
+        return loadExternalOpenAPIYAMLCacheEntry()?.data
+    }
+
+    private static func loadExternalOpenAPIJSON() -> Data? {
+        return loadExternalOpenAPIJSONCacheEntry()?.data
+    }
+
+    private static func loadExternalOpenAPIYAMLCacheEntry() -> CachedFile? {
         let env = ProcessInfo.processInfo.environment
-        if let p = env["SDLKIT_OPENAPI_PATH"], !p.isEmpty, FileManager.default.fileExists(atPath: p) {
-            let lower = p.lowercased()
-            if lower.hasSuffix(".yaml") || lower.hasSuffix(".yml") {
-                return try? Data(contentsOf: URL(fileURLWithPath: p))
+        let envPath = normalizedEnvPath(env)
+        refreshEnvPathCacheIfNeeded(envPath)
+        var checked = Set<String>()
+        if let envPath {
+            checked.insert(envPath)
+            if let entry = fetchFile(at: envPath, allowedExtensions: [".yaml", ".yml"], getCache: { externalYAMLCache }, setCache: setYAMLCache) {
+                return entry
             }
         }
-        // Try repo-root defaults
         let candidates = [
             "sdlkit.gui.v1.yaml",
             "openapi.yaml",
             "openapi/sdlkit.gui.v1.yaml"
         ]
-        for rel in candidates {
-            if FileManager.default.fileExists(atPath: rel) {
-                if let data = try? Data(contentsOf: URL(fileURLWithPath: rel)) { return data }
+        for rel in candidates where !checked.contains(rel) {
+            if let entry = fetchFile(at: rel, allowedExtensions: [".yaml", ".yml"], getCache: { externalYAMLCache }, setCache: setYAMLCache) {
+                return entry
             }
         }
         return nil
     }
 
-    private static func loadExternalOpenAPIJSON() -> Data? {
+    private static func loadExternalOpenAPIJSONCacheEntry() -> CachedFile? {
         let env = ProcessInfo.processInfo.environment
-        if let p = env["SDLKIT_OPENAPI_PATH"], !p.isEmpty, FileManager.default.fileExists(atPath: p) {
-            let lower = p.lowercased()
-            if lower.hasSuffix(".json") {
-                return try? Data(contentsOf: URL(fileURLWithPath: p))
+        let envPath = normalizedEnvPath(env)
+        refreshEnvPathCacheIfNeeded(envPath)
+        var checked = Set<String>()
+        if let envPath {
+            checked.insert(envPath)
+            if let entry = fetchFile(at: envPath, allowedExtensions: [".json"], getCache: { externalJSONCache }, setCache: setJSONCache) {
+                return entry
             }
         }
         let candidates = [
@@ -357,44 +423,115 @@ public struct SDLKitJSONAgent {
             "openapi/openapi.json",
             "openapi/sdlkit.gui.v1.json"
         ]
-        for rel in candidates {
-            if FileManager.default.fileExists(atPath: rel) {
-                if let data = try? Data(contentsOf: URL(fileURLWithPath: rel)) { return data }
+        for rel in candidates where !checked.contains(rel) {
+            if let entry = fetchFile(at: rel, allowedExtensions: [".json"], getCache: { externalJSONCache }, setCache: setJSONCache) {
+                return entry
             }
         }
         return nil
     }
 
+    private static func fetchFile(
+        at path: String,
+        allowedExtensions: [String],
+        getCache: () -> CachedFile?,
+        setCache: (CachedFile?) -> Void
+    ) -> CachedFile? {
+        let lower = path.lowercased()
+        guard allowedExtensions.contains(where: { lower.hasSuffix($0) }) else { return nil }
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: path) else {
+            if let existing = getCache(), existing.signature.path == path {
+                setCache(nil)
+            }
+            return nil
+        }
+        let signature = cacheSignature(for: path)
+        if let existing = getCache(), existing.signature.matches(signature) {
+            return existing
+        }
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)) else {
+            if let existing = getCache(), existing.signature.path == path {
+                setCache(nil)
+            }
+            return nil
+        }
+        let entry = CachedFile(signature: signature, data: data)
+        setCache(entry)
+        return entry
+    }
+
+    private static func cacheSignature(for path: String) -> CacheSignature {
+        var mtime: Date?
+        var size: UInt64?
+        if let attrs = try? FileManager.default.attributesOfItem(atPath: path) {
+            mtime = attrs[.modificationDate] as? Date
+            if let n = attrs[.size] as? NSNumber { size = n.uint64Value }
+        }
+        return CacheSignature(path: path, mtime: mtime, size: size)
+    }
+
+    private static func setYAMLCache(_ entry: CachedFile?) {
+        externalYAMLCache = entry
+        guard let entry else {
+            yamlConversionCache = nil
+            return
+        }
+        if let cached = yamlConversionCache, !cached.matches(entry) {
+            yamlConversionCache = nil
+        }
+    }
+
+    private static func setJSONCache(_ entry: CachedFile?) {
+        externalJSONCache = entry
+    }
+
+    private static func normalizedEnvPath(_ env: [String: String]) -> String? {
+        guard let raw = env["SDLKIT_OPENAPI_PATH"]?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
+            return nil
+        }
+        return raw
+    }
+
+    private static func refreshEnvPathCacheIfNeeded(_ envPath: String?) {
+        if envPath != cachedOpenAPIEnvPath {
+            cachedOpenAPIEnvPath = envPath
+            setYAMLCache(nil)
+            setJSONCache(nil)
+        }
+    }
+
+    static func resetOpenAPICacheForTesting() {
+        cachedOpenAPIEnvPath = nil
+        setYAMLCache(nil)
+        setJSONCache(nil)
+    }
+
     private static func externalOpenAPIVersion() -> String? {
-        // Prefer JSON (parse reliably)
-        if let json = loadExternalOpenAPIJSON() {
-            if let obj = try? JSONSerialization.jsonObject(with: json) as? [String: Any],
+        if let jsonEntry = loadExternalOpenAPIJSONCacheEntry() {
+            if let obj = try? JSONSerialization.jsonObject(with: jsonEntry.data) as? [String: Any],
                let info = obj["info"] as? [String: Any],
                let ver = info["version"] as? String { return ver }
         }
-        // Try YAML via converter first
-        if let yaml = loadExternalOpenAPIYAML() {
-            #if OPENAPI_USE_YAMS
-            if let data = OpenAPIConverter.yamlToJSON(yaml),
-               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+        if let converted = cachedJSONFromExternalYAML() {
+            if let obj = try? JSONSerialization.jsonObject(with: converted) as? [String: Any],
                let info = obj["info"] as? [String: Any],
                let ver = info["version"] as? String { return ver }
-            #endif
-            // Regex fallback if YAML parser unavailable
-            if let text = String(data: yaml, encoding: .utf8) {
-                let infoAnchor = text.range(of: "\ninfo:") ?? text.range(of: "^info:", options: .regularExpression)
-                if let infoAnchor {
-                    let afterInfo = text[infoAnchor.upperBound...]
-                    let endRange = afterInfo.range(of: "\npaths:")
-                    let block = endRange != nil ? afterInfo[..<endRange!.lowerBound] : afterInfo[afterInfo.startIndex...]
-                    if let verLine = block.range(of: "\n\\s*version:\\s*([^\n#]+)", options: .regularExpression) {
-                        let line = block[verLine]
-                        if let colon = line.range(of: ":") {
-                            var v = line[colon.upperBound...].trimmingCharacters(in: .whitespaces)
-                            if v.hasPrefix("\"") && v.hasSuffix("\"") { v.removeFirst(); v.removeLast() }
-                            if v.hasPrefix("'") && v.hasSuffix("'") { v.removeFirst(); v.removeLast() }
-                            return String(v)
-                        }
+        }
+        if let yamlEntry = externalYAMLCache ?? loadExternalOpenAPIYAMLCacheEntry(),
+           let text = String(data: yamlEntry.data, encoding: .utf8) {
+            let infoAnchor = text.range(of: "\ninfo:") ?? text.range(of: "^info:", options: .regularExpression)
+            if let infoAnchor {
+                let afterInfo = text[infoAnchor.upperBound...]
+                let endRange = afterInfo.range(of: "\npaths:")
+                let block = endRange != nil ? afterInfo[..<endRange!.lowerBound] : afterInfo[afterInfo.startIndex...]
+                if let verLine = block.range(of: "\n\\s*version:\\s*([^\n#]+)", options: .regularExpression) {
+                    let line = block[verLine]
+                    if let colon = line.range(of: ":") {
+                        var v = line[colon.upperBound...].trimmingCharacters(in: .whitespaces)
+                        if v.hasPrefix("\"") && v.hasSuffix("\"") { v.removeFirst(); v.removeLast() }
+                        if v.hasPrefix("'") && v.hasSuffix("'") { v.removeFirst(); v.removeLast() }
+                        return String(v)
                     }
                 }
             }
