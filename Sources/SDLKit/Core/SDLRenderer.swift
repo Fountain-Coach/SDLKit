@@ -10,6 +10,7 @@ import CSDL3IMAGE
 public final class SDLRenderer {
     public let width: Int
     public let height: Int
+    internal private(set) var didShutdown = false
     #if canImport(CSDL3) && !HEADLESS_CI
     var handle: UnsafeMutablePointer<SDL_Renderer>?
     var textures: [String: UnsafeMutablePointer<SDL_Texture>] = [:]
@@ -28,10 +29,27 @@ public final class SDLRenderer {
     internal init(testingWidth: Int, testingHeight: Int) {
         self.width = testingWidth
         self.height = testingHeight
+        self.didShutdown = false
         #if canImport(CSDL3) && !HEADLESS_CI
         handle = nil
         textures = [:]
         #endif
+    }
+
+    public func shutdown() {
+        if didShutdown { return }
+        #if canImport(CSDL3) && !HEADLESS_CI
+        for texture in textures.values {
+            SDLKit_DestroyTexture(texture)
+        }
+        textures.removeAll(keepingCapacity: false)
+        if let renderer = handle {
+            SDLKit_DestroyRenderer(renderer)
+            handle = nil
+        }
+        SDLRenderer.flushFontCacheIfNeeded()
+        #endif
+        didShutdown = true
     }
 
     public func present() {
@@ -479,6 +497,25 @@ public final class SDLRenderer {
         }
         fontCache[key] = UnsafeMutableRawPointer(f)
         return f
+    }
+
+    private static func flushFontCacheIfNeeded() {
+        if fontCache.isEmpty {
+            if ttfInitialized {
+                SDLKit_TTF_Quit()
+                ttfInitialized = false
+            }
+            return
+        }
+        for raw in fontCache.values {
+            let fontPtr = raw.bindMemory(to: SDLKit_TTF_Font.self, capacity: 1)
+            SDLKit_TTF_CloseFont(fontPtr)
+        }
+        fontCache.removeAll(keepingCapacity: false)
+        if ttfInitialized {
+            SDLKit_TTF_Quit()
+            ttfInitialized = false
+        }
     }
     #endif
 }

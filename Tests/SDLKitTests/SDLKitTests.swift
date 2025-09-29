@@ -1,4 +1,7 @@
 import XCTest
+#if canImport(CSDL3)
+import CSDL3
+#endif
 @testable import SDLKit
 
 final class SDLKitTests: XCTestCase {
@@ -59,5 +62,39 @@ final class SDLKitTests: XCTestCase {
         let v = try JSONDecoder().decode(V.self, from: res)
         XCTAssertEqual(v.agent, "sdlkit.gui.v1")
         XCTAssertEqual(v.openapi, "1.1.0")
+    }
+
+    func testCloseWindowInvokesRendererShutdown() async throws {
+        #if canImport(CSDL3)
+        guard SDLKitStub_IsActive() != 0 else {
+            throw XCTSkip("Requires stubbed SDLKit shim")
+        }
+        SDLKitStub_ResetCallCounts()
+        await MainActor.run {
+            let agent = SDLKitGUIAgent()
+            agent._testingPopulateWindows(count: 1)
+            guard let renderer = agent._testingRenderer(for: 1) else {
+                XCTFail("Expected renderer for test window")
+                return
+            }
+            let rendererPtr = UnsafeMutablePointer<SDL_Renderer>.allocate(capacity: 1)
+            defer { rendererPtr.deallocate() }
+            let texturePtr = UnsafeMutablePointer<SDL_Texture>.allocate(capacity: 1)
+            defer { texturePtr.deallocate() }
+            SDLCore._testingSetInitialized(true)
+            renderer.handle = rendererPtr
+            renderer.textures["dummy"] = texturePtr
+            XCTAssertFalse(renderer.didShutdown)
+            agent.closeWindow(windowId: 1)
+            XCTAssertTrue(renderer.didShutdown)
+            XCTAssertTrue(renderer.textures.isEmpty)
+        }
+        XCTAssertEqual(SDLKitStub_DestroyRendererCallCount(), 1)
+        XCTAssertEqual(SDLKitStub_QuitCallCount(), 1)
+        XCTAssertEqual(SDLKitStub_TTFQuitCallCount(), 0)
+        SDLKitStub_ResetCallCounts()
+        #else
+        throw XCTSkip("CSDL3 not available")
+        #endif
     }
 }
