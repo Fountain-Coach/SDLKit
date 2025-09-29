@@ -165,6 +165,15 @@ Errors are returned as `{ "error": { "code": string, "details"?: string } }` wit
   - `GET /openapi.yaml` → YAML (external file if present, else embedded)
   - `GET /openapi.json` → JSON mirror. If an external YAML is present, it is converted to JSON at runtime; otherwise an external JSON is served when present; else a generated JSON from the embedded spec is returned.
 
+#### YAML→JSON Conversion (Yams)
+
+- The agent uses a YAML→JSON converter to ensure `/openapi.json` mirrors the external YAML exactly.
+- Converter is enabled by default via the Yams dependency and a compile‑time flag `OPENAPI_USE_YAMS`.
+- Opt‑out: set `SDLKIT_NO_YAMS=1` at build time to disable Yams and the converter.
+  - Example: `SDLKIT_NO_YAMS=1 swift build`
+  - In this mode, `/openapi.json` serves an external JSON if present, else the embedded JSON.
+- Tests: deep comparison between converted YAML and served JSON is enabled by default and skipped automatically when Yams is disabled.
+
 ### Example HTTP Server (separate)
 
 - A minimal HTTP server sample is provided under `Examples/SDLKitJSONServer` to avoid cluttering the main package.
