@@ -36,23 +36,14 @@ open class SDLKitGUIAgent {
         return id
     }
 
-    internal func _testingPopulateWindows(count: Int) {
-        windows.removeAll()
-        nextID = 1
-        guard count > 0 else { return }
-        for _ in 0..<count {
-            let id = nextID; nextID += 1
-            let window = SDLWindow(config: .init(title: "test-\(id)", width: 1, height: 1))
-            let renderer = SDLRenderer(testingWidth: 1, testingHeight: 1)
-            windows[id] = WindowBundle(window: window, renderer: renderer)
-        }
-    }
-
     public func closeWindow(windowId: Int) {
         guard let bundle = windows.removeValue(forKey: windowId) else { return }
         SDLLogger.info("SDLKit.Agent", "Closing window id=\(windowId)")
+        bundle.renderer.shutdown()
         bundle.window.close()
-        // Renderer destroyed with window by SDL; nothing further here.
+        if windows.isEmpty {
+            SDLCore.shared.shutdown()
+        }
     }
 
     public func drawText(windowId: Int, text: String, x: Int, y: Int, font: String? = nil, size: Int? = nil, color: UInt32? = nil) throws {
@@ -87,6 +78,22 @@ open class SDLKitGUIAgent {
         guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }
         SDLLogger.debug("SDLKit.Agent", "present id=\(windowId)")
         bundle.renderer.present()
+    }
+
+    internal func _testingPopulateWindows(count: Int) {
+        windows.removeAll()
+        nextID = 1
+        guard count > 0 else { return }
+        for _ in 0..<count {
+            let id = nextID; nextID += 1
+            let window = SDLWindow(config: .init(title: "test-\(id)", width: 1, height: 1))
+            let renderer = SDLRenderer(testingWidth: 1, testingHeight: 1)
+            windows[id] = WindowBundle(window: window, renderer: renderer)
+        }
+    }
+
+    internal func _testingRenderer(for windowId: Int) -> SDLRenderer? {
+        return windows[windowId]?.renderer
     }
 
     // MARK: - Window controls
