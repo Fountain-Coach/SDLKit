@@ -23,10 +23,14 @@ public struct SDLKitJSONAgent {
     }
 
     public func handle(path: String, body: Data) -> Data {
-        guard let ep = Endpoint(rawValue: path) else { return Self.errorJSON(code: "invalid_endpoint", details: path) }
+        guard let ep = Endpoint(rawValue: path) else {
+            if path.hasPrefix("/agent/gui/") { return Self.errorJSON(code: "not_implemented", details: path) }
+            return Self.errorJSON(code: "invalid_endpoint", details: path)
+        }
         do {
             switch ep {
             case .openapiYAML:
+                if let ext = Self.loadExternalOpenAPIYAML() { return ext }
                 return Data(SDLKitOpenAPI.yaml.utf8)
             case .openapiJSON:
                 return SDLKitOpenAPI.json
@@ -83,6 +87,25 @@ public struct SDLKitJSONAgent {
         } catch {
             return Self.errorJSON(code: "invalid_argument", details: String(describing: error))
         }
+    }
+
+    private static func loadExternalOpenAPIYAML() -> Data? {
+        let env = ProcessInfo.processInfo.environment
+        if let p = env["SDLKIT_OPENAPI_PATH"], !p.isEmpty, FileManager.default.fileExists(atPath: p) {
+            return try? Data(contentsOf: URL(fileURLWithPath: p))
+        }
+        // Try repo-root defaults
+        let candidates = [
+            "sdlkit.gui.v1.yaml",
+            "openapi.yaml",
+            "openapi/sdlkit.gui.v1.yaml"
+        ]
+        for rel in candidates {
+            if FileManager.default.fileExists(atPath: rel) {
+                if let data = try? Data(contentsOf: URL(fileURLWithPath: rel)) { return data }
+            }
+        }
+        return nil
     }
 
     // MARK: - Models
