@@ -49,6 +49,43 @@ enum SDLFontResolver {
             }
         }
         return nil
+        #elseif os(Linux)
+        let fileManager = FileManager.default
+        // Search order:
+        // 1. Known, widely available fonts such as DejaVu Sans and Liberation Sans.
+        // 2. Common font directories (e.g., /usr/share/fonts) scanned depth-first for a readable .ttf.
+        let candidateFiles = [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+            "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+            "/usr/share/fonts/truetype/ubuntu/Ubuntu-R.ttf"
+        ]
+        for path in candidateFiles {
+            if fileManager.isReadableFile(atPath: path) {
+                return path
+            }
+        }
+
+        let candidateDirectories = [
+            "/usr/share/fonts/truetype",
+            "/usr/share/fonts/opentype",
+            "/usr/share/fonts",
+            "/usr/local/share/fonts"
+        ]
+        for directory in candidateDirectories {
+            var isDirectory: ObjCBool = false
+            guard fileManager.fileExists(atPath: directory, isDirectory: &isDirectory), isDirectory.boolValue else { continue }
+
+            let url = URL(fileURLWithPath: directory, isDirectory: true)
+            if let enumerator = fileManager.enumerator(at: url, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles, .skipsPackageDescendants]) {
+                for case let fileURL as URL in enumerator {
+                    if fileURL.pathExtension.lowercased() == "ttf" && fileManager.isReadableFile(atPath: fileURL.path) {
+                        return fileURL.path
+                    }
+                }
+            }
+        }
+        return nil
         #else
         return nil
         #endif
