@@ -1,0 +1,322 @@
+#include <stdlib.h>
+#include <string.h>
+#include "../CSDL3/shim.h"
+
+// Minimal stub implementations that satisfy the shim symbol surface when SDL3
+// headers/libraries are unavailable. All functions return failure defaults.
+
+static const char *SDLKIT_STUB_ERROR_MESSAGE = "SDLKit SDL3 stub: SDL unavailable";
+
+const char *SDLKit_GetError(void) {
+    return SDLKIT_STUB_ERROR_MESSAGE;
+}
+
+int SDLKit_Init(uint32_t flags) {
+    (void)flags;
+    return -1;
+}
+
+SDL_Window *SDLKit_CreateWindow(const char *title, int32_t width, int32_t height, uint32_t flags) {
+    (void)title; (void)width; (void)height; (void)flags;
+    return NULL;
+}
+
+void SDLKit_DestroyWindow(SDL_Window *window) {
+    (void)window;
+}
+
+void SDLKit_ShowWindow(SDL_Window *window) {
+    (void)window;
+}
+
+void SDLKit_HideWindow(SDL_Window *window) {
+    (void)window;
+}
+
+void SDLKit_SetWindowTitle(SDL_Window *window, const char *title) {
+    (void)window; (void)title;
+}
+
+const char *SDLKit_GetWindowTitle(SDL_Window *window) {
+    (void)window;
+    return "SDLKit Stub Window";
+}
+
+void SDLKit_SetWindowPosition(SDL_Window *window, int x, int y) {
+    (void)window; (void)x; (void)y;
+}
+
+void SDLKit_GetWindowPosition(SDL_Window *window, int *x, int *y) {
+    (void)window;
+    if (x) { *x = 0; }
+    if (y) { *y = 0; }
+}
+
+void SDLKit_SetWindowSize(SDL_Window *window, int w, int h) {
+    (void)window; (void)w; (void)h;
+}
+
+void SDLKit_GetWindowSize(SDL_Window *window, int *w, int *h) {
+    (void)window;
+    if (w) { *w = 0; }
+    if (h) { *h = 0; }
+}
+
+void SDLKit_MaximizeWindow(SDL_Window *window) {
+    (void)window;
+}
+
+void SDLKit_MinimizeWindow(SDL_Window *window) {
+    (void)window;
+}
+
+void SDLKit_RestoreWindow(SDL_Window *window) {
+    (void)window;
+}
+
+int SDLKit_SetWindowFullscreen(SDL_Window *window, int enabled) {
+    (void)window; (void)enabled;
+    return -1;
+}
+
+int SDLKit_SetWindowOpacity(SDL_Window *window, float opacity) {
+    (void)window; (void)opacity;
+    return -1;
+}
+
+int SDLKit_SetWindowAlwaysOnTop(SDL_Window *window, int enabled) {
+    (void)window; (void)enabled;
+    return -1;
+}
+
+void SDLKit_CenterWindow(SDL_Window *window) {
+    (void)window;
+}
+
+int SDLKit_SetClipboardText(const char *text) {
+    (void)text;
+    return -1;
+}
+
+char *SDLKit_GetClipboardText(void) {
+    return NULL;
+}
+
+void SDLKit_free(void *p) {
+    free(p);
+}
+
+void SDLKit_GetMouseState(int *x, int *y, unsigned int *buttons) {
+    if (x) { *x = 0; }
+    if (y) { *y = 0; }
+    if (buttons) { *buttons = 0; }
+}
+
+int SDLKit_GetModMask(void) {
+    return 0;
+}
+
+int SDLKit_GetNumVideoDisplays(void) {
+    return 0;
+}
+
+const char *SDLKit_GetDisplayName(int index) {
+    (void)index;
+    return "SDLKit Stub Display";
+}
+
+int SDLKit_GetDisplayBounds(int index, int *x, int *y, int *w, int *h) {
+    (void)index;
+    if (x) { *x = 0; }
+    if (y) { *y = 0; }
+    if (w) { *w = 0; }
+    if (h) { *h = 0; }
+    return -1;
+}
+
+SDL_Renderer *SDLKit_CreateRenderer(SDL_Window *window, uint32_t flags) {
+    (void)window; (void)flags;
+    return NULL;
+}
+
+int SDLKit_SetRenderDrawColor(SDL_Renderer *renderer, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+    (void)renderer; (void)r; (void)g; (void)b; (void)a;
+    return -1;
+}
+
+int SDLKit_RenderClear(SDL_Renderer *renderer) {
+    (void)renderer;
+    return -1;
+}
+
+int SDLKit_RenderFillRect(SDL_Renderer *renderer, const struct SDL_FRect *rect) {
+    (void)renderer; (void)rect;
+    return -1;
+}
+
+int SDLKit_RenderFillRects(struct SDL_Renderer *renderer, const struct SDL_FRect *rects, int count) {
+    (void)renderer; (void)rects; (void)count;
+    return -1;
+}
+
+int SDLKit_RenderRects(struct SDL_Renderer *renderer, const struct SDL_FRect *rects, int count) {
+    (void)renderer; (void)rects; (void)count;
+    return -1;
+}
+
+int SDLKit_RenderPoints(struct SDL_Renderer *renderer, const struct SDL_FPoint *points, int count) {
+    (void)renderer; (void)points; (void)count;
+    return -1;
+}
+
+int SDLKit_RenderLine(struct SDL_Renderer *renderer, float x1, float y1, float x2, float y2) {
+    (void)renderer; (void)x1; (void)y1; (void)x2; (void)y2;
+    return -1;
+}
+
+void SDLKit_RenderPresent(SDL_Renderer *renderer) {
+    (void)renderer;
+}
+
+void SDLKit_GetRenderOutputSize(struct SDL_Renderer *renderer, int *w, int *h) {
+    (void)renderer;
+    if (w) { *w = 0; }
+    if (h) { *h = 0; }
+}
+
+void SDLKit_GetRenderScale(struct SDL_Renderer *renderer, float *sx, float *sy) {
+    (void)renderer;
+    if (sx) { *sx = 1.0f; }
+    if (sy) { *sy = 1.0f; }
+}
+
+int SDLKit_SetRenderScale(struct SDL_Renderer *renderer, float sx, float sy) {
+    (void)renderer; (void)sx; (void)sy;
+    return -1;
+}
+
+void SDLKit_GetRenderDrawColor(struct SDL_Renderer *renderer, uint8_t *r, uint8_t *g, uint8_t *b, uint8_t *a) {
+    (void)renderer;
+    if (r) { *r = 0; }
+    if (g) { *g = 0; }
+    if (b) { *b = 0; }
+    if (a) { *a = 0; }
+}
+
+int SDLKit_SetRenderViewport(struct SDL_Renderer *renderer, int x, int y, int w, int h) {
+    (void)renderer; (void)x; (void)y; (void)w; (void)h;
+    return -1;
+}
+
+void SDLKit_GetRenderViewport(struct SDL_Renderer *renderer, int *x, int *y, int *w, int *h) {
+    (void)renderer;
+    if (x) { *x = 0; }
+    if (y) { *y = 0; }
+    if (w) { *w = 0; }
+    if (h) { *h = 0; }
+}
+
+int SDLKit_SetRenderClipRect(struct SDL_Renderer *renderer, int x, int y, int w, int h) {
+    (void)renderer; (void)x; (void)y; (void)w; (void)h;
+    return -1;
+}
+
+int SDLKit_DisableRenderClipRect(struct SDL_Renderer *renderer) {
+    (void)renderer;
+    return -1;
+}
+
+void SDLKit_GetRenderClipRect(struct SDL_Renderer *renderer, int *x, int *y, int *w, int *h) {
+    (void)renderer;
+    if (x) { *x = 0; }
+    if (y) { *y = 0; }
+    if (w) { *w = 0; }
+    if (h) { *h = 0; }
+}
+
+int SDLKit_PollEvent(SDLKit_Event *out) {
+    if (out) {
+        memset(out, 0, sizeof(*out));
+    }
+    return 0;
+}
+
+int SDLKit_WaitEventTimeout(SDLKit_Event *out, int timeout_ms) {
+    (void)timeout_ms;
+    if (out) {
+        memset(out, 0, sizeof(*out));
+    }
+    return 0;
+}
+
+int SDLKit_TTF_Init(void) {
+    return -1;
+}
+
+SDLKit_TTF_Font *SDLKit_TTF_OpenFont(const char *path, int ptsize) {
+    (void)path; (void)ptsize;
+    return NULL;
+}
+
+void SDLKit_TTF_CloseFont(SDLKit_TTF_Font *font) {
+    (void)font;
+}
+
+struct SDL_Surface *SDLKit_TTF_RenderUTF8_Blended(SDLKit_TTF_Font *font, const char *text,
+                                                  uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+    (void)font; (void)text; (void)r; (void)g; (void)b; (void)a;
+    return NULL;
+}
+
+struct SDL_Texture *SDLKit_CreateTextureFromSurface(struct SDL_Renderer *renderer, struct SDL_Surface *surface) {
+    (void)renderer; (void)surface;
+    return NULL;
+}
+
+void SDLKit_DestroySurface(struct SDL_Surface *surface) {
+    (void)surface;
+}
+
+void SDLKit_DestroyTexture(struct SDL_Texture *tex) {
+    (void)tex;
+}
+
+void SDLKit_GetTextureSize(struct SDL_Texture *tex, int *w, int *h) {
+    (void)tex;
+    if (w) { *w = 0; }
+    if (h) { *h = 0; }
+}
+
+int SDLKit_RenderTexture(struct SDL_Renderer *renderer, struct SDL_Texture *tex, const struct SDL_FRect *src, const struct SDL_FRect *dst) {
+    (void)renderer; (void)tex; (void)src; (void)dst;
+    return -1;
+}
+
+int SDLKit_RenderTextureRotated(struct SDL_Renderer *renderer, struct SDL_Texture *tex, const struct SDL_FRect *src, const struct SDL_FRect *dst, double angle, int hasCenter, float cx, float cy) {
+    (void)renderer; (void)tex; (void)src; (void)dst; (void)angle; (void)hasCenter; (void)cx; (void)cy;
+    return -1;
+}
+
+struct SDL_Surface *SDLKit_LoadBMP(const char *path) {
+    (void)path;
+    return NULL;
+}
+
+struct SDL_Surface *SDLKit_CreateSurfaceFrom(int width, int height, unsigned int format, void *pixels, int pitch) {
+    (void)width; (void)height; (void)format; (void)pixels; (void)pitch;
+    return NULL;
+}
+
+struct SDL_RWops *SDLKit_RWFromFile(const char *file, const char *mode) {
+    (void)file; (void)mode;
+    return NULL;
+}
+
+unsigned int SDLKit_PixelFormat_ABGR8888(void) {
+    return 0;
+}
+
+int SDLKit_RenderReadPixels(struct SDL_Renderer *renderer, int x, int y, int w, int h, void *pixels, int pitch) {
+    (void)renderer; (void)x; (void)y; (void)w; (void)h; (void)pixels; (void)pitch;
+    return -1;
+}
