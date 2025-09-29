@@ -20,6 +20,11 @@ open class SDLKitGUIAgent {
             throw AgentError.invalidArgument("Window limit of \(windowLimit) reached")
         }
         guard SDLKitConfig.guiEnabled else { throw AgentError.sdlUnavailable }
+        let limit = SDLKitConfig.maxWindows
+        guard windows.count < limit else {
+            SDLLogger.warn("SDLKit.Agent", "Refusing to open window: limit=\(limit) current=\(windows.count)")
+            throw AgentError.invalidArgument("Window limit of \(limit) reached")
+        }
 
         let window = SDLWindow(config: .init(title: title, width: width, height: height))
         try window.open()
