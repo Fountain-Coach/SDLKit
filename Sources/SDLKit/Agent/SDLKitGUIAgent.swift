@@ -12,7 +12,7 @@ open class SDLKitGUIAgent {
     public init() {}
 
     @discardableResult
-    public func openWindow(title: String, width: Int, height: Int) throws -> Int {
+    open func openWindow(title: String, width: Int, height: Int) throws -> Int {
         guard width > 0, height > 0 else { throw AgentError.invalidArgument("width/height must be > 0") }
         let windowLimit = SDLKitConfig.maxWindows
         guard windows.count < windowLimit else {
@@ -36,7 +36,7 @@ open class SDLKitGUIAgent {
         return id
     }
 
-    public func closeWindow(windowId: Int) {
+    open func closeWindow(windowId: Int) {
         guard let bundle = windows.removeValue(forKey: windowId) else { return }
         SDLLogger.info("SDLKit.Agent", "Closing window id=\(windowId)")
         bundle.renderer.shutdown()
@@ -61,20 +61,20 @@ open class SDLKitGUIAgent {
         #endif
     }
 
-    public func drawRectangle(windowId: Int, x: Int, y: Int, width: Int, height: Int, color: UInt32) throws {
+    open func drawRectangle(windowId: Int, x: Int, y: Int, width: Int, height: Int, color: UInt32) throws {
         guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }
         SDLLogger.debug("SDLKit.Agent", "drawRectangle id=\(windowId) x=\(x) y=\(y) w=\(width) h=\(height) color=\(String(format: "%08X", color))")
         try bundle.renderer.drawRectangle(x: x, y: y, width: width, height: height, color: color)
     }
 
     // Convenience overload: color as string (e.g., "#RRGGBB", "#AARRGGBB", or a name like "red").
-    public func drawRectangle(windowId: Int, x: Int, y: Int, width: Int, height: Int, color: String) throws {
+    open func drawRectangle(windowId: Int, x: Int, y: Int, width: Int, height: Int, color: String) throws {
         let argb: UInt32
         do { argb = try SDLColor.parse(color) } catch { throw AgentError.invalidArgument("Invalid color: \(color)") }
         try drawRectangle(windowId: windowId, x: x, y: y, width: width, height: height, color: argb)
     }
 
-    public func present(windowId: Int) throws {
+    open func present(windowId: Int) throws {
         guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }
         SDLLogger.debug("SDLKit.Agent", "present id=\(windowId)")
         bundle.renderer.present()
@@ -163,22 +163,22 @@ open class SDLKitGUIAgent {
     }
 
     // MARK: - Textures
-    public func textureLoad(windowId: Int, id: String, path: String) throws {
+    open func textureLoad(windowId: Int, id: String, path: String) throws {
         guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }
         try bundle.renderer.loadTexture(id: id, path: path)
     }
 
-    public func textureDraw(windowId: Int, id: String, x: Int, y: Int, width: Int?, height: Int?) throws {
+    open func textureDraw(windowId: Int, id: String, x: Int, y: Int, width: Int?, height: Int?) throws {
         guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }
         try bundle.renderer.drawTexture(id: id, x: x, y: y, width: width, height: height)
     }
 
-    public func textureFree(windowId: Int, id: String) {
+    open func textureFree(windowId: Int, id: String) {
         guard let bundle = windows[windowId] else { return }
         bundle.renderer.freeTexture(id: id)
     }
 
-    public func textureDrawRotated(windowId: Int, id: String, x: Int, y: Int, width: Int?, height: Int?, angle: Double, cx: Float?, cy: Float?) throws {
+    open func textureDrawRotated(windowId: Int, id: String, x: Int, y: Int, width: Int?, height: Int?, angle: Double, cx: Float?, cy: Float?) throws {
         guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }
         try bundle.renderer.drawTextureRotated(id: id, x: x, y: y, width: width, height: height, angleDegrees: angle, centerX: cx, centerY: cy)
     }
