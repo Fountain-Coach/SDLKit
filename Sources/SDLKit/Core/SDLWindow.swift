@@ -206,6 +206,10 @@ enum SDLCore {
 
     #if canImport(CSDL3) && !HEADLESS_CI
     static func lastError() -> String { String(cString: SDLKit_GetError()) }
+
+    static func _testingSetInitialized(_ value: Bool) {
+        initialized = value
+    }
     #else
     static func lastError() -> String { "SDL unavailable" }
     #endif
