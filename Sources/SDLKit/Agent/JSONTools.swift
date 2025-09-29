@@ -238,9 +238,19 @@ public struct SDLKitJSONAgent {
                 try agent.textureDrawRotated(windowId: req.window_id, id: req.id, x: req.x, y: req.y, width: req.width, height: req.height, angle: req.angle, cx: req.cx, cy: req.cy)
                 return Self.okJSON()
             case .screenshot:
-                let req = try JSONDecoder().decode(WindowOnlyReq.self, from: body)
-                let shot = try agent.screenshotRaw(windowId: req.window_id)
-                return try JSONEncoder().encode(shot)
+                let req = try JSONDecoder().decode(ScreenshotReq.self, from: body)
+                switch req.format {
+                case .raw:
+                    let shot = try agent.screenshotRaw(windowId: req.window_id)
+                    return try JSONEncoder().encode(shot)
+                case .png:
+                    do {
+                        let shot = try agent.screenshotPNG(windowId: req.window_id)
+                        return try JSONEncoder().encode(shot)
+                    } catch AgentError.notImplemented {
+                        return Self.errorJSON(code: "not_implemented", details: "PNG screenshots require SDL_image; retry with format \"raw\".")
+                    }
+                }
             case .renderGetOutputSize:
                 let req = try JSONDecoder().decode(WindowOnlyReq.self, from: body)
                 let (w, h) = try agent.getRenderOutputSize(windowId: req.window_id)
@@ -466,6 +476,27 @@ public struct SDLKitJSONAgent {
         let color: UInt32?
     }
     private struct EventReq: Codable { let window_id: Int; let timeout_ms: Int? }
+    private struct ScreenshotReq: Codable {
+        enum Format: String, Codable {
+            case raw
+            case png
+        }
+        let window_id: Int
+        let format: Format
+        enum CodingKeys: String, CodingKey { case window_id, format }
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            window_id = try c.decode(Int.self, forKey: .window_id)
+            if let rawValue = try c.decodeIfPresent(String.self, forKey: .format)?.lowercased() {
+                guard let fmt = Format(rawValue: rawValue) else {
+                    throw DecodingError.dataCorruptedError(forKey: .format, in: c, debugDescription: "format must be 'raw' or 'png'")
+                }
+                format = fmt
+            } else {
+                format = .raw
+            }
+        }
+    }
     private struct ClipboardSetReq: Codable { let window_id: Int; let text: String }
     private struct DisplayIndexReq: Codable { let index: Int }
     private struct TextureLoadReq: Codable { let window_id: Int; let id: String; let path: String }

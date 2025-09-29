@@ -2,6 +2,9 @@ import Foundation
 #if !HEADLESS_CI && canImport(CSDL3)
 import CSDL3
 #endif
+#if !HEADLESS_CI && canImport(CSDL3IMAGE)
+import CSDL3IMAGE
+#endif
 
 @MainActor
 public final class SDLRenderer {
@@ -190,7 +193,7 @@ public final class SDLRenderer {
         let w = Float(width ?? Int(tw))
         let h = Float(height ?? Int(th))
         var dst = SDL_FRect(x: Float(x), y: Float(y), w: w, h: h)
-        let hasCenter = (centerX != nil && centerY != nil) ? 1 : 0
+        let hasCenter: Int32 = (centerX != nil && centerY != nil) ? 1 : 0
         let cx = centerX ?? (w * 0.5)
         let cy = centerY ?? (h * 0.5)
         if SDLKit_RenderTextureRotated(r, tex, nil, &dst, angleDegrees, hasCenter, cx, cy) != 0 { throw AgentError.internalError(SDLCore.lastError()) }
@@ -344,15 +347,7 @@ public final class SDLRenderer {
         #endif
     }
 
-    public struct RawScreenshot: Codable {
-        public let raw_base64: String
-        public let width: Int
-        public let height: Int
-        public let pitch: Int
-        public let format: String // e.g., ABGR8888
-    }
-
-    public func captureRawScreenshot() throws -> RawScreenshot {
+    private func capturePixelBuffer() throws -> (buffer: [UInt8], width: Int, height: Int, pitch: Int) {
         #if canImport(CSDL3) && !HEADLESS_CI
         let (ow, oh) = try getOutputSize()
         let pitch = ow * 4
@@ -362,9 +357,63 @@ public final class SDLRenderer {
             SDLKit_RenderReadPixels(r, 0, 0, Int32(ow), Int32(oh), ptr.baseAddress, Int32(pitch))
         }
         if rc != 0 { throw AgentError.internalError(SDLCore.lastError()) }
-        let data = Data(buffer)
+        return (buffer, ow, oh, pitch)
+        #else
+        throw AgentError.sdlUnavailable
+        #endif
+    }
+
+    public struct RawScreenshot: Codable {
+        public let raw_base64: String
+        public let width: Int
+        public let height: Int
+        public let pitch: Int
+        public let format: String // e.g., ABGR8888
+    }
+
+    public struct PNGScreenshot: Codable {
+        public let png_base64: String
+        public let width: Int
+        public let height: Int
+        public let format: String // e.g., PNG
+    }
+
+    public func captureRawScreenshot() throws -> RawScreenshot {
+        let capture = try capturePixelBuffer()
+        let data = Data(capture.buffer)
         let b64 = data.base64EncodedString()
-        return RawScreenshot(raw_base64: b64, width: ow, height: oh, pitch: pitch, format: "ABGR8888")
+        return RawScreenshot(raw_base64: b64, width: capture.width, height: capture.height, pitch: capture.pitch, format: "ABGR8888")
+    }
+
+    public func capturePNGScreenshot() throws -> PNGScreenshot {
+        #if canImport(CSDL3) && !HEADLESS_CI
+        #if canImport(CSDL3IMAGE)
+        var capture = try capturePixelBuffer()
+        var pngData = Data()
+        try capture.buffer.withUnsafeMutableBytes { ptr in
+            guard let base = ptr.baseAddress else { throw AgentError.internalError("Pixel buffer unavailable") }
+            guard let surface = SDLKit_CreateSurfaceFrom(Int32(capture.width), Int32(capture.height), SDLKit_PixelFormat_ABGR8888(), base, Int32(capture.pitch)) else {
+                throw AgentError.internalError(SDLCore.lastError())
+            }
+            defer { SDLKit_DestroySurface(surface) }
+            let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension("png")
+            defer { try? FileManager.default.removeItem(at: tempURL) }
+            guard let rw = SDLKit_RWFromFile(tempURL.path, "wb") else {
+                throw AgentError.internalError(SDLCore.lastError())
+            }
+            if SDLKit_IMG_SavePNG_RW(surface, rw, 1) != 0 {
+                throw AgentError.internalError(SDLCore.lastError())
+            }
+            do {
+                pngData = try Data(contentsOf: tempURL)
+            } catch {
+                throw AgentError.internalError("Failed to read PNG data: \(error)")
+            }
+        }
+        return PNGScreenshot(png_base64: pngData.base64EncodedString(), width: capture.width, height: capture.height, format: "PNG")
+        #else
+        throw AgentError.notImplemented
+        #endif
         #else
         throw AgentError.sdlUnavailable
         #endif

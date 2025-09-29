@@ -6,17 +6,17 @@ import Yams
 #endif
 
 final class OpenAPIConversionTests: XCTestCase {
-    @MainActor
-    func testOpenAPIYAMLServedMatchesFile() throws {
+    func testOpenAPIYAMLServedMatchesFile() async throws {
         let path = "sdlkit.gui.v1.yaml"
         let fileData = try Data(contentsOf: URL(fileURLWithPath: path))
-        let agent = SDLKitJSONAgent()
-        let served = agent.handle(path: "/openapi.yaml", body: Data())
+        let served = await MainActor.run { () -> Data in
+            let agent = SDLKitJSONAgent()
+            return agent.handle(path: "/openapi.yaml", body: Data())
+        }
         XCTAssertEqual(served, fileData, "Served YAML should match root spec file exactly")
     }
 
-    @MainActor
-    func testOpenAPIJSONMatchesYAMLConversionDeep() throws {
+    func testOpenAPIJSONMatchesYAMLConversionDeep() async throws {
         #if OPENAPI_USE_YAMS
         let yamlPath = "sdlkit.gui.v1.yaml"
         let yamlData = try Data(contentsOf: URL(fileURLWithPath: yamlPath))
@@ -26,8 +26,10 @@ final class OpenAPIConversionTests: XCTestCase {
             return
         }
         // Get agent-served JSON
-        let agent = SDLKitJSONAgent()
-        let served = agent.handle(path: "/openapi.json", body: Data())
+        let served = await MainActor.run { () -> Data in
+            let agent = SDLKitJSONAgent()
+            return agent.handle(path: "/openapi.json", body: Data())
+        }
 
         // Parse both into top-level objects
         let cObj = try JSONSerialization.jsonObject(with: converted)

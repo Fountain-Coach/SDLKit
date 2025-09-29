@@ -178,6 +178,10 @@ typedef struct SDLKit_Event {
     return SDL_RenderTextureRotated(renderer, tex, src, dst, angle, hasCenter ? &center : NULL);
   }
   static inline SDL_Surface *SDLKit_LoadBMP(const char *path) { return SDL_LoadBMP(path); }
+  static inline SDL_Surface *SDLKit_CreateSurfaceFrom(int width, int height, unsigned int format, void *pixels, int pitch) {
+    return SDL_CreateSurfaceFrom(width, height, format, pixels, pitch);
+  }
+  static inline SDL_RWops *SDLKit_RWFromFile(const char *file, const char *mode) { return SDL_RWFromFile(file, mode); }
   static inline unsigned int SDLKit_PixelFormat_ABGR8888(void) { return SDL_PIXELFORMAT_ABGR8888; }
   static inline int SDLKit_RenderReadPixels(SDL_Renderer *renderer, int x, int y, int w, int h, void *pixels, int pitch) {
     SDL_Rect r = { x, y, w, h };
@@ -185,14 +189,17 @@ typedef struct SDLKit_Event {
   }
   #else
     static inline int SDLKit_TTF_Available(void) { return 0; }
-    typedef void SDLKit_TTF_Font;
   #endif
 #else
   // Headless CI or no headers: provide minimal types so Swift can compile,
   // but no symbol definitions (and Swift code compiles them out in HEADLESS_CI).
   typedef struct SDL_Window { int _unused_window; } SDL_Window;
   typedef struct SDL_Renderer { int _unused_renderer; } SDL_Renderer;
+  typedef struct SDL_Surface { int _unused_surface; } SDL_Surface;
+  typedef struct SDL_Texture { int _unused_texture; } SDL_Texture;
   typedef struct SDL_FRect { float x; float y; float w; float h; } SDL_FRect;
+  typedef struct SDL_FPoint { float x; float y; } SDL_FPoint;
+  typedef struct SDLKit_TTF_Font { int _unused_font; } SDLKit_TTF_Font;
   const char *SDLKit_GetError(void);
   int SDLKit_Init(uint32_t flags);
   SDL_Window *SDLKit_CreateWindow(const char *title, int32_t width, int32_t height, uint32_t flags);
@@ -244,22 +251,24 @@ typedef struct SDLKit_Event {
   int SDLKit_PollEvent(SDLKit_Event *out);
   int SDLKit_WaitEventTimeout(SDLKit_Event *out, int timeout_ms);
   static inline int SDLKit_TTF_Available(void) { return 0; }
-  typedef void SDLKit_TTF_Font;
   int SDLKit_TTF_Init(void);
   SDLKit_TTF_Font *SDLKit_TTF_OpenFont(const char *path, int ptsize);
   void SDLKit_TTF_CloseFont(SDLKit_TTF_Font *font);
   struct SDL_Surface;
   struct SDL_Texture;
-  SDL_Surface *SDLKit_TTF_RenderUTF8_Blended(SDLKit_TTF_Font *font, const char *text,
+  struct SDL_Surface *SDLKit_TTF_RenderUTF8_Blended(SDLKit_TTF_Font *font, const char *text,
                                              uint8_t r, uint8_t g, uint8_t b, uint8_t a);
   struct SDL_Renderer;
-  SDL_Texture *SDLKit_CreateTextureFromSurface(struct SDL_Renderer *renderer, struct SDL_Surface *surface);
+  struct SDL_Texture *SDLKit_CreateTextureFromSurface(struct SDL_Renderer *renderer, struct SDL_Surface *surface);
   void SDLKit_DestroySurface(struct SDL_Surface *surface);
   void SDLKit_DestroyTexture(struct SDL_Texture *tex);
   void SDLKit_GetTextureSize(struct SDL_Texture *tex, int *w, int *h);
   int SDLKit_RenderTexture(struct SDL_Renderer *renderer, struct SDL_Texture *tex, const struct SDL_FRect *src, const struct SDL_FRect *dst);
   int SDLKit_RenderTextureRotated(struct SDL_Renderer *renderer, struct SDL_Texture *tex, const struct SDL_FRect *src, const struct SDL_FRect *dst, double angle, int hasCenter, float cx, float cy);
   struct SDL_Surface *SDLKit_LoadBMP(const char *path);
+  struct SDL_Surface *SDLKit_CreateSurfaceFrom(int width, int height, unsigned int format, void *pixels, int pitch);
+  struct SDL_RWops;
+  struct SDL_RWops *SDLKit_RWFromFile(const char *file, const char *mode);
   unsigned int SDLKit_PixelFormat_ABGR8888(void);
   int SDLKit_RenderReadPixels(struct SDL_Renderer *renderer, int x, int y, int w, int h, void *pixels, int pitch);
 #endif
