@@ -11,9 +11,9 @@ public final class SDLRenderer {
     public let width: Int
     public let height: Int
     internal private(set) var didShutdown = false
-    #if canImport(CSDL3) && !HEADLESS_CI
-    var handle: UnsafeMutablePointer<SDL_Renderer>?
-    var textures: [String: UnsafeMutablePointer<SDL_Texture>] = [:]
+    #if canImport(CSDL3)
+    internal var handle: UnsafeMutablePointer<SDL_Renderer>?
+    internal var textures: [String: UnsafeMutablePointer<SDL_Texture>] = [:]
     #endif
 
     public init(width: Int, height: Int, window: SDLWindow) throws {
@@ -30,7 +30,7 @@ public final class SDLRenderer {
         self.width = testingWidth
         self.height = testingHeight
         self.didShutdown = false
-        #if canImport(CSDL3) && !HEADLESS_CI
+        #if canImport(CSDL3)
         handle = nil
         textures = [:]
         #endif
@@ -38,7 +38,7 @@ public final class SDLRenderer {
 
     public func shutdown() {
         if didShutdown { return }
-        #if canImport(CSDL3) && !HEADLESS_CI
+        #if canImport(CSDL3)
         for texture in textures.values {
             SDLKit_DestroyTexture(texture)
         }
@@ -47,7 +47,9 @@ public final class SDLRenderer {
             SDLKit_DestroyRenderer(renderer)
             handle = nil
         }
+        #if !HEADLESS_CI
         SDLRenderer.flushFontCacheIfNeeded()
+        #endif
         #endif
         didShutdown = true
     }
