@@ -32,6 +32,10 @@ public struct SDLKitJSONAgent {
         case openapiJSON = "/openapi.json"
         case health = "/health"
         case version = "/version"
+        case clipboardGet = "/agent/gui/clipboard/get"
+        case clipboardSet = "/agent/gui/clipboard/set"
+        case inputKeyboard = "/agent/gui/input/getKeyboardState"
+        case inputMouse = "/agent/gui/input/getMouseState"
     }
 
     public func handle(path: String, body: Data) -> Data {
@@ -142,6 +146,29 @@ public struct SDLKitJSONAgent {
                 } else {
                     return try JSONEncoder().encode([String: String]())
                 }
+            case .clipboardGet:
+                // Require a valid window_id to ensure context
+                let req = try JSONDecoder().decode(WindowOnlyReq.self, from: body)
+                _ = try agent.getWindowInfo(windowId: req.window_id)
+                let text = try SDLClipboard.getText()
+                struct R: Codable { let text: String }
+                return try JSONEncoder().encode(R(text: text))
+            case .clipboardSet:
+                let req = try JSONDecoder().decode(ClipboardSetReq.self, from: body)
+                _ = try agent.getWindowInfo(windowId: req.window_id)
+                try SDLClipboard.setText(req.text)
+                return Self.okJSON()
+            case .inputKeyboard:
+                let req = try JSONDecoder().decode(WindowOnlyReq.self, from: body)
+                _ = try agent.getWindowInfo(windowId: req.window_id)
+                let m = try SDLInput.getKeyboardModifiers()
+                struct R: Codable { let modifiers: SDLInput.KeyboardModifiers }
+                return try JSONEncoder().encode(R(modifiers: m))
+            case .inputMouse:
+                let req = try JSONDecoder().decode(WindowOnlyReq.self, from: body)
+                _ = try agent.getWindowInfo(windowId: req.window_id)
+                let s = try SDLInput.getMouseState()
+                return try JSONEncoder().encode(s)
             }
         } catch let e as AgentError {
             return Self.errorJSON(from: e)
@@ -243,6 +270,7 @@ public struct SDLKitJSONAgent {
         let color: UInt32?
     }
     private struct EventReq: Codable { let window_id: Int; let timeout_ms: Int? }
+    private struct ClipboardSetReq: Codable { let window_id: Int; let text: String }
 
     private struct JEvent: Codable {
         let type: String

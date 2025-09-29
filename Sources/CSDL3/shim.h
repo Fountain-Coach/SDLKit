@@ -51,6 +51,20 @@ typedef struct SDLKit_Event {
   static inline int SDLKit_SetWindowFullscreen(SDL_Window *window, int enabled) { return SDL_SetWindowFullscreen(window, enabled != 0); }
   static inline int SDLKit_SetWindowOpacity(SDL_Window *window, float opacity) { return SDL_SetWindowOpacity(window, opacity); }
   static inline int SDLKit_SetWindowAlwaysOnTop(SDL_Window *window, int enabled) { return SDL_SetWindowAlwaysOnTop(window, enabled != 0); }
+
+  // Clipboard
+  static inline int SDLKit_SetClipboardText(const char *text) { return SDL_SetClipboardText(text); }
+  static inline char *SDLKit_GetClipboardText(void) { return SDL_GetClipboardText(); }
+  static inline void SDLKit_free(void *p) { SDL_free(p); }
+
+  // Input state
+  static inline void SDLKit_GetMouseState(int *x, int *y, unsigned int *buttons) {
+    Uint32 b = SDL_GetMouseState(x, y);
+    if (buttons) *buttons = (unsigned int)b;
+  }
+  static inline int SDLKit_GetModMask(void) {
+    return (int)SDL_GetModState();
+  }
   // Renderer creation API evolves; accept a flags arg but ignore when not needed.
   static inline SDL_Renderer *SDLKit_CreateRenderer(SDL_Window *window, uint32_t flags) {
     (void)flags;
@@ -157,6 +171,13 @@ typedef struct SDLKit_Event {
   int SDLKit_SetWindowFullscreen(SDL_Window *window, int enabled);
   int SDLKit_SetWindowOpacity(SDL_Window *window, float opacity);
   int SDLKit_SetWindowAlwaysOnTop(SDL_Window *window, int enabled);
+  // Clipboard
+  int SDLKit_SetClipboardText(const char *text);
+  char *SDLKit_GetClipboardText(void);
+  void SDLKit_free(void *p);
+  // Input state
+  void SDLKit_GetMouseState(int *x, int *y, unsigned int *buttons);
+  int SDLKit_GetModMask(void);
   SDL_Renderer *SDLKit_CreateRenderer(SDL_Window *window, uint32_t flags);
   int SDLKit_SetRenderDrawColor(SDL_Renderer *renderer, uint8_t r, uint8_t g, uint8_t b, uint8_t a);
   int SDLKit_RenderClear(SDL_Renderer *renderer);
