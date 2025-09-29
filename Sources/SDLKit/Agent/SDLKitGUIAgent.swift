@@ -4,7 +4,7 @@ import CSDL3
 #endif
 
 @MainActor
-public final class SDLKitGUIAgent {
+open class SDLKitGUIAgent {
     private var nextID: Int = 1
     private struct WindowBundle { let window: SDLWindow; let renderer: SDLRenderer }
     private var windows: [Int: WindowBundle] = [:]
@@ -210,9 +210,14 @@ public final class SDLKitGUIAgent {
         try bundle.renderer.disableClipRect()
     }
 
-    public func screenshotRaw(windowId: Int) throws -> SDLRenderer.RawScreenshot {
+    open func screenshotRaw(windowId: Int) throws -> SDLRenderer.RawScreenshot {
         guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }
         return try bundle.renderer.captureRawScreenshot()
+    }
+
+    open func screenshotPNG(windowId: Int) throws -> SDLRenderer.PNGScreenshot {
+        guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }
+        return try bundle.renderer.capturePNGScreenshot()
     }
 
     // New tools: clear, line, circle
@@ -272,14 +277,15 @@ public final class SDLKitGUIAgent {
             got = Int32(SDLKit_PollEvent(&out))
         }
         if got == 0 { return nil }
-        switch out.type {
-        case SDLKIT_EVENT_KEY_DOWN: return Event(type: .keyDown, key: String(out.keycode))
-        case SDLKIT_EVENT_KEY_UP: return Event(type: .keyUp, key: String(out.keycode))
-        case SDLKIT_EVENT_MOUSE_DOWN: return Event(type: .mouseDown, x: Int(out.x), y: Int(out.y), button: Int(out.button))
-        case SDLKIT_EVENT_MOUSE_UP: return Event(type: .mouseUp, x: Int(out.x), y: Int(out.y), button: Int(out.button))
-        case SDLKIT_EVENT_MOUSE_MOVE: return Event(type: .mouseMove, x: Int(out.x), y: Int(out.y))
-        case SDLKIT_EVENT_QUIT: return Event(type: .quit)
-        case SDLKIT_EVENT_WINDOW_CLOSED: return Event(type: .windowClosed)
+        let type = Int32(bitPattern: out.type)
+        switch type {
+        case Int32(SDLKIT_EVENT_KEY_DOWN): return Event(type: .keyDown, key: String(out.keycode))
+        case Int32(SDLKIT_EVENT_KEY_UP): return Event(type: .keyUp, key: String(out.keycode))
+        case Int32(SDLKIT_EVENT_MOUSE_DOWN): return Event(type: .mouseDown, x: Int(out.x), y: Int(out.y), button: Int(out.button))
+        case Int32(SDLKIT_EVENT_MOUSE_UP): return Event(type: .mouseUp, x: Int(out.x), y: Int(out.y), button: Int(out.button))
+        case Int32(SDLKIT_EVENT_MOUSE_MOVE): return Event(type: .mouseMove, x: Int(out.x), y: Int(out.y))
+        case Int32(SDLKIT_EVENT_QUIT): return Event(type: .quit)
+        case Int32(SDLKIT_EVENT_WINDOW_CLOSED): return Event(type: .windowClosed)
         default: return nil
         }
         #else

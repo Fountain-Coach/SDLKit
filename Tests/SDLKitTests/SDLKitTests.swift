@@ -35,14 +35,15 @@ final class SDLKitTests: XCTestCase {
         XCTAssertThrowsError(try SDLColor.parse("#12345"))
     }
 
-    @MainActor
-    func testVersionReflectsExternalSpec() throws {
+    func testVersionReflectsExternalSpec() async throws {
         // /version should reflect the version from the external YAML present in the repo
-        let agent = SDLKitJSONAgent()
-        let res = agent.handle(path: "/version", body: Data())
+        let res = await MainActor.run { () -> Data in
+            let agent = SDLKitJSONAgent()
+            return agent.handle(path: "/version", body: Data())
+        }
         struct V: Codable { let agent: String; let openapi: String }
         let v = try JSONDecoder().decode(V.self, from: res)
         XCTAssertEqual(v.agent, "sdlkit.gui.v1")
-        XCTAssertEqual(v.openapi, "1.0.0")
+        XCTAssertEqual(v.openapi, "1.1.0")
     }
 }

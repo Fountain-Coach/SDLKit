@@ -90,7 +90,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "SDLKitDemo",
-            dependencies: ["SDLKit", "SDLKitTTF"],
+            dependencies: ["SDLKit"],
             path: "Sources/SDLKitDemo"
         )
     ]

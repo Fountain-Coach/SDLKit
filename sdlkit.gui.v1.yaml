@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: SDLKit GUI Agent API
-  version: 1.0.0
+  version: 1.1.0
   description: |
     Source-of-truth OpenAPI for the SDLKit GUI Agent.
     Agent protocol version: sdlkit.gui.v1
@@ -735,20 +735,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/WindowOnlyRequest'
+              $ref: '#/components/schemas/ScreenshotCaptureRequest'
       responses:
         '200':
           description: OK
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  raw_base64: { type: string, description: ABGR8888 pixel data, row-major }
-                  width: { type: integer }
-                  height: { type: integer }
-                  pitch: { type: integer }
-                  format: { type: string, enum: [ABGR8888] }
+                $ref: '#/components/schemas/ScreenshotCaptureResponse'
 components:
   responses:
     Ok:
@@ -779,6 +773,36 @@ components:
             details: { type: string, nullable: true }
           required: [code]
       required: [error]
+    ScreenshotCaptureRequest:
+      type: object
+      properties:
+        window_id: { type: integer, minimum: 1 }
+        format:
+          type: string
+          enum: [raw, png]
+          default: raw
+      required: [window_id]
+    RawScreenshot:
+      type: object
+      properties:
+        raw_base64: { type: string, description: ABGR8888 pixel data, row-major }
+        width: { type: integer }
+        height: { type: integer }
+        pitch: { type: integer }
+        format: { type: string, enum: [ABGR8888] }
+      required: [raw_base64, width, height, pitch, format]
+    PNGScreenshot:
+      type: object
+      properties:
+        png_base64: { type: string, description: PNG image bytes encoded in Base64 }
+        width: { type: integer }
+        height: { type: integer }
+        format: { type: string, enum: [PNG] }
+      required: [png_base64, width, height, format]
+    ScreenshotCaptureResponse:
+      oneOf:
+        - $ref: '#/components/schemas/RawScreenshot'
+        - $ref: '#/components/schemas/PNGScreenshot'
     WindowOnlyRequest:
       type: object
       properties:

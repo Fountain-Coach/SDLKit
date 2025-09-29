@@ -2,12 +2,12 @@ import Foundation
 
 public enum SDLKitOpenAPI {
     public static let agentVersion = "sdlkit.gui.v1"
-    public static let specVersion = "1.0.0"
+    public static let specVersion = "1.1.0"
     public static let yaml: String = """
 openapi: 3.1.0
 info:
   title: SDLKit GUI Agent API
-  version: 1.0.0
+  version: 1.1.0
   description: |
     OpenAPI for SDLKit GUI tools. Agent version: sdlkit.gui.v1
 servers:
@@ -120,6 +120,24 @@ paths:
               $ref: '#/components/schemas/TextRequest'
       responses:
         '200': { $ref: '#/components/responses/Ok' }
+        '400': { $ref: '#/components/responses/Error' }
+
+  /agent/gui/screenshot/capture:
+    post:
+      operationId: screenshotCapture
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScreenshotCaptureRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScreenshotCaptureResponse'
         '400': { $ref: '#/components/responses/Error' }
 
   /agent/gui/captureEvent:
@@ -257,6 +275,40 @@ components:
           nullable: true
       required: [window_id, text, x, y]
 
+    ScreenshotCaptureRequest:
+      type: object
+      properties:
+        window_id: { type: integer, minimum: 1 }
+        format:
+          type: string
+          enum: [raw, png]
+          default: raw
+      required: [window_id]
+
+    RawScreenshot:
+      type: object
+      properties:
+        raw_base64: { type: string, description: ABGR8888 pixel data, row-major }
+        width: { type: integer }
+        height: { type: integer }
+        pitch: { type: integer }
+        format: { type: string, enum: [ABGR8888] }
+      required: [raw_base64, width, height, pitch, format]
+
+    PNGScreenshot:
+      type: object
+      properties:
+        png_base64: { type: string, description: PNG image bytes encoded in Base64 }
+        width: { type: integer }
+        height: { type: integer }
+        format: { type: string, enum: [PNG] }
+      required: [png_base64, width, height, format]
+
+    ScreenshotCaptureResponse:
+      oneOf:
+        - $ref: '#/components/schemas/RawScreenshot'
+        - $ref: '#/components/schemas/PNGScreenshot'
+
     CaptureEventRequest:
       type: object
       properties:
@@ -382,6 +434,23 @@ components:
                     "operationId": "drawText",
                     "requestBody": jsonRequest(reqRef("TextRequest")),
                     "responses": okErrResponses()
+                ]
+            ],
+            "/agent/gui/screenshot/capture": [
+                "post": [
+                    "operationId": "screenshotCapture",
+                    "requestBody": jsonRequest(reqRef("ScreenshotCaptureRequest")),
+                    "responses": [
+                        "200": [
+                            "description": "OK",
+                            "content": [
+                                "application/json": [
+                                    "schema": reqRef("ScreenshotCaptureResponse")
+                                ]
+                            ]
+                        ],
+                        "400": errResponseRef()
+                    ]
                 ]
             ],
             "/agent/gui/captureEvent": [
@@ -527,6 +596,45 @@ components:
                     "color": ["type": "integer", "nullable": true, "description": "ARGB as 0xAARRGGBB (optional; default white)"]
                 ],
                 "required": ["window_id", "text", "x", "y"]
+            ],
+            "ScreenshotCaptureRequest": [
+                "type": "object",
+                "properties": [
+                    "window_id": ["type": "integer", "minimum": 1],
+                    "format": [
+                        "type": "string",
+                        "enum": ["raw", "png"],
+                        "default": "raw"
+                    ]
+                ],
+                "required": ["window_id"]
+            ],
+            "RawScreenshot": [
+                "type": "object",
+                "properties": [
+                    "raw_base64": ["type": "string", "description": "ABGR8888 pixel data, row-major"],
+                    "width": ["type": "integer"],
+                    "height": ["type": "integer"],
+                    "pitch": ["type": "integer"],
+                    "format": ["type": "string", "enum": ["ABGR8888"]]
+                ],
+                "required": ["raw_base64", "width", "height", "pitch", "format"]
+            ],
+            "PNGScreenshot": [
+                "type": "object",
+                "properties": [
+                    "png_base64": ["type": "string", "description": "PNG image bytes encoded in Base64"],
+                    "width": ["type": "integer"],
+                    "height": ["type": "integer"],
+                    "format": ["type": "string", "enum": ["PNG"]]
+                ],
+                "required": ["png_base64", "width", "height", "format"]
+            ],
+            "ScreenshotCaptureResponse": [
+                "oneOf": [
+                    reqRef("RawScreenshot"),
+                    reqRef("PNGScreenshot")
+                ]
             ],
             "CaptureEventRequest": [
                 "type": "object",
