@@ -332,7 +332,7 @@ components:
 """
 
     // JSON representation of the same spec
-    public static var json: Data {
+    public static let json: Data = {
         let spec: [String: Any] = [
             "openapi": "3.1.0",
             "info": [
@@ -344,8 +344,8 @@ components:
             "paths": pathsJSON(),
             "components": componentsJSON()
         ]
-        return (try? JSONSerialization.data(withJSONObject: spec, options: [.prettyPrinted])) ?? Data("{}".utf8)
-    }
+        return (try? JSONSerialization.data(withJSONObject: spec, options: [.prettyPrinted, .sortedKeys])) ?? Data("{}".utf8)
+    }()
 
     private static func okResponseRef() -> [String: Any] { ["$ref": "#/components/responses/Ok"] }
     private static func errResponseRef() -> [String: Any] { ["$ref": "#/components/responses/Error"] }

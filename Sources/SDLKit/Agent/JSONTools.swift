@@ -392,6 +392,12 @@ public struct SDLKitJSONAgent {
             if let entry = fetchFile(at: envPath, allowedExtensions: [".yaml", ".yml"], getCache: { externalYAMLCache }, setCache: setYAMLCache) {
                 return entry
             }
+            // When an explicit environment path is provided but either fails validation
+            // or the file is absent/unreadable, we intentionally skip probing fallback
+            // locations. The tests rely on falling back to the embedded spec instead of
+            // unexpectedly picking up repository-local files when the env override is
+            // unset or broken.
+            return nil
         }
         let candidates = [
             "sdlkit.gui.v1.yaml",
@@ -416,6 +422,9 @@ public struct SDLKitJSONAgent {
             if let entry = fetchFile(at: envPath, allowedExtensions: [".json"], getCache: { externalJSONCache }, setCache: setJSONCache) {
                 return entry
             }
+            // Honor the explicit environment path even when the target file is missing
+            // or has the wrong extension by avoiding any implicit fallback lookup.
+            return nil
         }
         let candidates = [
             "openapi.json",
