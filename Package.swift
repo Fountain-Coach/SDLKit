@@ -11,6 +11,10 @@ let package = Package(
         .library(name: "SDLKit", targets: ["SDLKit"]),
         .executable(name: "SDLKitDemo", targets: ["SDLKitDemo"])
     ],
+    dependencies: [
+        // YAML parser for OpenAPI YAML→JSON conversion
+        .package(url: "https://github.com/jpsim/Yams.git", from: "5.1.0")
+    ],
     targets: [
         .systemLibrary(
             name: "CSDL3",
@@ -38,7 +42,11 @@ let package = Package(
         ),
         .target(
             name: "SDLKit",
-            dependencies: ["CSDL3", .target(name: "CSDL3IMAGE", condition: .when(platforms: [.macOS, .linux]))],
+            dependencies: [
+                "CSDL3",
+                .target(name: "CSDL3IMAGE", condition: .when(platforms: [.macOS, .linux])),
+                .product(name: "Yams", package: "Yams")
+            ],
             path: "Sources/SDLKit",
             cSettings: {
                 var flags: [CSetting] = []

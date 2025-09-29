@@ -71,6 +71,8 @@ public struct SDLKitJSONAgent {
                 if let ext = Self.loadExternalOpenAPIYAML() { return ext }
                 return Data(SDLKitOpenAPI.yaml.utf8)
             case .openapiJSON:
+                // Prefer converting an external YAML to JSON for exact mirroring
+                if let y = Self.loadExternalOpenAPIYAML(), let converted = OpenAPIConverter.yamlToJSON(y) { return converted }
                 if let ext = Self.loadExternalOpenAPIJSON() { return ext }
                 return SDLKitOpenAPI.json
             case .health:
@@ -360,21 +362,29 @@ public struct SDLKitJSONAgent {
                let info = obj["info"] as? [String: Any],
                let ver = info["version"] as? String { return ver }
         }
-        // Fallback: try YAML and extract info.version between 'info:' and 'paths:'
-        if let yaml = loadExternalOpenAPIYAML(), let text = String(data: yaml, encoding: .utf8) {
-            // Find the 'info:' block
-            let infoAnchor = text.range(of: "\ninfo:") ?? text.range(of: "^info:", options: .regularExpression)
-            if let infoAnchor {
-                let afterInfo = text[infoAnchor.upperBound...]
-                let endRange = afterInfo.range(of: "\npaths:")
-                let block = endRange != nil ? afterInfo[..<endRange!.lowerBound] : afterInfo[afterInfo.startIndex...]
-                if let verLine = block.range(of: "\n\\s*version:\\s*([^\n#]+)", options: .regularExpression) {
-                    let line = block[verLine]
-                    if let colon = line.range(of: ":") {
-                        var v = line[colon.upperBound...].trimmingCharacters(in: .whitespaces)
-                        if v.hasPrefix("\"") && v.hasSuffix("\"") { v.removeFirst(); v.removeLast() }
-                        if v.hasPrefix("'") && v.hasSuffix("'") { v.removeFirst(); v.removeLast() }
-                        return String(v)
+        // Try YAML via converter first
+        if let yaml = loadExternalOpenAPIYAML() {
+            #if canImport(Yams)
+            if let data = OpenAPIConverter.yamlToJSON(yaml),
+               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let info = obj["info"] as? [String: Any],
+               let ver = info["version"] as? String { return ver }
+            #endif
+            // Regex fallback if YAML parser unavailable
+            if let text = String(data: yaml, encoding: .utf8) {
+                let infoAnchor = text.range(of: "\ninfo:") ?? text.range(of: "^info:", options: .regularExpression)
+                if let infoAnchor {
+                    let afterInfo = text[infoAnchor.upperBound...]
+                    let endRange = afterInfo.range(of: "\npaths:")
+                    let block = endRange != nil ? afterInfo[..<endRange!.lowerBound] : afterInfo[afterInfo.startIndex...]
+                    if let verLine = block.range(of: "\n\\s*version:\\s*([^\n#]+)", options: .regularExpression) {
+                        let line = block[verLine]
+                        if let colon = line.range(of: ":") {
+                            var v = line[colon.upperBound...].trimmingCharacters(in: .whitespaces)
+                            if v.hasPrefix("\"") && v.hasSuffix("\"") { v.removeFirst(); v.removeLast() }
+                            if v.hasPrefix("'") && v.hasSuffix("'") { v.removeFirst(); v.removeLast() }
+                            return String(v)
+                        }
                     }
                 }
             }

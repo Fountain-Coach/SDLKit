@@ -156,14 +156,14 @@ Errors are returned as `{ "error": { "code": string, "details"?: string } }` wit
 
 ### OpenAPI (source of truth)
 
-- Canonical spec: repo root `sdlkit.gui.v1.yaml` (or `openapi.yaml`). A copy also exists under `openapi/sdlkit.gui.v1.yaml` for convenience.
+- Canonical spec: repo root `sdlkit.gui.v1.yaml` (or `openapi.yaml`).
 - Discovery order for serving docs:
   - `SDLKIT_OPENAPI_PATH` (YAML or JSON)
   - `sdlkit.gui.v1.yaml` or `openapi.yaml` at repo root
-  - `openapi/sdlkit.gui.v1.yaml`
+  - `openapi/sdlkit.gui.v1.yaml` (legacy fallback only)
 - Served endpoints:
   - `GET /openapi.yaml` → YAML (external file if present, else embedded)
-  - `GET /openapi.json` → JSON mirror. If an external JSON file is present (via env or common paths), it is served; otherwise a generated JSON from the embedded spec is returned.
+  - `GET /openapi.json` → JSON mirror. If an external YAML is present, it is converted to JSON at runtime; otherwise an external JSON is served when present; else a generated JSON from the embedded spec is returned.
 
 ### Example HTTP Server (separate)
 
