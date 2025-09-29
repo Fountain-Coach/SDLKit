@@ -133,6 +133,22 @@ public final class SDLKitGUIAgent {
         try bundle.window.center()
     }
 
+    // MARK: - Textures
+    public func textureLoad(windowId: Int, id: String, path: String) throws {
+        guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }
+        try bundle.renderer.loadTexture(id: id, path: path)
+    }
+
+    public func textureDraw(windowId: Int, id: String, x: Int, y: Int, width: Int?, height: Int?) throws {
+        guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }
+        try bundle.renderer.drawTexture(id: id, x: x, y: y, width: width, height: height)
+    }
+
+    public func textureFree(windowId: Int, id: String) {
+        guard let bundle = windows[windowId] else { return }
+        bundle.renderer.freeTexture(id: id)
+    }
+
     // New tools: clear, line, circle
     public func clear(windowId: Int, color: UInt32) throws {
         guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }

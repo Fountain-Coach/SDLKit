@@ -39,6 +39,10 @@ public struct SDLKitJSONAgent {
         case inputMouse = "/agent/gui/input/getMouseState"
         case displayList = "/agent/gui/display/list"
         case displayGetInfo = "/agent/gui/display/getInfo"
+        case textureLoad = "/agent/gui/texture/load"
+        case textureDraw = "/agent/gui/texture/draw"
+        case textureFree = "/agent/gui/texture/free"
+        case screenshot = "/agent/gui/screenshot/capture"
     }
 
     public func handle(path: String, body: Data) -> Data {
@@ -185,6 +189,21 @@ public struct SDLKitJSONAgent {
                 let b = try SDLDisplay.getInfo(index: req.index)
                 struct R: Codable { let bounds: SDLDisplay.Bounds }
                 return try JSONEncoder().encode(R(bounds: b))
+            case .textureLoad:
+                let req = try JSONDecoder().decode(TextureLoadReq.self, from: body)
+                try agent.textureLoad(windowId: req.window_id, id: req.id, path: req.path)
+                return Self.okJSON()
+            case .textureDraw:
+                let req = try JSONDecoder().decode(TextureDrawReq.self, from: body)
+                try agent.textureDraw(windowId: req.window_id, id: req.id, x: req.x, y: req.y, width: req.width, height: req.height)
+                return Self.okJSON()
+            case .textureFree:
+                let req = try JSONDecoder().decode(TextureFreeReq.self, from: body)
+                agent.textureFree(windowId: req.window_id, id: req.id)
+                return Self.okJSON()
+            case .screenshot:
+                // Not implemented yet; keep endpoint present per spec
+                return Self.errorJSON(code: "not_implemented", details: "screenshot not implemented")
             }
         } catch let e as AgentError {
             return Self.errorJSON(from: e)
@@ -288,6 +307,9 @@ public struct SDLKitJSONAgent {
     private struct EventReq: Codable { let window_id: Int; let timeout_ms: Int? }
     private struct ClipboardSetReq: Codable { let window_id: Int; let text: String }
     private struct DisplayIndexReq: Codable { let index: Int }
+    private struct TextureLoadReq: Codable { let window_id: Int; let id: String; let path: String }
+    private struct TextureDrawReq: Codable { let window_id: Int; let id: String; let x: Int; let y: Int; let width: Int?; let height: Int? }
+    private struct TextureFreeReq: Codable { let window_id: Int; let id: String }
 
     private struct JEvent: Codable {
         let type: String

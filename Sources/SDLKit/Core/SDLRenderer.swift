@@ -9,6 +9,7 @@ public final class SDLRenderer {
     public let height: Int
     #if canImport(CSDL3) && !HEADLESS_CI
     var handle: UnsafeMutablePointer<SDL_Renderer>?
+    var textures: [String: UnsafeMutablePointer<SDL_Texture>] = [:]
     #endif
 
     public init(width: Int, height: Int, window: SDLWindow) throws {
@@ -68,7 +69,6 @@ public final class SDLRenderer {
 
     public func drawLine(x1: Int, y1: Int, x2: Int, y2: Int, color: UInt32) throws {
         #if canImport(CSDL3) && !HEADLESS_CI
-        // Fallback Bresenham rendering using 1x1 rects to avoid SDL API drift for lines.
         guard let r = handle else { throw AgentError.internalError("Renderer not created") }
         let a = UInt8((color >> 24) & 0xFF)
         let rr = UInt8((color >> 16) & 0xFF)
@@ -108,7 +108,6 @@ public final class SDLRenderer {
         if SDLKit_SetRenderDrawColor(r, rr, gg, bb, a) != 0 {
             throw AgentError.internalError(SDLCore.lastError())
         }
-        // Midpoint circle, drawing horizontal spans for a filled circle
         var x = radius
         var y = 0
         var err = 1 - x
@@ -135,6 +134,42 @@ public final class SDLRenderer {
         if SDLKitConfig.presentPolicy == .auto { SDLKit_RenderPresent(r) }
         #else
         throw AgentError.sdlUnavailable
+        #endif
+    }
+
+    // MARK: - Textures
+    public func loadTexture(id: String, path: String) throws {
+        #if canImport(CSDL3) && !HEADLESS_CI
+        guard let r = handle else { throw AgentError.internalError("Renderer not created") }
+        if let existing = textures[id] { SDLKit_DestroyTexture(existing) }
+        guard let surf = SDLKit_LoadBMP(path) else { throw AgentError.internalError(SDLCore.lastError()) }
+        defer { SDLKit_DestroySurface(surf) }
+        guard let tex = SDLKit_CreateTextureFromSurface(r, surf) else { throw AgentError.internalError(SDLCore.lastError()) }
+        textures[id] = tex
+        #else
+        throw AgentError.sdlUnavailable
+        #endif
+    }
+
+    public func drawTexture(id: String, x: Int, y: Int, width: Int?, height: Int?) throws {
+        #if canImport(CSDL3) && !HEADLESS_CI
+        guard let r = handle else { throw AgentError.internalError("Renderer not created") }
+        guard let tex = textures[id] else { throw AgentError.invalidArgument("texture not found: \(id)") }
+        var tw: Int32 = 0, th: Int32 = 0
+        SDLKit_GetTextureSize(tex, &tw, &th)
+        let w = Float(width ?? Int(tw))
+        let h = Float(height ?? Int(th))
+        var dst = SDL_FRect(x: Float(x), y: Float(y), w: w, h: h)
+        if SDLKit_RenderTexture(r, tex, nil, &dst) != 0 { throw AgentError.internalError(SDLCore.lastError()) }
+        if SDLKitConfig.presentPolicy == .auto { SDLKit_RenderPresent(r) }
+        #else
+        throw AgentError.sdlUnavailable
+        #endif
+    }
+
+    public func freeTexture(id: String) {
+        #if canImport(CSDL3) && !HEADLESS_CI
+        if let tex = textures.removeValue(forKey: id) { SDLKit_DestroyTexture(tex) }
         #endif
     }
 

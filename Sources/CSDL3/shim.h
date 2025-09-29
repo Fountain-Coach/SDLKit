@@ -148,9 +148,10 @@ typedef struct SDLKit_Event {
     static inline void SDLKit_DestroySurface(SDL_Surface *surface) { SDL_DestroySurface(surface); }
     static inline void SDLKit_DestroyTexture(SDL_Texture *tex) { SDL_DestroyTexture(tex); }
     static inline void SDLKit_GetTextureSize(SDL_Texture *tex, int *w, int *h) { SDL_GetTextureSize(tex, w, h); }
-    static inline int SDLKit_RenderTexture(SDL_Renderer *renderer, SDL_Texture *tex, const SDL_FRect *src, const SDL_FRect *dst) {
-      return SDL_RenderTexture(renderer, tex, src, dst);
-    }
+  static inline int SDLKit_RenderTexture(SDL_Renderer *renderer, SDL_Texture *tex, const SDL_FRect *src, const SDL_FRect *dst) {
+    return SDL_RenderTexture(renderer, tex, src, dst);
+  }
+  static inline SDL_Surface *SDLKit_LoadBMP(const char *path) { return SDL_LoadBMP(path); }
   #else
     static inline int SDLKit_TTF_Available(void) { return 0; }
     typedef void SDLKit_TTF_Font;
@@ -213,6 +214,7 @@ typedef struct SDLKit_Event {
   void SDLKit_DestroyTexture(struct SDL_Texture *tex);
   void SDLKit_GetTextureSize(struct SDL_Texture *tex, int *w, int *h);
   int SDLKit_RenderTexture(struct SDL_Renderer *renderer, struct SDL_Texture *tex, const struct SDL_FRect *src, const struct SDL_FRect *dst);
+  struct SDL_Surface *SDLKit_LoadBMP(const char *path);
 #endif
 
 #ifdef __cplusplus
