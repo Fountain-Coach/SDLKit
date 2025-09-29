@@ -68,7 +68,7 @@ Linux notes and quick validation
   - `curl localhost:8080/version` should report the spec’s `info.version`.
 
 Example server portability
-- `Examples/SDLKitJSONServer/Package.swift` currently pins `.platforms` to macOS. For Linux, remove the `platforms` line or add Linux to allow building on Linux.
+- Updated: `Examples/SDLKitJSONServer/Package.swift` no longer pins `.platforms` to macOS, so it builds on Linux.
 - Content-type for docs is based on suffix; adjust if your hosting environment requires explicit response headers.
 
 Open TODOs carried forward (from code comments)
@@ -84,4 +84,3 @@ Next steps after PNG and cache
 - Add lightweight metrics/log counters (opens/closes/presents/errors) via `SDLLogger`.
 
 Thank you! Please proceed cautiously, keep patches tight, and avoid spec drift or duplicate files.
-

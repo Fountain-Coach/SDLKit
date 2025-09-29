@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "SDLKitJSONServer",
-    platforms: [ .macOS(.v13) ],
+    // No explicit Apple platform pin so this builds on Linux as well
     products: [ .executable(name: "SDLKitJSONServer", targets: ["SDLKitJSONServer"]) ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-nio.git", from: "2.62.0"),
@@ -21,4 +21,3 @@ let package = Package(
         )
     ]
 )
-
