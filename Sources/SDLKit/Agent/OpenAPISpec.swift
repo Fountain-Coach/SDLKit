@@ -124,6 +124,8 @@ paths:
 
   /agent/gui/screenshot/capture:
     post:
+      summary: Capture window screenshot
+      description: Captures the current window contents and returns either raw ABGR pixels or a Base64 PNG depending on the requested format.
       operationId: screenshotCapture
       requestBody:
         required: true
@@ -438,6 +440,8 @@ components:
             ],
             "/agent/gui/screenshot/capture": [
                 "post": [
+                    "summary": "Capture window screenshot",
+                    "description": "Captures the current window contents and returns either raw ABGR pixels or a Base64 PNG depending on the requested format.",
                     "operationId": "screenshotCapture",
                     "requestBody": jsonRequest(reqRef("ScreenshotCaptureRequest")),
                     "responses": [
