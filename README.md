@@ -81,6 +81,8 @@ The agent reads several environment variables at runtime. Key options include:
   - `name:<id>` where `<id>` was previously registered via `SDLFontRegistry.register(name:path:)`
 - If `font` is omitted, the agent tries `system:default`.
 - If `size` is omitted, the agent uses `16`.
+- `SDLKitState.isTextRenderingEnabled` returns `true` once the optional `SDLKitTTF` product (and SDL_ttf) are linked, allowing 
+  text rendering paths to activate.
 
 macOS CI: not enabled by default. If you need macOS validation, set up a self‑hosted macOS runner and add a job targeting `runs-on: [self-hosted, macOS]`.
 

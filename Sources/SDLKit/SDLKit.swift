@@ -1,5 +1,9 @@
 import Foundation
 
+#if !HEADLESS_CI && canImport(CSDL3)
+import CSDL3
+#endif
+
 public enum SDLKitConfig {
     public static var guiEnabled: Bool {
         let env = ProcessInfo.processInfo.environment["SDLKIT_GUI_ENABLED"]?.lowercased()
@@ -28,6 +32,20 @@ public enum SDLKitConfig {
 }
 
 public enum SDLKitState {
-    public static var isTextRenderingEnabled: Bool { false }
+    #if !HEADLESS_CI && canImport(CSDL3)
+    private static let cachedTextRenderingEnabled: Bool = {
+        SDLKit_TTF_Available() != 0
+    }()
+    #endif
+
+    public static var isTextRenderingEnabled: Bool {
+        #if HEADLESS_CI
+        return false
+        #elseif canImport(CSDL3)
+        return cachedTextRenderingEnabled
+        #else
+        return false
+        #endif
+    }
 }
 
