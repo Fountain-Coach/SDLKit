@@ -344,7 +344,7 @@ components:
             "paths": pathsJSON(),
             "components": componentsJSON()
         ]
-        return (try? JSONSerialization.data(withJSONObject: spec, options: [.prettyPrinted])) ?? Data("{}".utf8)
+        return (try? JSONSerialization.data(withJSONObject: spec, options: [.prettyPrinted, .sortedKeys])) ?? Data("{}".utf8)
     }
 
     private static func okResponseRef() -> [String: Any] { ["$ref": "#/components/responses/Ok"] }
