@@ -227,8 +227,9 @@ public struct SDLKitJSONAgent {
                 }
                 return Self.okJSON()
             case .textureDrawRotated:
-                // Placeholder: not implemented yet
-                return Self.errorJSON(code: "not_implemented", details: "texture rotated not implemented")
+                let req = try JSONDecoder().decode(TextureDrawRotatedReq.self, from: body)
+                try agent.textureDrawRotated(windowId: req.window_id, id: req.id, x: req.x, y: req.y, width: req.width, height: req.height, angle: req.angle, cx: req.cx, cy: req.cy)
+                return Self.okJSON()
             case .screenshot:
                 let req = try JSONDecoder().decode(WindowOnlyReq.self, from: body)
                 let shot = try agent.screenshotRaw(windowId: req.window_id)
@@ -387,6 +388,7 @@ public struct SDLKitJSONAgent {
     private struct TextureDrawReq: Codable { let window_id: Int; let id: String; let x: Int; let y: Int; let width: Int?; let height: Int? }
     private struct TextureFreeReq: Codable { let window_id: Int; let id: String }
     private struct TextureDrawTiledReq: Codable { let window_id: Int; let id: String; let x: Int; let y: Int; let width: Int; let height: Int; let tileWidth: Int; let tileHeight: Int }
+    private struct TextureDrawRotatedReq: Codable { let window_id: Int; let id: String; let x: Int; let y: Int; let width: Int?; let height: Int?; let angle: Double; let cx: Float?; let cy: Float? }
     private struct RenderScaleReq: Codable { let window_id: Int; let sx: Float; let sy: Float }
     private struct RectOnlyReq: Codable { let window_id: Int; let x: Int; let y: Int; let width: Int; let height: Int }
 

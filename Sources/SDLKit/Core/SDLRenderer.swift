@@ -181,6 +181,25 @@ public final class SDLRenderer {
         #endif
     }
 
+    public func drawTextureRotated(id: String, x: Int, y: Int, width: Int?, height: Int?, angleDegrees: Double, centerX: Float?, centerY: Float?) throws {
+        #if canImport(CSDL3) && !HEADLESS_CI
+        guard let r = handle else { throw AgentError.internalError("Renderer not created") }
+        guard let tex = textures[id] else { throw AgentError.invalidArgument("texture not found: \(id)") }
+        var tw: Int32 = 0, th: Int32 = 0
+        SDLKit_GetTextureSize(tex, &tw, &th)
+        let w = Float(width ?? Int(tw))
+        let h = Float(height ?? Int(th))
+        var dst = SDL_FRect(x: Float(x), y: Float(y), w: w, h: h)
+        let hasCenter = (centerX != nil && centerY != nil) ? 1 : 0
+        let cx = centerX ?? (w * 0.5)
+        let cy = centerY ?? (h * 0.5)
+        if SDLKit_RenderTextureRotated(r, tex, nil, &dst, angleDegrees, hasCenter, cx, cy) != 0 { throw AgentError.internalError(SDLCore.lastError()) }
+        if SDLKitConfig.presentPolicy == .auto { SDLKit_RenderPresent(r) }
+        #else
+        throw AgentError.sdlUnavailable
+        #endif
+    }
+
     // MARK: - Render state queries
     public func getOutputSize() throws -> (width: Int, height: Int) {
         #if canImport(CSDL3) && !HEADLESS_CI

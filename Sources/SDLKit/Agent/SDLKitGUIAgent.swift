@@ -149,6 +149,11 @@ public final class SDLKitGUIAgent {
         bundle.renderer.freeTexture(id: id)
     }
 
+    public func textureDrawRotated(windowId: Int, id: String, x: Int, y: Int, width: Int?, height: Int?, angle: Double, cx: Float?, cy: Float?) throws {
+        guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }
+        try bundle.renderer.drawTextureRotated(id: id, x: x, y: y, width: width, height: height, angleDegrees: angle, centerX: cx, centerY: cy)
+    }
+
     // MARK: - Render state accessors
     public func getRenderOutputSize(windowId: Int) throws -> (width: Int, height: Int) {
         guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }

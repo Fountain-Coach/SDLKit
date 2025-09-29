@@ -10,6 +10,8 @@ servers:
 paths:
   /health:
     get:
+      summary: Health check
+      description: Returns ok true to indicate the agent is responding.
       operationId: health
       responses:
         '200':
@@ -20,6 +22,8 @@ paths:
                 $ref: '#/components/schemas/OkResponse'
   /version:
     get:
+      summary: Agent and spec version
+      description: Returns the agent protocol version and the OpenAPI spec version served by this instance.
       operationId: version
       responses:
         '200':
@@ -34,6 +38,8 @@ paths:
                 required: [agent, openapi]
   /agent/gui/window/open:
     post:
+      summary: Open a window
+      description: Creates a new window and returns its window_id.
       operationId: openWindow
       requestBody:
         required: true
@@ -51,6 +57,8 @@ paths:
         '400': { $ref: '#/components/responses/Error' }
   /agent/gui/window/close:
     post:
+      summary: Close a window
+      description: Closes the specified window and releases its resources.
       operationId: closeWindow
       requestBody:
         required: true
@@ -63,6 +71,8 @@ paths:
         '400': { $ref: '#/components/responses/Error' }
   /agent/gui/window/show:
     post:
+      summary: Show a window
+      description: Makes a hidden window visible on screen.
       operationId: showWindow
       requestBody:
         required: true
@@ -74,6 +84,8 @@ paths:
         '200': { $ref: '#/components/responses/Ok' }
   /agent/gui/window/hide:
     post:
+      summary: Hide a window
+      description: Hides a window without destroying it; rendering can continue.
       operationId: hideWindow
       requestBody:
         required: true
@@ -85,6 +97,8 @@ paths:
         '200': { $ref: '#/components/responses/Ok' }
   /agent/gui/window/resize:
     post:
+      summary: Resize a window
+      description: Changes the window size to the requested width and height.
       operationId: resizeWindow
       requestBody:
         required: true
@@ -101,6 +115,8 @@ paths:
         '200': { $ref: '#/components/responses/Ok' }
   /agent/gui/window/setTitle:
     post:
+      summary: Set window title
+      description: Updates the title displayed in the window’s title bar.
       operationId: setTitle
       requestBody:
         required: true
@@ -116,6 +132,8 @@ paths:
         '200': { $ref: '#/components/responses/Ok' }
   /agent/gui/window/setPosition:
     post:
+      summary: Move a window
+      description: Moves the window to the given screen coordinates.
       operationId: setPosition
       requestBody:
         required: true
@@ -132,6 +150,8 @@ paths:
         '200': { $ref: '#/components/responses/Ok' }
   /agent/gui/window/maximize:
     post:
+      summary: Maximize window
+      description: Maximizes the window according to the platform’s window manager.
       operationId: maximize
       requestBody:
         required: true
@@ -143,6 +163,8 @@ paths:
         '200': { $ref: '#/components/responses/Ok' }
   /agent/gui/window/minimize:
     post:
+      summary: Minimize window
+      description: Minimizes the window to the task bar or dock, depending on platform.
       operationId: minimize
       requestBody:
         required: true
@@ -154,6 +176,8 @@ paths:
         '200': { $ref: '#/components/responses/Ok' }
   /agent/gui/window/restore:
     post:
+      summary: Restore window
+      description: Restores a minimized or maximized window to its normal size.
       operationId: restore
       requestBody:
         required: true
@@ -165,6 +189,8 @@ paths:
         '200': { $ref: '#/components/responses/Ok' }
   /agent/gui/window/setFullscreen:
     post:
+      summary: Toggle fullscreen
+      description: Enables or disables fullscreen mode for the window.
       operationId: setFullscreen
       requestBody:
         required: true
@@ -180,6 +206,8 @@ paths:
         '200': { $ref: '#/components/responses/Ok' }
   /agent/gui/window/setAlwaysOnTop:
     post:
+      summary: Toggle always-on-top
+      description: Enables or disables always-on-top for the window above other windows.
       operationId: setAlwaysOnTop
       requestBody:
         required: true
@@ -195,6 +223,8 @@ paths:
         '200': { $ref: '#/components/responses/Ok' }
   /agent/gui/window/setOpacity:
     post:
+      summary: Set window opacity
+      description: Sets the window’s opacity between 0.0 (transparent) and 1.0 (opaque).
       operationId: setOpacity
       requestBody:
         required: true
@@ -210,6 +240,8 @@ paths:
         '200': { $ref: '#/components/responses/Ok' }
   /agent/gui/window/center:
     post:
+      summary: Center window
+      description: Centers the window on the primary display.
       operationId: center
       requestBody:
         required: true
@@ -221,6 +253,8 @@ paths:
         '200': { $ref: '#/components/responses/Ok' }
   /agent/gui/window/getInfo:
     post:
+      summary: Get window info
+      description: Returns window position, size, and title for the specified window.
       operationId: getWindowInfo
       requestBody:
         required: true
@@ -237,6 +271,8 @@ paths:
                 $ref: '#/components/schemas/WindowInfo'
   /agent/gui/clear:
     post:
+      summary: Clear with color
+      description: Clears the current render target to the given color.
       operationId: clear
       requestBody:
         required: true
@@ -248,6 +284,8 @@ paths:
         '200': { $ref: '#/components/responses/Ok' }
   /agent/gui/present:
     post:
+      summary: Present
+      description: Presents any pending draw commands to the display according to the present policy.
       operationId: present
       requestBody:
         required: true
@@ -259,6 +297,8 @@ paths:
         '200': { $ref: '#/components/responses/Ok' }
   /agent/gui/render/getOutputSize:
     post:
+      summary: Query render output size
+      description: Returns the size of the renderer’s current output in pixels.
       operationId: renderGetOutputSize
       requestBody:
         required: true
@@ -275,6 +315,8 @@ paths:
                 properties: { width: {type: integer}, height: {type: integer} }
   /agent/gui/render/getScale:
     post:
+      summary: Query render scale
+      description: Returns the current render scale factors (sx, sy).
       operationId: renderGetScale
       requestBody:
         required: true
@@ -291,6 +333,8 @@ paths:
                 properties: { sx: {type: number}, sy: {type: number} }
   /agent/gui/render/setScale:
     post:
+      summary: Set render scale
+      description: Sets the render scale factors (sx, sy) for subsequent draw operations.
       operationId: renderSetScale
       requestBody:
         required: true
@@ -307,6 +351,8 @@ paths:
         '200': { $ref: '#/components/responses/Ok' }
   /agent/gui/render/getDrawColor:
     post:
+      summary: Query draw color
+      description: Returns the current draw color used by primitive operations.
       operationId: renderGetDrawColor
       requestBody:
         required: true
@@ -323,6 +369,8 @@ paths:
                 properties: { color: { type: integer, description: ARGB 0xAARRGGBB } }
   /agent/gui/render/setDrawColor:
     post:
+      summary: Set draw color
+      description: Sets the renderer’s draw color for subsequent primitive operations.
       operationId: renderSetDrawColor
       requestBody:
         required: true
@@ -333,6 +381,8 @@ paths:
         '200': { $ref: '#/components/responses/Ok' }
   /agent/gui/render/getViewport:
     post:
+      summary: Query viewport
+      description: Returns the renderer’s current viewport rectangle.
       operationId: renderGetViewport
       requestBody:
         required: true
@@ -349,6 +399,8 @@ paths:
                 properties: { x: {type: integer}, y: {type: integer}, width: {type: integer}, height: {type: integer} }
   /agent/gui/render/setViewport:
     post:
+      summary: Set viewport
+      description: Sets the renderer’s viewport rectangle.
       operationId: renderSetViewport
       requestBody:
         required: true
@@ -367,6 +419,8 @@ paths:
         '200': { $ref: '#/components/responses/Ok' }
   /agent/gui/render/getClipRect:
     post:
+      summary: Query clip rect
+      description: Returns the current clip rectangle; drawing outside it is clipped.
       operationId: renderGetClipRect
       requestBody:
         required: true
@@ -383,6 +437,8 @@ paths:
                 properties: { x: {type: integer}, y: {type: integer}, width: {type: integer}, height: {type: integer} }
   /agent/gui/render/setClipRect:
     post:
+      summary: Set clip rect
+      description: Sets the renderer’s clip rectangle.
       operationId: renderSetClipRect
       requestBody:
         required: true
@@ -401,6 +457,8 @@ paths:
         '200': { $ref: '#/components/responses/Ok' }
   /agent/gui/render/disableClipRect:
     post:
+      summary: Disable clip rect
+      description: Disables clipping; subsequent draws are not clipped.
       operationId: renderDisableClipRect
       requestBody:
         required: true
@@ -411,6 +469,8 @@ paths:
         '200': { $ref: '#/components/responses/Ok' }
   /agent/gui/drawRectangle:
     post:
+      summary: Draw filled rectangle
+      description: Draws a filled rectangle with the given color at the specified position.
       operationId: drawRectangle
       requestBody:
         required: true
@@ -422,6 +482,8 @@ paths:
         '200': { $ref: '#/components/responses/Ok' }
   /agent/gui/drawLine:
     post:
+      summary: Draw line
+      description: Draws a straight line between two points using the current draw color.
       operationId: drawLine
       requestBody:
         required: true
@@ -433,6 +495,8 @@ paths:
         '200': { $ref: '#/components/responses/Ok' }
   /agent/gui/drawCircleFilled:
     post:
+      summary: Draw filled circle
+      description: Draws a filled circle using software rasterization.
       operationId: drawCircleFilled
       requestBody:
         required: true
@@ -444,6 +508,8 @@ paths:
         '200': { $ref: '#/components/responses/Ok' }
   /agent/gui/drawText:
     post:
+      summary: Draw text (SDL_ttf)
+      description: Renders UTF‑8 text to the renderer using a TrueType font when SDL_ttf is available.
       operationId: drawText
       requestBody:
         required: true
@@ -456,6 +522,8 @@ paths:
         '400': { $ref: '#/components/responses/Error' }
   /agent/gui/captureEvent:
     post:
+      summary: Capture input event
+      description: Polls or waits for an input event and returns it if available.
       operationId: captureEvent
       requestBody:
         required: true
@@ -475,6 +543,8 @@ paths:
                     $ref: '#/components/schemas/Event'
   /agent/gui/clipboard/get:
     post:
+      summary: Get clipboard text
+      description: Reads the current clipboard text.
       operationId: clipboardGet
       requestBody:
         required: true
@@ -493,6 +563,8 @@ paths:
                   text: { type: string }
   /agent/gui/clipboard/set:
     post:
+      summary: Set clipboard text
+      description: Writes the given text to the clipboard.
       operationId: clipboardSet
       requestBody:
         required: true
@@ -508,6 +580,8 @@ paths:
         '200': { $ref: '#/components/responses/Ok' }
   /agent/gui/input/getKeyboardState:
     post:
+      summary: Get keyboard modifiers
+      description: Returns the current state of modifier keys (shift, ctrl, alt, gui).
       operationId: getKeyboardState
       requestBody:
         required: true
@@ -532,6 +606,8 @@ paths:
                       gui: { type: boolean }
   /agent/gui/input/getMouseState:
     post:
+      summary: Get mouse state
+      description: Returns the current mouse position and pressed buttons.
       operationId: getMouseState
       requestBody:
         required: true
@@ -552,6 +628,8 @@ paths:
                   buttons: { type: array, items: { type: integer } }
   /agent/gui/display/list:
     get:
+      summary: List displays
+      description: Returns the available video displays and their names.
       operationId: listDisplays
       responses:
         '200':
@@ -570,6 +648,8 @@ paths:
                         name: { type: string }
   /agent/gui/display/getInfo:
     post:
+      summary: Get display bounds
+      description: Returns the pixel bounds of a display by index.
       operationId: getDisplayInfo
       requestBody:
         required: true
@@ -593,6 +673,8 @@ paths:
                     properties: { x: {type: integer}, y: {type: integer}, width: {type: integer}, height: {type: integer} }
   /agent/gui/texture/load:
     post:
+      summary: Load texture
+      description: Loads a texture from disk (BMP or common formats when SDL_image is present) and assigns a logical id.
       operationId: textureLoad
       requestBody:
         required: true
@@ -609,6 +691,8 @@ paths:
         '200': { $ref: '#/components/responses/Ok' }
   /agent/gui/texture/draw:
     post:
+      summary: Draw texture
+      description: Draws a previously loaded texture at a position; optional scaling via width/height.
       operationId: textureDraw
       requestBody:
         required: true
@@ -628,6 +712,8 @@ paths:
         '200': { $ref: '#/components/responses/Ok' }
   /agent/gui/texture/free:
     post:
+      summary: Free texture
+      description: Releases a previously loaded texture by id.
       operationId: textureFree
       requestBody:
         required: true
@@ -794,6 +880,8 @@ components:
       required: [type]
   /agent/gui/texture/drawTiled:
     post:
+      summary: Draw tiled texture
+      description: Fills a region by repeating a texture in a tile grid.
       operationId: textureDrawTiled
       requestBody:
         required: true
@@ -815,6 +903,8 @@ components:
         '200': { $ref: '#/components/responses/Ok' }
   /agent/gui/texture/drawRotated:
     post:
+      summary: Draw rotated texture
+      description: Draws a texture rotated by an angle (degrees) around an optional center.
       operationId: textureDrawRotated
       requestBody:
         required: true
