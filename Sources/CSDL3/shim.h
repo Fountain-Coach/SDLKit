@@ -66,6 +66,13 @@ typedef struct SDLKit_Event {
   static inline int SDLKit_GetModMask(void) {
     return (int)SDL_GetModState();
   }
+
+  // Displays (best-effort wrappers; API may evolve across SDL3 releases)
+  static inline int SDLKit_GetNumVideoDisplays(void) { return SDL_GetNumVideoDisplays(); }
+  static inline const char *SDLKit_GetDisplayName(int index) { return SDL_GetDisplayName(index); }
+  static inline int SDLKit_GetDisplayBounds(int index, int *x, int *y, int *w, int *h) {
+    SDL_Rect r; if (SDL_GetDisplayBounds(index, &r) != 0) return -1; if (x) *x = r.x; if (y) *y = r.y; if (w) *w = r.w; if (h) *h = r.h; return 0;
+  }
   // Renderer creation API evolves; accept a flags arg but ignore when not needed.
   static inline SDL_Renderer *SDLKit_CreateRenderer(SDL_Window *window, uint32_t flags) {
     (void)flags;
@@ -180,6 +187,10 @@ typedef struct SDLKit_Event {
   // Input state
   void SDLKit_GetMouseState(int *x, int *y, unsigned int *buttons);
   int SDLKit_GetModMask(void);
+  // Displays
+  int SDLKit_GetNumVideoDisplays(void);
+  const char *SDLKit_GetDisplayName(int index);
+  int SDLKit_GetDisplayBounds(int index, int *x, int *y, int *w, int *h);
   SDL_Renderer *SDLKit_CreateRenderer(SDL_Window *window, uint32_t flags);
   int SDLKit_SetRenderDrawColor(SDL_Renderer *renderer, uint8_t r, uint8_t g, uint8_t b, uint8_t a);
   int SDLKit_RenderClear(SDL_Renderer *renderer);

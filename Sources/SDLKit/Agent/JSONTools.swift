@@ -37,6 +37,8 @@ public struct SDLKitJSONAgent {
         case clipboardSet = "/agent/gui/clipboard/set"
         case inputKeyboard = "/agent/gui/input/getKeyboardState"
         case inputMouse = "/agent/gui/input/getMouseState"
+        case displayList = "/agent/gui/display/list"
+        case displayGetInfo = "/agent/gui/display/getInfo"
     }
 
     public func handle(path: String, body: Data) -> Data {
@@ -174,6 +176,15 @@ public struct SDLKitJSONAgent {
                 _ = try agent.getWindowInfo(windowId: req.window_id)
                 let s = try SDLInput.getMouseState()
                 return try JSONEncoder().encode(s)
+            case .displayList:
+                let list = try SDLDisplay.list()
+                struct R: Codable { let displays: [SDLDisplay.Summary] }
+                return try JSONEncoder().encode(R(displays: list))
+            case .displayGetInfo:
+                let req = try JSONDecoder().decode(DisplayIndexReq.self, from: body)
+                let b = try SDLDisplay.getInfo(index: req.index)
+                struct R: Codable { let bounds: SDLDisplay.Bounds }
+                return try JSONEncoder().encode(R(bounds: b))
             }
         } catch let e as AgentError {
             return Self.errorJSON(from: e)
@@ -276,6 +287,7 @@ public struct SDLKitJSONAgent {
     }
     private struct EventReq: Codable { let window_id: Int; let timeout_ms: Int? }
     private struct ClipboardSetReq: Codable { let window_id: Int; let text: String }
+    private struct DisplayIndexReq: Codable { let index: Int }
 
     private struct JEvent: Codable {
         let type: String
