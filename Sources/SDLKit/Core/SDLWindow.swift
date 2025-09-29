@@ -178,9 +178,7 @@ public final class SDLWindow {
 enum SDLCore {
     case shared
 
-    #if canImport(CSDL3) && !HEADLESS_CI
     private static var initialized = false
-    #endif
 
     func ensureInitialized() throws {
         #if canImport(CSDL3) && !HEADLESS_CI
@@ -197,9 +195,22 @@ enum SDLCore {
         #endif
     }
 
+    func shutdown() {
+        #if canImport(CSDL3) && !HEADLESS_CI
+        if Self.initialized {
+            SDLKit_Quit()
+        }
+        #endif
+        Self.initialized = false
+    }
+
     #if canImport(CSDL3) && !HEADLESS_CI
     static func lastError() -> String { String(cString: SDLKit_GetError()) }
     #else
     static func lastError() -> String { "SDL unavailable" }
     #endif
+
+    static func _testingSetInitialized(_ value: Bool) {
+        Self.initialized = value
+    }
 }
