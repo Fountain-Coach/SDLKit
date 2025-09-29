@@ -149,6 +149,48 @@ public final class SDLKitGUIAgent {
         bundle.renderer.freeTexture(id: id)
     }
 
+    // MARK: - Render state accessors
+    public func getRenderOutputSize(windowId: Int) throws -> (width: Int, height: Int) {
+        guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }
+        return try bundle.renderer.getOutputSize()
+    }
+    public func getRenderScale(windowId: Int) throws -> (sx: Float, sy: Float) {
+        guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }
+        return try bundle.renderer.getScale()
+    }
+    public func setRenderScale(windowId: Int, sx: Float, sy: Float) throws {
+        guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }
+        try bundle.renderer.setScale(sx: sx, sy: sy)
+    }
+    public func getRenderDrawColor(windowId: Int) throws -> UInt32 {
+        guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }
+        return try bundle.renderer.getDrawColor()
+    }
+    public func setRenderDrawColor(windowId: Int, color: UInt32) throws {
+        guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }
+        try bundle.renderer.setDrawColor(color)
+    }
+    public func getRenderViewport(windowId: Int) throws -> (x: Int, y: Int, width: Int, height: Int) {
+        guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }
+        return try bundle.renderer.getViewport()
+    }
+    public func setRenderViewport(windowId: Int, x: Int, y: Int, width: Int, height: Int) throws {
+        guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }
+        try bundle.renderer.setViewport(x: x, y: y, width: width, height: height)
+    }
+    public func getRenderClipRect(windowId: Int) throws -> (x: Int, y: Int, width: Int, height: Int) {
+        guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }
+        return try bundle.renderer.getClipRect()
+    }
+    public func setRenderClipRect(windowId: Int, x: Int, y: Int, width: Int, height: Int) throws {
+        guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }
+        try bundle.renderer.setClipRect(x: x, y: y, width: width, height: height)
+    }
+    public func disableRenderClipRect(windowId: Int) throws {
+        guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }
+        try bundle.renderer.disableClipRect()
+    }
+
     // New tools: clear, line, circle
     public func clear(windowId: Int, color: UInt32) throws {
         guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }

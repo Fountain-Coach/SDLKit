@@ -257,6 +257,158 @@ paths:
               $ref: '#/components/schemas/WindowOnlyRequest'
       responses:
         '200': { $ref: '#/components/responses/Ok' }
+  /agent/gui/render/getOutputSize:
+    post:
+      operationId: renderGetOutputSize
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/WindowOnlyRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: { width: {type: integer}, height: {type: integer} }
+  /agent/gui/render/getScale:
+    post:
+      operationId: renderGetScale
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/WindowOnlyRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: { sx: {type: number}, sy: {type: number} }
+  /agent/gui/render/setScale:
+    post:
+      operationId: renderSetScale
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                window_id: { type: integer, minimum: 1 }
+                sx: { type: number }
+                sy: { type: number }
+              required: [window_id, sx, sy]
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /agent/gui/render/getDrawColor:
+    post:
+      operationId: renderGetDrawColor
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/WindowOnlyRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: { color: { type: integer, description: ARGB 0xAARRGGBB } }
+  /agent/gui/render/setDrawColor:
+    post:
+      operationId: renderSetDrawColor
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ColorRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /agent/gui/render/getViewport:
+    post:
+      operationId: renderGetViewport
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/WindowOnlyRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: { x: {type: integer}, y: {type: integer}, width: {type: integer}, height: {type: integer} }
+  /agent/gui/render/setViewport:
+    post:
+      operationId: renderSetViewport
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                window_id: { type: integer, minimum: 1 }
+                x: { type: integer }
+                y: { type: integer }
+                width: { type: integer }
+                height: { type: integer }
+              required: [window_id, x, y, width, height]
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /agent/gui/render/getClipRect:
+    post:
+      operationId: renderGetClipRect
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/WindowOnlyRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: { x: {type: integer}, y: {type: integer}, width: {type: integer}, height: {type: integer} }
+  /agent/gui/render/setClipRect:
+    post:
+      operationId: renderSetClipRect
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                window_id: { type: integer, minimum: 1 }
+                x: { type: integer }
+                y: { type: integer }
+                width: { type: integer }
+                height: { type: integer }
+              required: [window_id, x, y, width, height]
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /agent/gui/render/disableClipRect:
+    post:
+      operationId: renderDisableClipRect
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/WindowOnlyRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
   /agent/gui/drawRectangle:
     post:
       operationId: drawRectangle

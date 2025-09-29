@@ -87,6 +87,16 @@ typedef struct SDLKit_Event {
     return SDL_RenderFillRect(renderer, rect);
   }
   static inline void SDLKit_RenderPresent(SDL_Renderer *renderer) { SDL_RenderPresent(renderer); }
+  // Render state helpers
+  static inline void SDLKit_GetRenderOutputSize(SDL_Renderer *renderer, int *w, int *h) { SDL_GetRenderOutputSize(renderer, w, h); }
+  static inline void SDLKit_GetRenderScale(SDL_Renderer *renderer, float *sx, float *sy) { SDL_GetRenderScale(renderer, sx, sy); }
+  static inline int SDLKit_SetRenderScale(SDL_Renderer *renderer, float sx, float sy) { return SDL_SetRenderScale(renderer, sx, sy); }
+  static inline void SDLKit_GetRenderDrawColor(SDL_Renderer *renderer, uint8_t *r, uint8_t *g, uint8_t *b, uint8_t *a) { SDL_GetRenderDrawColor(renderer, r, g, b, a); }
+  static inline int SDLKit_SetRenderViewport(SDL_Renderer *renderer, int x, int y, int w, int h) { SDL_Rect r = { x, y, w, h }; return SDL_SetRenderViewport(renderer, &r); }
+  static inline void SDLKit_GetRenderViewport(SDL_Renderer *renderer, int *x, int *y, int *w, int *h) { SDL_Rect r; SDL_GetRenderViewport(renderer, &r); if (x) *x = r.x; if (y) *y = r.y; if (w) *w = r.w; if (h) *h = r.h; }
+  static inline int SDLKit_SetRenderClipRect(SDL_Renderer *renderer, int x, int y, int w, int h) { SDL_Rect r = { x, y, w, h }; return SDL_SetRenderClipRect(renderer, &r); }
+  static inline int SDLKit_DisableRenderClipRect(SDL_Renderer *renderer) { return SDL_SetRenderClipRect(renderer, NULL); }
+  static inline void SDLKit_GetRenderClipRect(SDL_Renderer *renderer, int *x, int *y, int *w, int *h) { SDL_Rect r; SDL_GetRenderClipRect(renderer, &r); if (x) *x = r.x; if (y) *y = r.y; if (w) *w = r.w; if (h) *h = r.h; }
 
   static inline void SDLKit__FillEvent(SDLKit_Event *out, const SDL_Event *ev) {
     out->type = SDLKIT_EVENT_NONE;
@@ -197,6 +207,15 @@ typedef struct SDLKit_Event {
   int SDLKit_RenderClear(SDL_Renderer *renderer);
   int SDLKit_RenderFillRect(SDL_Renderer *renderer, const struct SDL_FRect *rect);
   void SDLKit_RenderPresent(SDL_Renderer *renderer);
+  void SDLKit_GetRenderOutputSize(struct SDL_Renderer *renderer, int *w, int *h);
+  void SDLKit_GetRenderScale(struct SDL_Renderer *renderer, float *sx, float *sy);
+  int SDLKit_SetRenderScale(struct SDL_Renderer *renderer, float sx, float sy);
+  void SDLKit_GetRenderDrawColor(struct SDL_Renderer *renderer, uint8_t *r, uint8_t *g, uint8_t *b, uint8_t *a);
+  int SDLKit_SetRenderViewport(struct SDL_Renderer *renderer, int x, int y, int w, int h);
+  void SDLKit_GetRenderViewport(struct SDL_Renderer *renderer, int *x, int *y, int *w, int *h);
+  int SDLKit_SetRenderClipRect(struct SDL_Renderer *renderer, int x, int y, int w, int h);
+  int SDLKit_DisableRenderClipRect(struct SDL_Renderer *renderer);
+  void SDLKit_GetRenderClipRect(struct SDL_Renderer *renderer, int *x, int *y, int *w, int *h);
   int SDLKit_PollEvent(SDLKit_Event *out);
   int SDLKit_WaitEventTimeout(SDLKit_Event *out, int timeout_ms);
   static inline int SDLKit_TTF_Available(void) { return 0; }

@@ -43,6 +43,16 @@ public struct SDLKitJSONAgent {
         case textureDraw = "/agent/gui/texture/draw"
         case textureFree = "/agent/gui/texture/free"
         case screenshot = "/agent/gui/screenshot/capture"
+        case renderGetOutputSize = "/agent/gui/render/getOutputSize"
+        case renderGetScale = "/agent/gui/render/getScale"
+        case renderSetScale = "/agent/gui/render/setScale"
+        case renderGetDrawColor = "/agent/gui/render/getDrawColor"
+        case renderSetDrawColor = "/agent/gui/render/setDrawColor"
+        case renderGetViewport = "/agent/gui/render/getViewport"
+        case renderSetViewport = "/agent/gui/render/setViewport"
+        case renderGetClipRect = "/agent/gui/render/getClipRect"
+        case renderSetClipRect = "/agent/gui/render/setClipRect"
+        case renderDisableClipRect = "/agent/gui/render/disableClipRect"
     }
 
     public func handle(path: String, body: Data) -> Data {
@@ -204,6 +214,53 @@ public struct SDLKitJSONAgent {
             case .screenshot:
                 // Not implemented yet; keep endpoint present per spec
                 return Self.errorJSON(code: "not_implemented", details: "screenshot not implemented")
+            case .renderGetOutputSize:
+                let req = try JSONDecoder().decode(WindowOnlyReq.self, from: body)
+                let (w, h) = try agent.getRenderOutputSize(windowId: req.window_id)
+                struct R: Codable { let width: Int; let height: Int }
+                return try JSONEncoder().encode(R(width: w, height: h))
+            case .renderGetScale:
+                let req = try JSONDecoder().decode(WindowOnlyReq.self, from: body)
+                let s = try agent.getRenderScale(windowId: req.window_id)
+                struct R: Codable { let sx: Float; let sy: Float }
+                return try JSONEncoder().encode(R(sx: s.sx, sy: s.sy))
+            case .renderSetScale:
+                let req = try JSONDecoder().decode(RenderScaleReq.self, from: body)
+                try agent.setRenderScale(windowId: req.window_id, sx: req.sx, sy: req.sy)
+                return Self.okJSON()
+            case .renderGetDrawColor:
+                let req = try JSONDecoder().decode(WindowOnlyReq.self, from: body)
+                let col = try agent.getRenderDrawColor(windowId: req.window_id)
+                struct R: Codable { let color: UInt32 }
+                return try JSONEncoder().encode(R(color: col))
+            case .renderSetDrawColor:
+                let req = try JSONDecoder().decode(ColorReq.self, from: body)
+                let argb: UInt32
+                if let cstr = req.colorString { argb = (try? SDLColor.parse(cstr)) ?? 0xFFFFFFFF } else { argb = req.color ?? 0xFFFFFFFF }
+                try agent.setRenderDrawColor(windowId: req.window_id, color: argb)
+                return Self.okJSON()
+            case .renderGetViewport:
+                let req = try JSONDecoder().decode(WindowOnlyReq.self, from: body)
+                let v = try agent.getRenderViewport(windowId: req.window_id)
+                struct R: Codable { let x: Int; let y: Int; let width: Int; let height: Int }
+                return try JSONEncoder().encode(R(x: v.x, y: v.y, width: v.width, height: v.height))
+            case .renderSetViewport:
+                let req = try JSONDecoder().decode(RectOnlyReq.self, from: body)
+                try agent.setRenderViewport(windowId: req.window_id, x: req.x, y: req.y, width: req.width, height: req.height)
+                return Self.okJSON()
+            case .renderGetClipRect:
+                let req = try JSONDecoder().decode(WindowOnlyReq.self, from: body)
+                let v = try agent.getRenderClipRect(windowId: req.window_id)
+                struct R: Codable { let x: Int; let y: Int; let width: Int; let height: Int }
+                return try JSONEncoder().encode(R(x: v.x, y: v.y, width: v.width, height: v.height))
+            case .renderSetClipRect:
+                let req = try JSONDecoder().decode(RectOnlyReq.self, from: body)
+                try agent.setRenderClipRect(windowId: req.window_id, x: req.x, y: req.y, width: req.width, height: req.height)
+                return Self.okJSON()
+            case .renderDisableClipRect:
+                let req = try JSONDecoder().decode(WindowOnlyReq.self, from: body)
+                try agent.disableRenderClipRect(windowId: req.window_id)
+                return Self.okJSON()
             }
         } catch let e as AgentError {
             return Self.errorJSON(from: e)
@@ -310,6 +367,8 @@ public struct SDLKitJSONAgent {
     private struct TextureLoadReq: Codable { let window_id: Int; let id: String; let path: String }
     private struct TextureDrawReq: Codable { let window_id: Int; let id: String; let x: Int; let y: Int; let width: Int?; let height: Int? }
     private struct TextureFreeReq: Codable { let window_id: Int; let id: String }
+    private struct RenderScaleReq: Codable { let window_id: Int; let sx: Float; let sy: Float }
+    private struct RectOnlyReq: Codable { let window_id: Int; let x: Int; let y: Int; let width: Int; let height: Int }
 
     private struct JEvent: Codable {
         let type: String

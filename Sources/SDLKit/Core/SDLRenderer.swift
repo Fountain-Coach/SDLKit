@@ -173,6 +173,111 @@ public final class SDLRenderer {
         #endif
     }
 
+    // MARK: - Render state queries
+    public func getOutputSize() throws -> (width: Int, height: Int) {
+        #if canImport(CSDL3) && !HEADLESS_CI
+        guard let r = handle else { throw AgentError.internalError("Renderer not created") }
+        var w: Int32 = 0, h: Int32 = 0
+        SDLKit_GetRenderOutputSize(r, &w, &h)
+        return (Int(w), Int(h))
+        #else
+        throw AgentError.sdlUnavailable
+        #endif
+    }
+
+    public func getScale() throws -> (sx: Float, sy: Float) {
+        #if canImport(CSDL3) && !HEADLESS_CI
+        guard let r = handle else { throw AgentError.internalError("Renderer not created") }
+        var sx: Float = 0, sy: Float = 0
+        SDLKit_GetRenderScale(r, &sx, &sy)
+        return (sx, sy)
+        #else
+        throw AgentError.sdlUnavailable
+        #endif
+    }
+
+    public func setScale(sx: Float, sy: Float) throws {
+        #if canImport(CSDL3) && !HEADLESS_CI
+        guard let r = handle else { throw AgentError.internalError("Renderer not created") }
+        if SDLKit_SetRenderScale(r, sx, sy) != 0 { throw AgentError.internalError(SDLCore.lastError()) }
+        #else
+        throw AgentError.sdlUnavailable
+        #endif
+    }
+
+    public func getDrawColor() throws -> UInt32 {
+        #if canImport(CSDL3) && !HEADLESS_CI
+        guard let r = handle else { throw AgentError.internalError("Renderer not created") }
+        var rr: UInt8 = 0, gg: UInt8 = 0, bb: UInt8 = 0, aa: UInt8 = 0
+        SDLKit_GetRenderDrawColor(r, &rr, &gg, &bb, &aa)
+        return (UInt32(aa) << 24) | (UInt32(rr) << 16) | (UInt32(gg) << 8) | UInt32(bb)
+        #else
+        throw AgentError.sdlUnavailable
+        #endif
+    }
+
+    public func setDrawColor(_ color: UInt32) throws {
+        #if canImport(CSDL3) && !HEADLESS_CI
+        guard let r = handle else { throw AgentError.internalError("Renderer not created") }
+        let a = UInt8((color >> 24) & 0xFF)
+        let rr = UInt8((color >> 16) & 0xFF)
+        let gg = UInt8((color >> 8) & 0xFF)
+        let bb = UInt8(color & 0xFF)
+        if SDLKit_SetRenderDrawColor(r, rr, gg, bb, a) != 0 { throw AgentError.internalError(SDLCore.lastError()) }
+        #else
+        throw AgentError.sdlUnavailable
+        #endif
+    }
+
+    public func getViewport() throws -> (x: Int, y: Int, width: Int, height: Int) {
+        #if canImport(CSDL3) && !HEADLESS_CI
+        guard let r = handle else { throw AgentError.internalError("Renderer not created") }
+        var x: Int32 = 0, y: Int32 = 0, w: Int32 = 0, h: Int32 = 0
+        SDLKit_GetRenderViewport(r, &x, &y, &w, &h)
+        return (Int(x), Int(y), Int(w), Int(h))
+        #else
+        throw AgentError.sdlUnavailable
+        #endif
+    }
+
+    public func setViewport(x: Int, y: Int, width: Int, height: Int) throws {
+        #if canImport(CSDL3) && !HEADLESS_CI
+        guard let r = handle else { throw AgentError.internalError("Renderer not created") }
+        if SDLKit_SetRenderViewport(r, Int32(x), Int32(y), Int32(width), Int32(height)) != 0 { throw AgentError.internalError(SDLCore.lastError()) }
+        #else
+        throw AgentError.sdlUnavailable
+        #endif
+    }
+
+    public func getClipRect() throws -> (x: Int, y: Int, width: Int, height: Int) {
+        #if canImport(CSDL3) && !HEADLESS_CI
+        guard let r = handle else { throw AgentError.internalError("Renderer not created") }
+        var x: Int32 = 0, y: Int32 = 0, w: Int32 = 0, h: Int32 = 0
+        SDLKit_GetRenderClipRect(r, &x, &y, &w, &h)
+        return (Int(x), Int(y), Int(w), Int(h))
+        #else
+        throw AgentError.sdlUnavailable
+        #endif
+    }
+
+    public func setClipRect(x: Int, y: Int, width: Int, height: Int) throws {
+        #if canImport(CSDL3) && !HEADLESS_CI
+        guard let r = handle else { throw AgentError.internalError("Renderer not created") }
+        if SDLKit_SetRenderClipRect(r, Int32(x), Int32(y), Int32(width), Int32(height)) != 0 { throw AgentError.internalError(SDLCore.lastError()) }
+        #else
+        throw AgentError.sdlUnavailable
+        #endif
+    }
+
+    public func disableClipRect() throws {
+        #if canImport(CSDL3) && !HEADLESS_CI
+        guard let r = handle else { throw AgentError.internalError("Renderer not created") }
+        if SDLKit_DisableRenderClipRect(r) != 0 { throw AgentError.internalError(SDLCore.lastError()) }
+        #else
+        throw AgentError.sdlUnavailable
+        #endif
+    }
+
     public func drawText(_ text: String, x: Int, y: Int, color: UInt32, fontPath: String, size: Int) throws {
         #if canImport(CSDL3) && !HEADLESS_CI
         guard let r = handle else { throw AgentError.internalError("Renderer not created") }
