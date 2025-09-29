@@ -792,3 +792,46 @@ components:
         key: { type: string, nullable: true }
         button: { type: integer, nullable: true }
       required: [type]
+  /agent/gui/texture/drawTiled:
+    post:
+      operationId: textureDrawTiled
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                window_id: { type: integer, minimum: 1 }
+                id: { type: string }
+                x: { type: integer }
+                y: { type: integer }
+                width: { type: integer }
+                height: { type: integer }
+                tileWidth: { type: integer, minimum: 1 }
+                tileHeight: { type: integer, minimum: 1 }
+              required: [window_id, id, x, y, width, height, tileWidth, tileHeight]
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /agent/gui/texture/drawRotated:
+    post:
+      operationId: textureDrawRotated
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                window_id: { type: integer, minimum: 1 }
+                id: { type: string }
+                x: { type: integer }
+                y: { type: integer }
+                width: { type: integer, nullable: true }
+                height: { type: integer, nullable: true }
+                angle: { type: number, description: degrees }
+                cx: { type: number, nullable: true, description: rotation center X }
+                cy: { type: number, nullable: true, description: rotation center Y }
+              required: [window_id, id, x, y, angle]
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }

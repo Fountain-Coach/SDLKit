@@ -21,6 +21,14 @@ let package = Package(
             ]
         ),
         .systemLibrary(
+            name: "CSDL3IMAGE",
+            pkgConfig: "sdl3-image",
+            providers: [
+                .brew(["sdl3_image"]),
+                .apt(["libsdl3-image-dev"])
+            ]
+        ),
+        .systemLibrary(
             name: "CSDL3TTF",
             pkgConfig: "sdl3-ttf",
             providers: [
@@ -30,7 +38,7 @@ let package = Package(
         ),
         .target(
             name: "SDLKit",
-            dependencies: ["CSDL3"],
+            dependencies: ["CSDL3", .target(name: "CSDL3IMAGE", condition: .when(platforms: [.macOS, .linux]))],
             path: "Sources/SDLKit",
             cSettings: {
                 var flags: [CSetting] = []

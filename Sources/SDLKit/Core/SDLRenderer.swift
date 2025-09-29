@@ -142,7 +142,15 @@ public final class SDLRenderer {
         #if canImport(CSDL3) && !HEADLESS_CI
         guard let r = handle else { throw AgentError.internalError("Renderer not created") }
         if let existing = textures[id] { SDLKit_DestroyTexture(existing) }
-        guard let surf = SDLKit_LoadBMP(path) else { throw AgentError.internalError(SDLCore.lastError()) }
+        // Try SDL_image if available for non-BMP formats; fall back to BMP
+        #if canImport(CSDL3IMAGE)
+        let ext = (path as NSString).pathExtension.lowercased()
+        let useIMG = ext != "bmp"
+        let surf: UnsafeMutablePointer<SDL_Surface>? = useIMG ? SDLKit_IMG_Load(path) : SDLKit_LoadBMP(path)
+        #else
+        let surf: UnsafeMutablePointer<SDL_Surface>? = SDLKit_LoadBMP(path)
+        #endif
+        guard let surf else { throw AgentError.internalError(SDLCore.lastError()) }
         defer { SDLKit_DestroySurface(surf) }
         guard let tex = SDLKit_CreateTextureFromSurface(r, surf) else { throw AgentError.internalError(SDLCore.lastError()) }
         textures[id] = tex

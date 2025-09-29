@@ -42,6 +42,8 @@ public struct SDLKitJSONAgent {
         case textureLoad = "/agent/gui/texture/load"
         case textureDraw = "/agent/gui/texture/draw"
         case textureFree = "/agent/gui/texture/free"
+        case textureDrawTiled = "/agent/gui/texture/drawTiled"
+        case textureDrawRotated = "/agent/gui/texture/drawRotated"
         case screenshot = "/agent/gui/screenshot/capture"
         case renderGetOutputSize = "/agent/gui/render/getOutputSize"
         case renderGetScale = "/agent/gui/render/getScale"
@@ -211,6 +213,22 @@ public struct SDLKitJSONAgent {
                 let req = try JSONDecoder().decode(TextureFreeReq.self, from: body)
                 agent.textureFree(windowId: req.window_id, id: req.id)
                 return Self.okJSON()
+            case .textureDrawTiled:
+                let req = try JSONDecoder().decode(TextureDrawTiledReq.self, from: body)
+                // Implement tiled by repeated drawTexture
+                let tilesX = max(1, req.width / req.tileWidth)
+                let tilesY = max(1, req.height / req.tileHeight)
+                for ty in 0..<tilesY {
+                    for tx in 0..<tilesX {
+                        let dx = req.x + tx * req.tileWidth
+                        let dy = req.y + ty * req.tileHeight
+                        try agent.textureDraw(windowId: req.window_id, id: req.id, x: dx, y: dy, width: req.tileWidth, height: req.tileHeight)
+                    }
+                }
+                return Self.okJSON()
+            case .textureDrawRotated:
+                // Placeholder: not implemented yet
+                return Self.errorJSON(code: "not_implemented", details: "texture rotated not implemented")
             case .screenshot:
                 let req = try JSONDecoder().decode(WindowOnlyReq.self, from: body)
                 let shot = try agent.screenshotRaw(windowId: req.window_id)
@@ -368,6 +386,7 @@ public struct SDLKitJSONAgent {
     private struct TextureLoadReq: Codable { let window_id: Int; let id: String; let path: String }
     private struct TextureDrawReq: Codable { let window_id: Int; let id: String; let x: Int; let y: Int; let width: Int?; let height: Int? }
     private struct TextureFreeReq: Codable { let window_id: Int; let id: String }
+    private struct TextureDrawTiledReq: Codable { let window_id: Int; let id: String; let x: Int; let y: Int; let width: Int; let height: Int; let tileWidth: Int; let tileHeight: Int }
     private struct RenderScaleReq: Codable { let window_id: Int; let sx: Float; let sy: Float }
     private struct RectOnlyReq: Codable { let window_id: Int; let x: Int; let y: Int; let width: Int; let height: Int }
 
