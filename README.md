@@ -7,8 +7,8 @@ SDLKit is a Swift Package that wraps SDL3 and exposes a Swift‑friendly API and
 
 ## Status
 
-- Pre‑alpha skeleton. Compiles as a SwiftPM package, but no SDL calls are wired yet.
-- Public API and agent contract are drafted; most methods throw `notImplemented` until wired.
+- Alpha: Core window + renderer wrappers are wired to SDL3 when available; headless builds remain supported via `-DHEADLESS_CI`.
+- JSON Agent implements the documented tools (window controls, primitives, batches, textures, optional text, events, clipboard, input, display, screenshot).
 - See `AGENTS.md:1` for the official agent contract and repo guidelines.
 
 ## Project Structure
@@ -156,9 +156,14 @@ Errors are returned as `{ "error": { "code": string, "details"?: string } }` wit
 
 ### OpenAPI (source of truth)
 
-- The canonical OpenAPI lives at repo root: `sdlkit.gui.v1.yaml` (or `openapi.yaml`).
-- The agent serves this file if present (env `SDLKIT_OPENAPI_PATH` can override), else falls back to an embedded spec.
-- JSON mirror is available at `/openapi.json`.
+- Canonical spec: repo root `sdlkit.gui.v1.yaml` (or `openapi.yaml`). A copy also exists under `openapi/sdlkit.gui.v1.yaml` for convenience.
+- Discovery order for serving docs:
+  - `SDLKIT_OPENAPI_PATH` (YAML or JSON)
+  - `sdlkit.gui.v1.yaml` or `openapi.yaml` at repo root
+  - `openapi/sdlkit.gui.v1.yaml`
+- Served endpoints:
+  - `GET /openapi.yaml` → YAML (external file if present, else embedded)
+  - `GET /openapi.json` → JSON mirror. If an external JSON file is present (via env or common paths), it is served; otherwise a generated JSON from the embedded spec is returned.
 
 ### Example HTTP Server (separate)
 

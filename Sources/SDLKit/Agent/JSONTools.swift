@@ -71,11 +71,13 @@ public struct SDLKitJSONAgent {
                 if let ext = Self.loadExternalOpenAPIYAML() { return ext }
                 return Data(SDLKitOpenAPI.yaml.utf8)
             case .openapiJSON:
+                if let ext = Self.loadExternalOpenAPIJSON() { return ext }
                 return SDLKitOpenAPI.json
             case .health:
                 return try JSONEncoder().encode(["ok": true])
             case .version:
-                return try JSONEncoder().encode(["agent": SDLKitOpenAPI.agentVersion, "openapi": SDLKitOpenAPI.specVersion])
+                let specVer = Self.externalOpenAPIVersion() ?? SDLKitOpenAPI.specVersion
+                return try JSONEncoder().encode(["agent": SDLKitOpenAPI.agentVersion, "openapi": specVer])
             case .open:
                 let req = try JSONDecoder().decode(OpenWindowReq.self, from: body)
                 let id = try agent.openWindow(title: req.title, width: req.width, height: req.height)
@@ -310,7 +312,10 @@ public struct SDLKitJSONAgent {
     private static func loadExternalOpenAPIYAML() -> Data? {
         let env = ProcessInfo.processInfo.environment
         if let p = env["SDLKIT_OPENAPI_PATH"], !p.isEmpty, FileManager.default.fileExists(atPath: p) {
-            return try? Data(contentsOf: URL(fileURLWithPath: p))
+            let lower = p.lowercased()
+            if lower.hasSuffix(".yaml") || lower.hasSuffix(".yml") {
+                return try? Data(contentsOf: URL(fileURLWithPath: p))
+            }
         }
         // Try repo-root defaults
         let candidates = [
@@ -321,6 +326,57 @@ public struct SDLKitJSONAgent {
         for rel in candidates {
             if FileManager.default.fileExists(atPath: rel) {
                 if let data = try? Data(contentsOf: URL(fileURLWithPath: rel)) { return data }
+            }
+        }
+        return nil
+    }
+
+    private static func loadExternalOpenAPIJSON() -> Data? {
+        let env = ProcessInfo.processInfo.environment
+        if let p = env["SDLKIT_OPENAPI_PATH"], !p.isEmpty, FileManager.default.fileExists(atPath: p) {
+            let lower = p.lowercased()
+            if lower.hasSuffix(".json") {
+                return try? Data(contentsOf: URL(fileURLWithPath: p))
+            }
+        }
+        let candidates = [
+            "openapi.json",
+            "sdlkit.gui.v1.json",
+            "openapi/openapi.json",
+            "openapi/sdlkit.gui.v1.json"
+        ]
+        for rel in candidates {
+            if FileManager.default.fileExists(atPath: rel) {
+                if let data = try? Data(contentsOf: URL(fileURLWithPath: rel)) { return data }
+            }
+        }
+        return nil
+    }
+
+    private static func externalOpenAPIVersion() -> String? {
+        // Prefer JSON (parse reliably)
+        if let json = loadExternalOpenAPIJSON() {
+            if let obj = try? JSONSerialization.jsonObject(with: json) as? [String: Any],
+               let info = obj["info"] as? [String: Any],
+               let ver = info["version"] as? String { return ver }
+        }
+        // Fallback: try YAML and extract info.version between 'info:' and 'paths:'
+        if let yaml = loadExternalOpenAPIYAML(), let text = String(data: yaml, encoding: .utf8) {
+            // Find the 'info:' block
+            let infoAnchor = text.range(of: "\ninfo:") ?? text.range(of: "^info:", options: .regularExpression)
+            if let infoAnchor {
+                let afterInfo = text[infoAnchor.upperBound...]
+                let endRange = afterInfo.range(of: "\npaths:")
+                let block = endRange != nil ? afterInfo[..<endRange!.lowerBound] : afterInfo[afterInfo.startIndex...]
+                if let verLine = block.range(of: "\n\\s*version:\\s*([^\n#]+)", options: .regularExpression) {
+                    let line = block[verLine]
+                    if let colon = line.range(of: ":") {
+                        var v = line[colon.upperBound...].trimmingCharacters(in: .whitespaces)
+                        if v.hasPrefix("\"") && v.hasSuffix("\"") { v.removeFirst(); v.removeLast() }
+                        if v.hasPrefix("'") && v.hasSuffix("'") { v.removeFirst(); v.removeLast() }
+                        return String(v)
+                    }
+                }
             }
         }
         return nil
