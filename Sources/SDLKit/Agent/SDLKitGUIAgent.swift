@@ -14,10 +14,10 @@ open class SDLKitGUIAgent {
     @discardableResult
     public func openWindow(title: String, width: Int, height: Int) throws -> Int {
         guard width > 0, height > 0 else { throw AgentError.invalidArgument("width/height must be > 0") }
-        let limit = SDLKitConfig.maxWindows
-        guard windows.count < limit else {
-            SDLLogger.warn("SDLKit.Agent", "Refusing to open window: limit=\(limit) current=\(windows.count)")
-            throw AgentError.invalidArgument("Window limit of \(limit) reached")
+        let windowLimit = SDLKitConfig.maxWindows
+        guard windows.count < windowLimit else {
+            SDLLogger.warn("SDLKit.Agent", "Refusing to open window: limit=\(windowLimit) current=\(windows.count)")
+            throw AgentError.invalidArgument("Window limit of \(windowLimit) reached")
         }
         guard SDLKitConfig.guiEnabled else { throw AgentError.sdlUnavailable }
         let limit = SDLKitConfig.maxWindows
