@@ -1,5 +1,5 @@
 import Foundation
-#if !HEADLESS_CI && canImport(CSDL3)
+#if canImport(CSDL3)
 import CSDL3
 #endif
 #if !HEADLESS_CI && canImport(CSDL3IMAGE)
@@ -10,9 +10,10 @@ import CSDL3IMAGE
 public final class SDLRenderer {
     public let width: Int
     public let height: Int
-    #if canImport(CSDL3) && !HEADLESS_CI
-    var handle: UnsafeMutablePointer<SDL_Renderer>?
-    var textures: [String: UnsafeMutablePointer<SDL_Texture>] = [:]
+    internal private(set) var didShutdown = false
+    #if canImport(CSDL3)
+    internal var handle: UnsafeMutablePointer<SDL_Renderer>?
+    internal var textures: [String: UnsafeMutablePointer<SDL_Texture>] = [:]
     #endif
 
     public init(width: Int, height: Int, window: SDLWindow) throws {
@@ -28,10 +29,29 @@ public final class SDLRenderer {
     internal init(testingWidth: Int, testingHeight: Int) {
         self.width = testingWidth
         self.height = testingHeight
-        #if canImport(CSDL3) && !HEADLESS_CI
+        self.didShutdown = false
+        #if canImport(CSDL3)
         handle = nil
         textures = [:]
         #endif
+    }
+
+    public func shutdown() {
+        if didShutdown { return }
+        #if canImport(CSDL3)
+        for texture in textures.values {
+            SDLKit_DestroyTexture(texture)
+        }
+        textures.removeAll(keepingCapacity: false)
+        if let renderer = handle {
+            SDLKit_DestroyRenderer(renderer)
+            handle = nil
+        }
+        #if !HEADLESS_CI
+        SDLRenderer.flushFontCacheIfNeeded()
+        #endif
+        #endif
+        didShutdown = true
     }
 
     public func present() {
@@ -479,6 +499,25 @@ public final class SDLRenderer {
         }
         fontCache[key] = UnsafeMutableRawPointer(f)
         return f
+    }
+
+    private static func flushFontCacheIfNeeded() {
+        if fontCache.isEmpty {
+            if ttfInitialized {
+                SDLKit_TTF_Quit()
+                ttfInitialized = false
+            }
+            return
+        }
+        for raw in fontCache.values {
+            let fontPtr = raw.bindMemory(to: SDLKit_TTF_Font.self, capacity: 1)
+            SDLKit_TTF_CloseFont(fontPtr)
+        }
+        fontCache.removeAll(keepingCapacity: false)
+        if ttfInitialized {
+            SDLKit_TTF_Quit()
+            ttfInitialized = false
+        }
     }
     #endif
 }

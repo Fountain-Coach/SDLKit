@@ -6,6 +6,9 @@
 // headers/libraries are unavailable. All functions return failure defaults.
 
 static const char *SDLKIT_STUB_ERROR_MESSAGE = "SDLKit SDL3 stub: SDL unavailable";
+static int s_destroy_renderer_calls = 0;
+static int s_quit_calls = 0;
+static int s_ttf_quit_calls = 0;
 
 const char *SDLKit_GetError(void) {
     return SDLKIT_STUB_ERROR_MESSAGE;
@@ -23,6 +26,11 @@ SDL_Window *SDLKit_CreateWindow(const char *title, int32_t width, int32_t height
 
 void SDLKit_DestroyWindow(SDL_Window *window) {
     (void)window;
+}
+
+void SDLKit_DestroyRenderer(SDL_Renderer *renderer) {
+    (void)renderer;
+    s_destroy_renderer_calls++;
 }
 
 void SDLKit_ShowWindow(SDL_Window *window) {
@@ -319,4 +327,34 @@ unsigned int SDLKit_PixelFormat_ABGR8888(void) {
 int SDLKit_RenderReadPixels(struct SDL_Renderer *renderer, int x, int y, int w, int h, void *pixels, int pitch) {
     (void)renderer; (void)x; (void)y; (void)w; (void)h; (void)pixels; (void)pitch;
     return -1;
+}
+
+void SDLKit_Quit(void) {
+    s_quit_calls++;
+}
+
+void SDLKit_TTF_Quit(void) {
+    s_ttf_quit_calls++;
+}
+
+int SDLKitStub_DestroyRendererCallCount(void) {
+    return s_destroy_renderer_calls;
+}
+
+int SDLKitStub_QuitCallCount(void) {
+    return s_quit_calls;
+}
+
+int SDLKitStub_TTFQuitCallCount(void) {
+    return s_ttf_quit_calls;
+}
+
+void SDLKitStub_ResetCallCounts(void) {
+    s_destroy_renderer_calls = 0;
+    s_quit_calls = 0;
+    s_ttf_quit_calls = 0;
+}
+
+int SDLKitStub_IsActive(void) {
+    return 1;
 }

@@ -37,6 +37,7 @@ typedef struct SDLKit_Event {
     return SDL_CreateWindow(title, width, height, flags);
   }
   static inline void SDLKit_DestroyWindow(SDL_Window *window) { SDL_DestroyWindow(window); }
+  static inline void SDLKit_DestroyRenderer(SDL_Renderer *renderer) { SDL_DestroyRenderer(renderer); }
   static inline void SDLKit_ShowWindow(SDL_Window *window) { SDL_ShowWindow(window); }
   static inline void SDLKit_HideWindow(SDL_Window *window) { SDL_HideWindow(window); }
   static inline void SDLKit_SetWindowTitle(SDL_Window *window, const char *title) { SDL_SetWindowTitle(window, title); }
@@ -159,6 +160,7 @@ typedef struct SDLKit_Event {
     typedef TTF_Font SDLKit_TTF_Font;
     static inline SDLKit_TTF_Font *SDLKit_TTF_OpenFont(const char *path, int ptsize) { return TTF_OpenFont(path, ptsize); }
     static inline void SDLKit_TTF_CloseFont(SDLKit_TTF_Font *font) { if (font) TTF_CloseFont(font); }
+    static inline void SDLKit_TTF_Quit(void) { TTF_Quit(); }
     static inline SDL_Surface *SDLKit_TTF_RenderUTF8_Blended(SDLKit_TTF_Font *font, const char *text,
                                                              uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
       SDL_Color c = { r, g, b, a };
@@ -189,7 +191,9 @@ typedef struct SDLKit_Event {
   }
   #else
     static inline int SDLKit_TTF_Available(void) { return 0; }
+    static inline void SDLKit_TTF_Quit(void) { }
   #endif
+  static inline void SDLKit_Quit(void) { SDL_Quit(); }
 #else
   // Headless CI or no headers: provide minimal types so Swift can compile,
   // but no symbol definitions (and Swift code compiles them out in HEADLESS_CI).
@@ -205,6 +209,7 @@ typedef struct SDLKit_Event {
   SDL_Window *SDLKit_CreateWindow(const char *title, int32_t width, int32_t height, uint32_t flags);
   void SDLKit_DestroyWindow(SDL_Window *window);
   void SDLKit_ShowWindow(SDL_Window *window);
+  void SDLKit_DestroyRenderer(SDL_Renderer *renderer);
   void SDLKit_HideWindow(SDL_Window *window);
   void SDLKit_SetWindowTitle(SDL_Window *window, const char *title);
   const char *SDLKit_GetWindowTitle(SDL_Window *window);
@@ -254,6 +259,7 @@ typedef struct SDLKit_Event {
   int SDLKit_TTF_Init(void);
   SDLKit_TTF_Font *SDLKit_TTF_OpenFont(const char *path, int ptsize);
   void SDLKit_TTF_CloseFont(SDLKit_TTF_Font *font);
+  void SDLKit_TTF_Quit(void);
   struct SDL_Surface;
   struct SDL_Texture;
   struct SDL_Surface *SDLKit_TTF_RenderUTF8_Blended(SDLKit_TTF_Font *font, const char *text,
@@ -271,6 +277,21 @@ typedef struct SDLKit_Event {
   struct SDL_RWops *SDLKit_RWFromFile(const char *file, const char *mode);
   unsigned int SDLKit_PixelFormat_ABGR8888(void);
   int SDLKit_RenderReadPixels(struct SDL_Renderer *renderer, int x, int y, int w, int h, void *pixels, int pitch);
+  void SDLKit_Quit(void);
+
+  int SDLKitStub_DestroyRendererCallCount(void);
+  int SDLKitStub_QuitCallCount(void);
+  int SDLKitStub_TTFQuitCallCount(void);
+  void SDLKitStub_ResetCallCounts(void);
+  int SDLKitStub_IsActive(void);
+#endif
+
+#if __has_include(<SDL3/SDL.h>)
+  static inline int SDLKitStub_DestroyRendererCallCount(void) { return -1; }
+  static inline int SDLKitStub_QuitCallCount(void) { return -1; }
+  static inline int SDLKitStub_TTFQuitCallCount(void) { return -1; }
+  static inline void SDLKitStub_ResetCallCounts(void) { }
+  static inline int SDLKitStub_IsActive(void) { return 0; }
 #endif
 
 #ifdef __cplusplus
