@@ -21,6 +21,7 @@ public struct SDLKitJSONAgent {
         case setFullscreen = "/agent/gui/window/setFullscreen"
         case setOpacity = "/agent/gui/window/setOpacity"
         case setAlwaysOnTop = "/agent/gui/window/setAlwaysOnTop"
+        case center = "/agent/gui/window/center"
         case present = "/agent/gui/present"
         case drawRect = "/agent/gui/drawRectangle"
         case clear = "/agent/gui/clear"
@@ -110,6 +111,10 @@ public struct SDLKitJSONAgent {
             case .setAlwaysOnTop:
                 let req = try JSONDecoder().decode(ToggleReq.self, from: body)
                 try agent.setAlwaysOnTop(windowId: req.window_id, enabled: req.enabled)
+                return Self.okJSON()
+            case .center:
+                let req = try JSONDecoder().decode(WindowOnlyReq.self, from: body)
+                try agent.centerWindow(windowId: req.window_id)
                 return Self.okJSON()
             case .present:
                 let req = try JSONDecoder().decode(WindowOnlyReq.self, from: body)

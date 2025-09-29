@@ -163,6 +163,15 @@ public final class SDLWindow {
         throw AgentError.sdlUnavailable
         #endif
     }
+
+    public func center() throws {
+        #if canImport(CSDL3) && !HEADLESS_CI
+        guard let win = handle else { throw AgentError.internalError("Window not opened") }
+        SDLKit_CenterWindow(win)
+        #else
+        throw AgentError.sdlUnavailable
+        #endif
+    }
 }
 
 @MainActor

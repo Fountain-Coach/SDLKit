@@ -128,6 +128,11 @@ public final class SDLKitGUIAgent {
         return try bundle.window.info()
     }
 
+    public func centerWindow(windowId: Int) throws {
+        guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }
+        try bundle.window.center()
+    }
+
     // New tools: clear, line, circle
     public func clear(windowId: Int, color: UInt32) throws {
         guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }

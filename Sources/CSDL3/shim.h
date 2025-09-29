@@ -51,6 +51,7 @@ typedef struct SDLKit_Event {
   static inline int SDLKit_SetWindowFullscreen(SDL_Window *window, int enabled) { return SDL_SetWindowFullscreen(window, enabled != 0); }
   static inline int SDLKit_SetWindowOpacity(SDL_Window *window, float opacity) { return SDL_SetWindowOpacity(window, opacity); }
   static inline int SDLKit_SetWindowAlwaysOnTop(SDL_Window *window, int enabled) { return SDL_SetWindowAlwaysOnTop(window, enabled != 0); }
+  static inline void SDLKit_CenterWindow(SDL_Window *window) { SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED); }
 
   // Clipboard
   static inline int SDLKit_SetClipboardText(const char *text) { return SDL_SetClipboardText(text); }
@@ -171,6 +172,7 @@ typedef struct SDLKit_Event {
   int SDLKit_SetWindowFullscreen(SDL_Window *window, int enabled);
   int SDLKit_SetWindowOpacity(SDL_Window *window, float opacity);
   int SDLKit_SetWindowAlwaysOnTop(SDL_Window *window, int enabled);
+  void SDLKit_CenterWindow(SDL_Window *window);
   // Clipboard
   int SDLKit_SetClipboardText(const char *text);
   char *SDLKit_GetClipboardText(void);
