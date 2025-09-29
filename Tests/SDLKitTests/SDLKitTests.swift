@@ -97,4 +97,22 @@ final class SDLKitTests: XCTestCase {
         throw XCTSkip("CSDL3 not available")
         #endif
     }
+
+    func testTextRenderingAvailabilityFlag() throws {
+        #if HEADLESS_CI
+        XCTAssertFalse(SDLKitState.isTextRenderingEnabled)
+        #elseif canImport(CSDL3TTF)
+        #if canImport(CSDL3)
+        let available = SDLKit_TTF_Available() != 0
+        if !available {
+            throw XCTSkip("SDL_ttf not linked in this configuration")
+        }
+        XCTAssertEqual(SDLKitState.isTextRenderingEnabled, available)
+        #else
+        XCTAssertFalse(SDLKitState.isTextRenderingEnabled)
+        #endif
+        #else
+        XCTAssertFalse(SDLKitState.isTextRenderingEnabled)
+        #endif
+    }
 }
