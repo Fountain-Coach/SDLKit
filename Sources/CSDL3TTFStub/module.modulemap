@@ -1,0 +1,4 @@
+module CSDL3TTF {
+  header "shim_ttf.h"
+  export *
+}
