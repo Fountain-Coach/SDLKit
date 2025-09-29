@@ -169,7 +169,10 @@ let package = Package(
         targets.append(
             .executableTarget(
                 name: "SDLKitDemo",
-                dependencies: ["SDLKit"],
+                dependencies: [
+                    "SDLKit",
+                    .target(name: "SDLKitTTF", condition: .when(platforms: [.macOS, .linux]))
+                ],
                 path: "Sources/SDLKitDemo"
             )
         )
