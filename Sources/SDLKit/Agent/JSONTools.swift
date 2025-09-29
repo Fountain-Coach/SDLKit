@@ -366,6 +366,12 @@ public struct SDLKitJSONAgent {
     }
 
     private static func cachedJSONFromExternalYAML() -> Data? {
+        if let envPath = normalizedEnvPath(ProcessInfo.processInfo.environment) {
+            let lower = envPath.lowercased()
+            if lower.hasSuffix(".json") || lower.hasSuffix(".jsonc") {
+                return nil
+            }
+        }
         guard let yamlEntry = loadExternalOpenAPIYAMLCacheEntry() else { return nil }
         if let cached = yamlConversionCache, cached.matches(yamlEntry) { return cached.data }
         guard let converted = OpenAPIConverter.yamlToJSON(yamlEntry.data) else { return nil }
@@ -487,7 +493,11 @@ public struct SDLKitJSONAgent {
     }
 
     private static func normalizedEnvPath(_ env: [String: String]) -> String? {
-        guard let raw = env["SDLKIT_OPENAPI_PATH"]?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
+        if let raw = env["SDLKIT_OPENAPI_PATH"]?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty {
+            return raw
+        }
+        guard let cString = getenv("SDLKIT_OPENAPI_PATH") else { return nil }
+        guard let raw = String(validatingCString: cString)?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
             return nil
         }
         return raw
