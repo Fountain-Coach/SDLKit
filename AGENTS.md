@@ -83,7 +83,8 @@ This document serves two purposes:
 
 ### 7.1 OpenAPI & Stability
 
-- The root agent maintains the canonical OpenAPI 3.1 spec for the GUI tools.
+- The canonical OpenAPI 3.1 spec for the GUI tools is stored at the repo root (`sdlkit.gui.v1.yaml` or `openapi.yaml`).
+- The agent serves this source-of-truth when present (overridable via `SDLKIT_OPENAPI_PATH`).
 - Served endpoints (read-only):
   - `GET /openapi.yaml` (YAML)
   - `GET /openapi.json` (JSON)

@@ -67,6 +67,67 @@ public final class SDLKitGUIAgent {
         bundle.renderer.present()
     }
 
+    // MARK: - Window controls
+    public func showWindow(windowId: Int) throws {
+        guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }
+        try bundle.window.show()
+    }
+
+    public func hideWindow(windowId: Int) throws {
+        guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }
+        try bundle.window.hide()
+    }
+
+    public func setTitle(windowId: Int, title: String) throws {
+        guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }
+        try bundle.window.setTitle(title)
+    }
+
+    public func setPosition(windowId: Int, x: Int, y: Int) throws {
+        guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }
+        try bundle.window.setPosition(x: x, y: y)
+    }
+
+    public func resizeWindow(windowId: Int, width: Int, height: Int) throws {
+        guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }
+        try bundle.window.resize(width: width, height: height)
+    }
+
+    public func maximizeWindow(windowId: Int) throws {
+        guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }
+        try bundle.window.maximize()
+    }
+
+    public func minimizeWindow(windowId: Int) throws {
+        guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }
+        try bundle.window.minimize()
+    }
+
+    public func restoreWindow(windowId: Int) throws {
+        guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }
+        try bundle.window.restore()
+    }
+
+    public func setFullscreen(windowId: Int, enabled: Bool) throws {
+        guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }
+        try bundle.window.setFullscreen(enabled)
+    }
+
+    public func setOpacity(windowId: Int, opacity: Float) throws {
+        guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }
+        try bundle.window.setOpacity(opacity)
+    }
+
+    public func setAlwaysOnTop(windowId: Int, enabled: Bool) throws {
+        guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }
+        try bundle.window.setAlwaysOnTop(enabled)
+    }
+
+    public func getWindowInfo(windowId: Int) throws -> SDLWindow.Info {
+        guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }
+        return try bundle.window.info()
+    }
+
     // New tools: clear, line, circle
     public func clear(windowId: Int, color: UInt32) throws {
         guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }

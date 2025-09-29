@@ -9,6 +9,18 @@ public struct SDLKitJSONAgent {
     public enum Endpoint: String {
         case open = "/agent/gui/window/open"
         case close = "/agent/gui/window/close"
+        case show = "/agent/gui/window/show"
+        case hide = "/agent/gui/window/hide"
+        case resize = "/agent/gui/window/resize"
+        case setTitle = "/agent/gui/window/setTitle"
+        case setPosition = "/agent/gui/window/setPosition"
+        case getInfo = "/agent/gui/window/getInfo"
+        case maximize = "/agent/gui/window/maximize"
+        case minimize = "/agent/gui/window/minimize"
+        case restore = "/agent/gui/window/restore"
+        case setFullscreen = "/agent/gui/window/setFullscreen"
+        case setOpacity = "/agent/gui/window/setOpacity"
+        case setAlwaysOnTop = "/agent/gui/window/setAlwaysOnTop"
         case present = "/agent/gui/present"
         case drawRect = "/agent/gui/drawRectangle"
         case clear = "/agent/gui/clear"
@@ -45,6 +57,55 @@ public struct SDLKitJSONAgent {
             case .close:
                 let req = try JSONDecoder().decode(WindowOnlyReq.self, from: body)
                 agent.closeWindow(windowId: req.window_id)
+                return Self.okJSON()
+            case .show:
+                let req = try JSONDecoder().decode(WindowOnlyReq.self, from: body)
+                try agent.showWindow(windowId: req.window_id)
+                return Self.okJSON()
+            case .hide:
+                let req = try JSONDecoder().decode(WindowOnlyReq.self, from: body)
+                try agent.hideWindow(windowId: req.window_id)
+                return Self.okJSON()
+            case .resize:
+                let req = try JSONDecoder().decode(ResizeReq.self, from: body)
+                try agent.resizeWindow(windowId: req.window_id, width: req.width, height: req.height)
+                return Self.okJSON()
+            case .setTitle:
+                let req = try JSONDecoder().decode(SetTitleReq.self, from: body)
+                try agent.setTitle(windowId: req.window_id, title: req.title)
+                return Self.okJSON()
+            case .setPosition:
+                let req = try JSONDecoder().decode(SetPositionReq.self, from: body)
+                try agent.setPosition(windowId: req.window_id, x: req.x, y: req.y)
+                return Self.okJSON()
+            case .getInfo:
+                let req = try JSONDecoder().decode(WindowOnlyReq.self, from: body)
+                let info = try agent.getWindowInfo(windowId: req.window_id)
+                struct R: Codable { let x: Int; let y: Int; let width: Int; let height: Int; let title: String }
+                return try JSONEncoder().encode(R(x: info.x, y: info.y, width: info.width, height: info.height, title: info.title))
+            case .maximize:
+                let req = try JSONDecoder().decode(WindowOnlyReq.self, from: body)
+                try agent.maximizeWindow(windowId: req.window_id)
+                return Self.okJSON()
+            case .minimize:
+                let req = try JSONDecoder().decode(WindowOnlyReq.self, from: body)
+                try agent.minimizeWindow(windowId: req.window_id)
+                return Self.okJSON()
+            case .restore:
+                let req = try JSONDecoder().decode(WindowOnlyReq.self, from: body)
+                try agent.restoreWindow(windowId: req.window_id)
+                return Self.okJSON()
+            case .setFullscreen:
+                let req = try JSONDecoder().decode(ToggleReq.self, from: body)
+                try agent.setFullscreen(windowId: req.window_id, enabled: req.enabled)
+                return Self.okJSON()
+            case .setOpacity:
+                let req = try JSONDecoder().decode(OpacityReq.self, from: body)
+                try agent.setOpacity(windowId: req.window_id, opacity: Float(req.opacity))
+                return Self.okJSON()
+            case .setAlwaysOnTop:
+                let req = try JSONDecoder().decode(ToggleReq.self, from: body)
+                try agent.setAlwaysOnTop(windowId: req.window_id, enabled: req.enabled)
                 return Self.okJSON()
             case .present:
                 let req = try JSONDecoder().decode(WindowOnlyReq.self, from: body)
@@ -111,6 +172,11 @@ public struct SDLKitJSONAgent {
     // MARK: - Models
     private struct OpenWindowReq: Codable { let title: String; let width: Int; let height: Int }
     private struct WindowOnlyReq: Codable { let window_id: Int }
+    private struct ResizeReq: Codable { let window_id: Int; let width: Int; let height: Int }
+    private struct SetTitleReq: Codable { let window_id: Int; let title: String }
+    private struct SetPositionReq: Codable { let window_id: Int; let x: Int; let y: Int }
+    private struct ToggleReq: Codable { let window_id: Int; let enabled: Bool }
+    private struct OpacityReq: Codable { let window_id: Int; let opacity: Double }
     private struct RectReq: Codable {
         let window_id: Int, x: Int, y: Int, width: Int, height: Int
         let color: UInt32?

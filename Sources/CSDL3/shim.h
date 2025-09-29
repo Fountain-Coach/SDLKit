@@ -37,6 +37,20 @@ typedef struct SDLKit_Event {
     return SDL_CreateWindow(title, width, height, flags);
   }
   static inline void SDLKit_DestroyWindow(SDL_Window *window) { SDL_DestroyWindow(window); }
+  static inline void SDLKit_ShowWindow(SDL_Window *window) { SDL_ShowWindow(window); }
+  static inline void SDLKit_HideWindow(SDL_Window *window) { SDL_HideWindow(window); }
+  static inline void SDLKit_SetWindowTitle(SDL_Window *window, const char *title) { SDL_SetWindowTitle(window, title); }
+  static inline const char *SDLKit_GetWindowTitle(SDL_Window *window) { return SDL_GetWindowTitle(window); }
+  static inline void SDLKit_SetWindowPosition(SDL_Window *window, int x, int y) { SDL_SetWindowPosition(window, x, y); }
+  static inline void SDLKit_GetWindowPosition(SDL_Window *window, int *x, int *y) { SDL_GetWindowPosition(window, x, y); }
+  static inline void SDLKit_SetWindowSize(SDL_Window *window, int w, int h) { SDL_SetWindowSize(window, w, h); }
+  static inline void SDLKit_GetWindowSize(SDL_Window *window, int *w, int *h) { SDL_GetWindowSize(window, w, h); }
+  static inline void SDLKit_MaximizeWindow(SDL_Window *window) { SDL_MaximizeWindow(window); }
+  static inline void SDLKit_MinimizeWindow(SDL_Window *window) { SDL_MinimizeWindow(window); }
+  static inline void SDLKit_RestoreWindow(SDL_Window *window) { SDL_RestoreWindow(window); }
+  static inline int SDLKit_SetWindowFullscreen(SDL_Window *window, int enabled) { return SDL_SetWindowFullscreen(window, enabled != 0); }
+  static inline int SDLKit_SetWindowOpacity(SDL_Window *window, float opacity) { return SDL_SetWindowOpacity(window, opacity); }
+  static inline int SDLKit_SetWindowAlwaysOnTop(SDL_Window *window, int enabled) { return SDL_SetWindowAlwaysOnTop(window, enabled != 0); }
   // Renderer creation API evolves; accept a flags arg but ignore when not needed.
   static inline SDL_Renderer *SDLKit_CreateRenderer(SDL_Window *window, uint32_t flags) {
     (void)flags;
@@ -129,6 +143,20 @@ typedef struct SDLKit_Event {
   int SDLKit_Init(uint32_t flags);
   SDL_Window *SDLKit_CreateWindow(const char *title, int32_t width, int32_t height, uint32_t flags);
   void SDLKit_DestroyWindow(SDL_Window *window);
+  void SDLKit_ShowWindow(SDL_Window *window);
+  void SDLKit_HideWindow(SDL_Window *window);
+  void SDLKit_SetWindowTitle(SDL_Window *window, const char *title);
+  const char *SDLKit_GetWindowTitle(SDL_Window *window);
+  void SDLKit_SetWindowPosition(SDL_Window *window, int x, int y);
+  void SDLKit_GetWindowPosition(SDL_Window *window, int *x, int *y);
+  void SDLKit_SetWindowSize(SDL_Window *window, int w, int h);
+  void SDLKit_GetWindowSize(SDL_Window *window, int *w, int *h);
+  void SDLKit_MaximizeWindow(SDL_Window *window);
+  void SDLKit_MinimizeWindow(SDL_Window *window);
+  void SDLKit_RestoreWindow(SDL_Window *window);
+  int SDLKit_SetWindowFullscreen(SDL_Window *window, int enabled);
+  int SDLKit_SetWindowOpacity(SDL_Window *window, float opacity);
+  int SDLKit_SetWindowAlwaysOnTop(SDL_Window *window, int enabled);
   SDL_Renderer *SDLKit_CreateRenderer(SDL_Window *window, uint32_t flags);
   int SDLKit_SetRenderDrawColor(SDL_Renderer *renderer, uint8_t r, uint8_t g, uint8_t b, uint8_t a);
   int SDLKit_RenderClear(SDL_Renderer *renderer);

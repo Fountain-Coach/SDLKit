@@ -154,6 +154,12 @@ Endpoints (paths):
 
 Errors are returned as `{ "error": { "code": string, "details"?: string } }` with canonical codes defined in `AGENTS.md`.
 
+### OpenAPI (source of truth)
+
+- The canonical OpenAPI lives at repo root: `sdlkit.gui.v1.yaml` (or `openapi.yaml`).
+- The agent serves this file if present (env `SDLKIT_OPENAPI_PATH` can override), else falls back to an embedded spec.
+- JSON mirror is available at `/openapi.json`.
+
 ### Example HTTP Server (separate)
 
 - A minimal HTTP server sample is provided under `Examples/SDLKitJSONServer` to avoid cluttering the main package.

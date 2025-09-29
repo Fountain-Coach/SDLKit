@@ -130,6 +130,95 @@ paths:
               required: [window_id, x, y]
       responses:
         '200': { $ref: '#/components/responses/Ok' }
+  /agent/gui/window/maximize:
+    post:
+      operationId: maximize
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WindowOnlyRequest'
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /agent/gui/window/minimize:
+    post:
+      operationId: minimize
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WindowOnlyRequest'
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /agent/gui/window/restore:
+    post:
+      operationId: restore
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WindowOnlyRequest'
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /agent/gui/window/setFullscreen:
+    post:
+      operationId: setFullscreen
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                window_id: { type: integer, minimum: 1 }
+                enabled: { type: boolean }
+              required: [window_id, enabled]
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /agent/gui/window/setAlwaysOnTop:
+    post:
+      operationId: setAlwaysOnTop
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                window_id: { type: integer, minimum: 1 }
+                enabled: { type: boolean }
+              required: [window_id, enabled]
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /agent/gui/window/setOpacity:
+    post:
+      operationId: setOpacity
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                window_id: { type: integer, minimum: 1 }
+                opacity: { type: number, minimum: 0.0, maximum: 1.0 }
+              required: [window_id, opacity]
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /agent/gui/window/center:
+    post:
+      operationId: center
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WindowOnlyRequest'
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
   /agent/gui/window/getInfo:
     post:
       operationId: getWindowInfo
@@ -232,6 +321,192 @@ paths:
                 properties:
                   event:
                     $ref: '#/components/schemas/Event'
+  /agent/gui/clipboard/get:
+    post:
+      operationId: clipboardGet
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WindowOnlyRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  text: { type: string }
+  /agent/gui/clipboard/set:
+    post:
+      operationId: clipboardSet
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                window_id: { type: integer, minimum: 1 }
+                text: { type: string }
+              required: [window_id, text]
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /agent/gui/input/getKeyboardState:
+    post:
+      operationId: getKeyboardState
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WindowOnlyRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  modifiers:
+                    type: object
+                    properties:
+                      shift: { type: boolean }
+                      ctrl: { type: boolean }
+                      alt: { type: boolean }
+                      gui: { type: boolean }
+  /agent/gui/input/getMouseState:
+    post:
+      operationId: getMouseState
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WindowOnlyRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  x: { type: integer }
+                  y: { type: integer }
+                  buttons: { type: array, items: { type: integer } }
+  /agent/gui/display/list:
+    get:
+      operationId: listDisplays
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  displays:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        name: { type: string }
+  /agent/gui/display/getInfo:
+    post:
+      operationId: getDisplayInfo
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                index: { type: integer, minimum: 0 }
+              required: [index]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  bounds:
+                    type: object
+                    properties: { x: {type: integer}, y: {type: integer}, width: {type: integer}, height: {type: integer} }
+  /agent/gui/texture/load:
+    post:
+      operationId: textureLoad
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                window_id: { type: integer, minimum: 1 }
+                id: { type: string, description: logical texture id }
+                path: { type: string }
+              required: [window_id, id, path]
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /agent/gui/texture/draw:
+    post:
+      operationId: textureDraw
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                window_id: { type: integer, minimum: 1 }
+                id: { type: string }
+                x: { type: integer }
+                y: { type: integer }
+                width: { type: integer, nullable: true }
+                height: { type: integer, nullable: true }
+              required: [window_id, id, x, y]
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /agent/gui/texture/free:
+    post:
+      operationId: textureFree
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                window_id: { type: integer, minimum: 1 }
+                id: { type: string }
+              required: [window_id, id]
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /agent/gui/screenshot/capture:
+    post:
+      operationId: screenshotCapture
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WindowOnlyRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  png_base64: { type: string }
 components:
   responses:
     Ok:
@@ -361,4 +636,3 @@ components:
         key: { type: string, nullable: true }
         button: { type: integer, nullable: true }
       required: [type]
-

@@ -13,6 +13,14 @@ public final class SDLWindow {
             self.title = title; self.width = width; self.height = height
         }
     }
+    public struct Info: Equatable, Codable {
+        public var x: Int
+        public var y: Int
+        public var width: Int
+        public var height: Int
+        public var title: String
+        public init(x: Int, y: Int, width: Int, height: Int, title: String) { self.x = x; self.y = y; self.width = width; self.height = height; self.title = title }
+    }
 
     public let config: Config
     #if canImport(CSDL3) && !HEADLESS_CI
@@ -40,6 +48,119 @@ public final class SDLWindow {
             SDLKit_DestroyWindow(win)
         }
         handle = nil
+        #endif
+    }
+
+    // MARK: - Controls
+    public func show() throws {
+        #if canImport(CSDL3) && !HEADLESS_CI
+        guard let win = handle else { throw AgentError.internalError("Window not opened") }
+        SDLKit_ShowWindow(win)
+        #else
+        throw AgentError.sdlUnavailable
+        #endif
+    }
+
+    public func hide() throws {
+        #if canImport(CSDL3) && !HEADLESS_CI
+        guard let win = handle else { throw AgentError.internalError("Window not opened") }
+        SDLKit_HideWindow(win)
+        #else
+        throw AgentError.sdlUnavailable
+        #endif
+    }
+
+    public func setTitle(_ title: String) throws {
+        #if canImport(CSDL3) && !HEADLESS_CI
+        guard let win = handle else { throw AgentError.internalError("Window not opened") }
+        SDLKit_SetWindowTitle(win, title)
+        #else
+        throw AgentError.sdlUnavailable
+        #endif
+    }
+
+    public func setPosition(x: Int, y: Int) throws {
+        #if canImport(CSDL3) && !HEADLESS_CI
+        guard let win = handle else { throw AgentError.internalError("Window not opened") }
+        SDLKit_SetWindowPosition(win, Int32(x), Int32(y))
+        #else
+        throw AgentError.sdlUnavailable
+        #endif
+    }
+
+    public func resize(width: Int, height: Int) throws {
+        #if canImport(CSDL3) && !HEADLESS_CI
+        guard let win = handle else { throw AgentError.internalError("Window not opened") }
+        SDLKit_SetWindowSize(win, Int32(width), Int32(height))
+        #else
+        throw AgentError.sdlUnavailable
+        #endif
+    }
+
+    public func maximize() throws {
+        #if canImport(CSDL3) && !HEADLESS_CI
+        guard let win = handle else { throw AgentError.internalError("Window not opened") }
+        SDLKit_MaximizeWindow(win)
+        #else
+        throw AgentError.sdlUnavailable
+        #endif
+    }
+
+    public func minimize() throws {
+        #if canImport(CSDL3) && !HEADLESS_CI
+        guard let win = handle else { throw AgentError.internalError("Window not opened") }
+        SDLKit_MinimizeWindow(win)
+        #else
+        throw AgentError.sdlUnavailable
+        #endif
+    }
+
+    public func restore() throws {
+        #if canImport(CSDL3) && !HEADLESS_CI
+        guard let win = handle else { throw AgentError.internalError("Window not opened") }
+        SDLKit_RestoreWindow(win)
+        #else
+        throw AgentError.sdlUnavailable
+        #endif
+    }
+
+    public func setFullscreen(_ enabled: Bool) throws {
+        #if canImport(CSDL3) && !HEADLESS_CI
+        guard let win = handle else { throw AgentError.internalError("Window not opened") }
+        if SDLKit_SetWindowFullscreen(win, enabled ? 1 : 0) != 0 { throw AgentError.internalError(SDLCore.lastError()) }
+        #else
+        throw AgentError.sdlUnavailable
+        #endif
+    }
+
+    public func setOpacity(_ opacity: Float) throws {
+        #if canImport(CSDL3) && !HEADLESS_CI
+        guard let win = handle else { throw AgentError.internalError("Window not opened") }
+        if SDLKit_SetWindowOpacity(win, opacity) != 0 { throw AgentError.internalError(SDLCore.lastError()) }
+        #else
+        throw AgentError.sdlUnavailable
+        #endif
+    }
+
+    public func setAlwaysOnTop(_ enabled: Bool) throws {
+        #if canImport(CSDL3) && !HEADLESS_CI
+        guard let win = handle else { throw AgentError.internalError("Window not opened") }
+        if SDLKit_SetWindowAlwaysOnTop(win, enabled ? 1 : 0) != 0 { throw AgentError.internalError(SDLCore.lastError()) }
+        #else
+        throw AgentError.sdlUnavailable
+        #endif
+    }
+
+    public func info() throws -> Info {
+        #if canImport(CSDL3) && !HEADLESS_CI
+        guard let win = handle else { throw AgentError.internalError("Window not opened") }
+        var x: Int32 = 0, y: Int32 = 0, w: Int32 = 0, h: Int32 = 0
+        SDLKit_GetWindowPosition(win, &x, &y)
+        SDLKit_GetWindowSize(win, &w, &h)
+        let title = String(cString: SDLKit_GetWindowTitle(win))
+        return Info(x: Int(x), y: Int(y), width: Int(w), height: Int(h), title: title)
+        #else
+        throw AgentError.sdlUnavailable
         #endif
     }
 }
