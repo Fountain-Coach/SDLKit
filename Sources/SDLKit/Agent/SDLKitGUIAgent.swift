@@ -154,6 +154,20 @@ public final class SDLKitGUIAgent {
         try bundle.renderer.drawTextureRotated(id: id, x: x, y: y, width: width, height: height, angleDegrees: angle, centerX: cx, centerY: cy)
     }
 
+    // MARK: - Geometry batches
+    public func drawPoints(windowId: Int, points: [(Int, Int)], color: UInt32) throws {
+        guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }
+        try bundle.renderer.drawPoints(points, color: color)
+    }
+    public func drawLines(windowId: Int, segments: [(Int, Int, Int, Int)], color: UInt32) throws {
+        guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }
+        try bundle.renderer.drawLines(segments, color: color)
+    }
+    public func drawRects(windowId: Int, rects: [(Int, Int, Int, Int)], color: UInt32, filled: Bool) throws {
+        guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }
+        try bundle.renderer.drawRects(rects, color: color, filled: filled)
+    }
+
     // MARK: - Render state accessors
     public func getRenderOutputSize(windowId: Int) throws -> (width: Int, height: Int) {
         guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }

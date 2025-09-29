@@ -305,6 +305,45 @@ public final class SDLRenderer {
         #endif
     }
 
+    // MARK: - Geometry batches
+    public func drawPoints(_ points: [(Int, Int)], color: UInt32) throws {
+        #if canImport(CSDL3) && !HEADLESS_CI
+        guard let r = handle else { throw AgentError.internalError("Renderer not created") }
+        try setDrawColor(color)
+        var fpts = points.map { SDL_FPoint(x: Float($0.0), y: Float($0.1)) }
+        if SDLKit_RenderPoints(r, &fpts, Int32(fpts.count)) != 0 { throw AgentError.internalError(SDLCore.lastError()) }
+        if SDLKitConfig.presentPolicy == .auto { SDLKit_RenderPresent(r) }
+        #else
+        throw AgentError.sdlUnavailable
+        #endif
+    }
+
+    public func drawLines(_ segments: [(Int, Int, Int, Int)], color: UInt32) throws {
+        #if canImport(CSDL3) && !HEADLESS_CI
+        guard let r = handle else { throw AgentError.internalError("Renderer not created") }
+        try setDrawColor(color)
+        for (x1,y1,x2,y2) in segments {
+            if SDLKit_RenderLine(r, Float(x1), Float(y1), Float(x2), Float(y2)) != 0 { throw AgentError.internalError(SDLCore.lastError()) }
+        }
+        if SDLKitConfig.presentPolicy == .auto { SDLKit_RenderPresent(r) }
+        #else
+        throw AgentError.sdlUnavailable
+        #endif
+    }
+
+    public func drawRects(_ rects: [(Int, Int, Int, Int)], color: UInt32, filled: Bool) throws {
+        #if canImport(CSDL3) && !HEADLESS_CI
+        guard let r = handle else { throw AgentError.internalError("Renderer not created") }
+        try setDrawColor(color)
+        var frects = rects.map { SDL_FRect(x: Float($0.0), y: Float($0.1), w: Float($0.2), h: Float($0.3)) }
+        let rc: Int32 = filled ? SDLKit_RenderFillRects(r, &frects, Int32(frects.count)) : SDLKit_RenderRects(r, &frects, Int32(frects.count))
+        if rc != 0 { throw AgentError.internalError(SDLCore.lastError()) }
+        if SDLKitConfig.presentPolicy == .auto { SDLKit_RenderPresent(r) }
+        #else
+        throw AgentError.sdlUnavailable
+        #endif
+    }
+
     public struct RawScreenshot: Codable {
         public let raw_base64: String
         public let width: Int

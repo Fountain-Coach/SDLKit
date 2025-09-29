@@ -55,6 +55,9 @@ public struct SDLKitJSONAgent {
         case renderGetClipRect = "/agent/gui/render/getClipRect"
         case renderSetClipRect = "/agent/gui/render/setClipRect"
         case renderDisableClipRect = "/agent/gui/render/disableClipRect"
+        case drawPoints = "/agent/gui/drawPoints"
+        case drawLines = "/agent/gui/drawLines"
+        case drawRects = "/agent/gui/drawRects"
     }
 
     public func handle(path: String, body: Data) -> Data {
@@ -281,6 +284,21 @@ public struct SDLKitJSONAgent {
                 let req = try JSONDecoder().decode(WindowOnlyReq.self, from: body)
                 try agent.disableRenderClipRect(windowId: req.window_id)
                 return Self.okJSON()
+            case .drawPoints:
+                let req = try JSONDecoder().decode(PointsReq.self, from: body)
+                let color = try req.color.resolved()
+                try agent.drawPoints(windowId: req.window_id, points: req.points.map { ($0.x, $0.y) }, color: color)
+                return Self.okJSON()
+            case .drawLines:
+                let req = try JSONDecoder().decode(LinesReq.self, from: body)
+                let color = try req.color.resolved()
+                try agent.drawLines(windowId: req.window_id, segments: req.segments.map { ($0.x1, $0.y1, $0.x2, $0.y2) }, color: color)
+                return Self.okJSON()
+            case .drawRects:
+                let req = try JSONDecoder().decode(RectsReq.self, from: body)
+                let color = try req.color.resolved()
+                try agent.drawRects(windowId: req.window_id, rects: req.rects.map { ($0.x, $0.y, $0.width, $0.height) }, color: color, filled: req.filled ?? true)
+                return Self.okJSON()
             }
         } catch let e as AgentError {
             return Self.errorJSON(from: e)
@@ -391,6 +409,18 @@ public struct SDLKitJSONAgent {
     private struct TextureDrawRotatedReq: Codable { let window_id: Int; let id: String; let x: Int; let y: Int; let width: Int?; let height: Int?; let angle: Double; let cx: Float?; let cy: Float? }
     private struct RenderScaleReq: Codable { let window_id: Int; let sx: Float; let sy: Float }
     private struct RectOnlyReq: Codable { let window_id: Int; let x: Int; let y: Int; let width: Int; let height: Int }
+    private struct PointsReq: Codable { let window_id: Int; let points: [P]; let color: ColorValue; struct P: Codable { let x: Int; let y: Int } }
+    private struct LinesReq: Codable { let window_id: Int; let segments: [S]; let color: ColorValue; struct S: Codable { let x1: Int; let y1: Int; let x2: Int; let y2: Int } }
+    private struct RectsReq: Codable { let window_id: Int; let rects: [R]; let color: ColorValue; let filled: Bool?; struct R: Codable { let x: Int; let y: Int; let width: Int; let height: Int } }
+    private enum ColorValue: Codable { case int(UInt32), str(String)
+        init(from decoder: Decoder) throws {
+            let c = try decoder.singleValueContainer()
+            if let s = try? c.decode(String.self) { self = .str(s) } else { self = .int(try c.decode(UInt32.self)) }
+        }
+        func resolved() throws -> UInt32 {
+            switch self { case .int(let v): return v; case .str(let s): return try SDLColor.parse(s) }
+        }
+    }
 
     private struct JEvent: Codable {
         let type: String

@@ -925,3 +925,64 @@ components:
               required: [window_id, id, x, y, angle]
       responses:
         '200': { $ref: '#/components/responses/Ok' }
+  /agent/gui/drawPoints:
+    post:
+      summary: Draw multiple points
+      description: Draws an array of points using the current draw color or provided color.
+      operationId: drawPoints
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                window_id: { type: integer, minimum: 1 }
+                points:
+                  type: array
+                  items: { type: object, properties: { x: {type: integer}, y: {type: integer} }, required: [x,y] }
+                color: { $ref: '#/components/schemas/Color' }
+              required: [window_id, points, color]
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /agent/gui/drawLines:
+    post:
+      summary: Draw multiple line segments
+      description: Draws an array of independent line segments with the given color.
+      operationId: drawLines
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                window_id: { type: integer, minimum: 1 }
+                segments:
+                  type: array
+                  items: { type: object, properties: { x1: {type: integer}, y1: {type: integer}, x2: {type: integer}, y2: {type: integer} }, required: [x1,y1,x2,y2] }
+                color: { $ref: '#/components/schemas/Color' }
+              required: [window_id, segments, color]
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /agent/gui/drawRects:
+    post:
+      summary: Draw multiple rectangles
+      description: Draws an array of rectangles either filled or outlined.
+      operationId: drawRects
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                window_id: { type: integer, minimum: 1 }
+                rects:
+                  type: array
+                  items: { type: object, properties: { x: {type: integer}, y: {type: integer}, width: {type: integer}, height: {type: integer} }, required: [x,y,width,height] }
+                color: { $ref: '#/components/schemas/Color' }
+                filled: { type: boolean, description: When true draw filled rectangles, otherwise outlines only }
+              required: [window_id, rects, color]
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }

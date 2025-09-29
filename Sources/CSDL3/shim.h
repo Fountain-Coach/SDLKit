@@ -86,6 +86,18 @@ typedef struct SDLKit_Event {
   static inline int SDLKit_RenderFillRect(SDL_Renderer *renderer, const struct SDL_FRect *rect) {
     return SDL_RenderFillRect(renderer, rect);
   }
+  static inline int SDLKit_RenderFillRects(SDL_Renderer *renderer, const struct SDL_FRect *rects, int count) {
+    return SDL_RenderFillRects(renderer, rects, count);
+  }
+  static inline int SDLKit_RenderRects(SDL_Renderer *renderer, const struct SDL_FRect *rects, int count) {
+    return SDL_RenderRects(renderer, rects, count);
+  }
+  static inline int SDLKit_RenderPoints(SDL_Renderer *renderer, const struct SDL_FPoint *points, int count) {
+    return SDL_RenderPoints(renderer, points, count);
+  }
+  static inline int SDLKit_RenderLine(SDL_Renderer *renderer, float x1, float y1, float x2, float y2) {
+    return SDL_RenderLine(renderer, x1, y1, x2, y2);
+  }
   static inline void SDLKit_RenderPresent(SDL_Renderer *renderer) { SDL_RenderPresent(renderer); }
   // Render state helpers
   static inline void SDLKit_GetRenderOutputSize(SDL_Renderer *renderer, int *w, int *h) { SDL_GetRenderOutputSize(renderer, w, h); }
@@ -215,6 +227,10 @@ typedef struct SDLKit_Event {
   int SDLKit_SetRenderDrawColor(SDL_Renderer *renderer, uint8_t r, uint8_t g, uint8_t b, uint8_t a);
   int SDLKit_RenderClear(SDL_Renderer *renderer);
   int SDLKit_RenderFillRect(SDL_Renderer *renderer, const struct SDL_FRect *rect);
+  int SDLKit_RenderFillRects(struct SDL_Renderer *renderer, const struct SDL_FRect *rects, int count);
+  int SDLKit_RenderRects(struct SDL_Renderer *renderer, const struct SDL_FRect *rects, int count);
+  int SDLKit_RenderPoints(struct SDL_Renderer *renderer, const struct SDL_FPoint *points, int count);
+  int SDLKit_RenderLine(struct SDL_Renderer *renderer, float x1, float y1, float x2, float y2);
   void SDLKit_RenderPresent(SDL_Renderer *renderer);
   void SDLKit_GetRenderOutputSize(struct SDL_Renderer *renderer, int *w, int *h);
   void SDLKit_GetRenderScale(struct SDL_Renderer *renderer, float *sx, float *sy);
