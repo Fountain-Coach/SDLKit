@@ -212,8 +212,9 @@ public struct SDLKitJSONAgent {
                 agent.textureFree(windowId: req.window_id, id: req.id)
                 return Self.okJSON()
             case .screenshot:
-                // Not implemented yet; keep endpoint present per spec
-                return Self.errorJSON(code: "not_implemented", details: "screenshot not implemented")
+                let req = try JSONDecoder().decode(WindowOnlyReq.self, from: body)
+                let shot = try agent.screenshotRaw(windowId: req.window_id)
+                return try JSONEncoder().encode(shot)
             case .renderGetOutputSize:
                 let req = try JSONDecoder().decode(WindowOnlyReq.self, from: body)
                 let (w, h) = try agent.getRenderOutputSize(windowId: req.window_id)

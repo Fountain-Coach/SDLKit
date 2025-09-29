@@ -278,6 +278,32 @@ public final class SDLRenderer {
         #endif
     }
 
+    public struct RawScreenshot: Codable {
+        public let raw_base64: String
+        public let width: Int
+        public let height: Int
+        public let pitch: Int
+        public let format: String // e.g., ABGR8888
+    }
+
+    public func captureRawScreenshot() throws -> RawScreenshot {
+        #if canImport(CSDL3) && !HEADLESS_CI
+        let (ow, oh) = try getOutputSize()
+        let pitch = ow * 4
+        var buffer = [UInt8](repeating: 0, count: pitch * oh)
+        guard let r = handle else { throw AgentError.internalError("Renderer not created") }
+        let rc = buffer.withUnsafeMutableBytes { ptr in
+            SDLKit_RenderReadPixels(r, 0, 0, Int32(ow), Int32(oh), ptr.baseAddress, Int32(pitch))
+        }
+        if rc != 0 { throw AgentError.internalError(SDLCore.lastError()) }
+        let data = Data(buffer)
+        let b64 = data.base64EncodedString()
+        return RawScreenshot(raw_base64: b64, width: ow, height: oh, pitch: pitch, format: "ABGR8888")
+        #else
+        throw AgentError.sdlUnavailable
+        #endif
+    }
+
     public func drawText(_ text: String, x: Int, y: Int, color: UInt32, fontPath: String, size: Int) throws {
         #if canImport(CSDL3) && !HEADLESS_CI
         guard let r = handle else { throw AgentError.internalError("Renderer not created") }

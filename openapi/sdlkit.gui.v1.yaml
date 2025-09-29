@@ -658,7 +658,11 @@ paths:
               schema:
                 type: object
                 properties:
-                  png_base64: { type: string }
+                  raw_base64: { type: string, description: ABGR8888 pixel data, row-major }
+                  width: { type: integer }
+                  height: { type: integer }
+                  pitch: { type: integer }
+                  format: { type: string, enum: [ABGR8888] }
 components:
   responses:
     Ok:

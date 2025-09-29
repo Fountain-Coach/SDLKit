@@ -162,6 +162,11 @@ typedef struct SDLKit_Event {
     return SDL_RenderTexture(renderer, tex, src, dst);
   }
   static inline SDL_Surface *SDLKit_LoadBMP(const char *path) { return SDL_LoadBMP(path); }
+  static inline unsigned int SDLKit_PixelFormat_ABGR8888(void) { return SDL_PIXELFORMAT_ABGR8888; }
+  static inline int SDLKit_RenderReadPixels(SDL_Renderer *renderer, int x, int y, int w, int h, void *pixels, int pitch) {
+    SDL_Rect r = { x, y, w, h };
+    return SDL_RenderReadPixels(renderer, &r, SDL_PIXELFORMAT_ABGR8888, pixels, pitch);
+  }
   #else
     static inline int SDLKit_TTF_Available(void) { return 0; }
     typedef void SDLKit_TTF_Font;
@@ -234,6 +239,8 @@ typedef struct SDLKit_Event {
   void SDLKit_GetTextureSize(struct SDL_Texture *tex, int *w, int *h);
   int SDLKit_RenderTexture(struct SDL_Renderer *renderer, struct SDL_Texture *tex, const struct SDL_FRect *src, const struct SDL_FRect *dst);
   struct SDL_Surface *SDLKit_LoadBMP(const char *path);
+  unsigned int SDLKit_PixelFormat_ABGR8888(void);
+  int SDLKit_RenderReadPixels(struct SDL_Renderer *renderer, int x, int y, int w, int h, void *pixels, int pitch);
 #endif
 
 #ifdef __cplusplus

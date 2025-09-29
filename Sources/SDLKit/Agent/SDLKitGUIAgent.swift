@@ -191,6 +191,11 @@ public final class SDLKitGUIAgent {
         try bundle.renderer.disableClipRect()
     }
 
+    public func screenshotRaw(windowId: Int) throws -> SDLRenderer.RawScreenshot {
+        guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }
+        return try bundle.renderer.captureRawScreenshot()
+    }
+
     // New tools: clear, line, circle
     public func clear(windowId: Int, color: UInt32) throws {
         guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }
