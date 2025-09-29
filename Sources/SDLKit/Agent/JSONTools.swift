@@ -364,7 +364,7 @@ public struct SDLKitJSONAgent {
         }
         // Try YAML via converter first
         if let yaml = loadExternalOpenAPIYAML() {
-            #if canImport(Yams)
+            #if OPENAPI_USE_YAMS
             if let data = OpenAPIConverter.yamlToJSON(yaml),
                let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                let info = obj["info"] as? [String: Any],

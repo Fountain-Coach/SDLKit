@@ -2,6 +2,9 @@
 import PackageDescription
 import Foundation
 
+let env = ProcessInfo.processInfo.environment
+let useYams = (env["SDLKIT_NO_YAMS"] ?? "0") != "1"
+
 let package = Package(
     name: "SDLKit",
     platforms: [
@@ -11,10 +14,13 @@ let package = Package(
         .library(name: "SDLKit", targets: ["SDLKit"]),
         .executable(name: "SDLKitDemo", targets: ["SDLKitDemo"])
     ],
-    dependencies: [
-        // YAML parser for OpenAPI YAML→JSON conversion
-        .package(url: "https://github.com/jpsim/Yams.git", from: "5.1.0")
-    ],
+    dependencies: {
+        var deps: [Package.Dependency] = []
+        if useYams {
+            deps.append(.package(url: "https://github.com/jpsim/Yams.git", from: "5.1.0"))
+        }
+        return deps
+    }(),
     targets: [
         .systemLibrary(
             name: "CSDL3",
@@ -42,15 +48,17 @@ let package = Package(
         ),
         .target(
             name: "SDLKit",
-            dependencies: [
-                "CSDL3",
-                .target(name: "CSDL3IMAGE", condition: .when(platforms: [.macOS, .linux])),
-                .product(name: "Yams", package: "Yams")
-            ],
+            dependencies: {
+                var deps: [Target.Dependency] = [
+                    "CSDL3",
+                    .target(name: "CSDL3IMAGE", condition: .when(platforms: [.macOS, .linux]))
+                ]
+                if useYams { deps.append(.product(name: "Yams", package: "Yams")) }
+                return deps
+            }(),
             path: "Sources/SDLKit",
             cSettings: {
                 var flags: [CSetting] = []
-                let env = ProcessInfo.processInfo.environment
                 if let inc = env["SDL3_INCLUDE_DIR"], !inc.isEmpty {
                     flags.append(.unsafeFlags(["-I\(inc)"]))
                 }
@@ -59,9 +67,9 @@ let package = Package(
                 flags.append(.unsafeFlags(["-I/usr/include"]))
                 return flags
             }(),
+            swiftSettings: useYams ? [ .define("OPENAPI_USE_YAMS") ] : [],
             linkerSettings: {
                 var flags: [LinkerSetting] = []
-                let env = ProcessInfo.processInfo.environment
                 if let lib = env["SDL3_LIB_DIR"], !lib.isEmpty {
                     flags.append(.unsafeFlags(["-L\(lib)"]))
                 }

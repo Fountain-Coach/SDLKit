@@ -1,5 +1,5 @@
 import Foundation
-#if canImport(Yams)
+#if OPENAPI_USE_YAMS
 import Yams
 #endif
 
@@ -7,7 +7,7 @@ enum OpenAPIConverter {
     /// Attempts to convert OpenAPI YAML data to JSON data using Yams when available.
     /// Returns nil if conversion is not possible.
     static func yamlToJSON(_ data: Data) -> Data? {
-        #if canImport(Yams)
+        #if OPENAPI_USE_YAMS
         guard let s = String(data: data, encoding: .utf8) else { return nil }
         do {
             let obj = try Yams.load(yaml: s)
