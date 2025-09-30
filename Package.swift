@@ -152,6 +152,14 @@ let package = Package(
 
         targets.append(
             .target(
+                name: "VulkanMinimal",
+                path: "Sources/VulkanMinimal",
+                publicHeadersPath: "include"
+            )
+        )
+
+        targets.append(
+            .target(
                 name: "SDLKitTTF",
                 dependencies: ["SDLKit", "CSDL3TTF"],
                 path: "Sources/SDLKitTTF"
@@ -171,7 +179,8 @@ let package = Package(
                 name: "SDLKitDemo",
                 dependencies: [
                     "SDLKit",
-                    .target(name: "SDLKitTTF", condition: .when(platforms: [.macOS, .linux]))
+                    .target(name: "SDLKitTTF", condition: .when(platforms: [.macOS, .linux])),
+                    .target(name: "VulkanMinimal", condition: .when(platforms: [.linux]))
                 ],
                 path: "Sources/SDLKitDemo"
             )
