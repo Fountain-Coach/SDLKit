@@ -11,7 +11,10 @@ import CSDL3
 #if canImport(Vulkan)
 import Vulkan
 #endif
-#if !canImport(Vulkan)
+#if os(Linux) && canImport(CVulkan)
+import CVulkan
+#endif
+#if !canImport(Vulkan) && !(os(Linux) && canImport(CVulkan))
 public typealias VkInstance = OpaquePointer?
 public typealias VkSurfaceKHR = UInt64
 #endif
