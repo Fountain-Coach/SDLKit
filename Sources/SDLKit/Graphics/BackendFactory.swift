@@ -214,12 +214,14 @@ public final class MetalRenderBackend: StubRenderBackend {
 }
 #endif
 
+#if !os(Windows)
 @MainActor
 public final class D3D12RenderBackend: StubRenderBackend {
     required public init(window: SDLWindow) throws {
         try super.init(kind: .d3d12, window: window)
     }
 }
+#endif
 
 @MainActor
 public final class VulkanRenderBackend: StubRenderBackend {
