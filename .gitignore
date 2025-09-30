@@ -1,7 +1,10 @@
+.env
+
 # macOS
 .DS_Store
 .AppleDouble
 .LSOverride
+
 
 # SwiftPM
 .build/
