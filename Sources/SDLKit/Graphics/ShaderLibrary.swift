@@ -121,7 +121,11 @@ public final class ShaderLibrary {
             vertexEntryPoint: "unlit_triangle_vs",
             fragmentEntryPoint: "unlit_triangle_ps",
             vertexLayout: layout,
-            bindings: [:],
+            // Vertex stage expects a 4x4 transform:
+            // - D3D12: cbuffer at b0
+            // - Metal: constant buffer at [[buffer(1)]] (backend sets it)
+            // - Vulkan: push constants (backend sets it)
+            bindings: [ .vertex: [ BindingSlot(index: 0, kind: .uniformBuffer) ] ],
             artifacts: artifacts
         )
     }

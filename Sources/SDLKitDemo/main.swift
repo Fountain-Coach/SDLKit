@@ -219,13 +219,22 @@ struct DemoApp {
         let mesh = Mesh(vertexBuffer: vertexBuffer, vertexCount: vertices.count)
         let material = Material(shader: ShaderID("unlit_triangle"))
         let node = SceneNode(name: "Triangle", transform: .identity, mesh: mesh, material: material)
-        let scene = Scene(root: node)
+        // Add a second node offset to the right to show multiple nodes
+        let node2 = SceneNode(name: "Triangle2", transform: float4x4.translation(x: 0.8, y: 0, z: 0), mesh: mesh, material: material)
+        let root = SceneNode(name: "Root")
+        root.addChild(node)
+        root.addChild(node2)
+
+        // Simple camera
+        let aspect: Float = Float(window.config.width) / Float(max(1, window.config.height))
+        let cam = Camera.identity(aspect: aspect)
+        let scene = Scene(root: root, camera: cam)
 
         // Animate rotation for a few frames
         let frames = 90
         for i in 0..<frames {
             let t = Float(i) * (Float.pi / 90.0)
-            node.localTransform = .rotationZ(t)
+            node.localTransform = float4x4.rotationZ(t) * float4x4.translation(x: -0.2, y: 0, z: 0)
             try SceneGraphRenderer.updateAndRender(scene: scene, backend: backend)
             Thread.sleep(forTimeInterval: 1.0 / 60.0)
         }

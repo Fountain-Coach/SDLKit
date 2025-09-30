@@ -62,5 +62,49 @@ public extension float4x4 {
                 c.2.0, c.2.1, c.2.2, c.2.3,
                 c.3.0, c.3.1, c.3.2, c.3.3]
     }
-}
 
+    static func perspective(fovYRadians: Float, aspect: Float, zNear: Float, zFar: Float) -> float4x4 {
+        let f = 1.0 / tanf(fovYRadians * 0.5)
+        let a = f / max(0.0001, aspect)
+        let b = zFar / (zNear - zFar)
+        let c = (zFar * zNear) / (zNear - zFar)
+        return float4x4(
+            ( a, 0,  0,  0),
+            ( 0, f,  0,  0),
+            ( 0, 0,  b, -1),
+            ( 0, 0,  c,  0)
+        )
+    }
+
+    static func lookAt(eye: (Float, Float, Float), center: (Float, Float, Float), up: (Float, Float, Float)) -> float4x4 {
+        let ex = eye.0, ey = eye.1, ez = eye.2
+        let cx = center.0, cy = center.1, cz = center.2
+        let ux = up.0, uy = up.1, uz = up.2
+
+        // Forward (z), Right (x), Up (y) for right-handed system
+        var zx = ex - cx, zy = ey - cy, zz = ez - cz
+        let zlen = max(0.000001, sqrtf(zx*zx + zy*zy + zz*zz))
+        zx /= zlen; zy /= zlen; zz /= zlen
+
+        var xx = uy*zz - uz*zy
+        var xy = uz*zx - ux*zz
+        var xz = ux*zy - uy*zx
+        let xlen = max(0.000001, sqrtf(xx*xx + xy*xy + xz*xz))
+        xx /= xlen; xy /= xlen; xz /= xlen
+
+        var yx = zy*xz - zz*xy
+        var yy = zz*xx - zx*xz
+        var yz = zx*xy - zy*xx
+
+        let tx = -(xx*ex + xy*ey + xz*ez)
+        let ty = -(yx*ex + yy*ey + yz*ez)
+        let tz = -(zx*ex + zy*ey + zz*ez)
+
+        return float4x4(
+            (xx, yx, zx, 0),
+            (xy, yy, zy, 0),
+            (xz, yz, zz, 0),
+            (tx, ty, tz, 1)
+        )
+    }
+}

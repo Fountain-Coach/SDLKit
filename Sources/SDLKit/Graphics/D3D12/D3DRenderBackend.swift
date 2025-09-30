@@ -62,6 +62,7 @@ public final class D3D12RenderBackend: RenderBackend {
     private var rtvDescriptorSize: UINT = 0
     private var currentWidth: Int
     private var currentHeight: Int
+    private var transformBuffer: UnsafeMutablePointer<ID3D12Resource>?
 
     private var buffers: [BufferHandle: BufferResource] = [:]
     private var pipelines: [PipelineHandle: PipelineResource] = [:]
@@ -337,9 +338,17 @@ public final class D3D12RenderBackend: RenderBackend {
             pixelShader = nil
         }
 
+        // Root signature with one CBV at b0 for vertex shader (transform)
+        var cbv = D3D12_ROOT_PARAMETER()
+        cbv.ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV
+        cbv.ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX
+        cbv.Anonymous.Descriptor = D3D12_ROOT_DESCRIPTOR(ShaderRegister: 0, RegisterSpace: 0)
         var rootDesc = D3D12_ROOT_SIGNATURE_DESC()
-        rootDesc.NumParameters = 0
-        rootDesc.pParameters = nil
+        var params = [cbv]
+        params.withUnsafeMutableBufferPointer { buf in
+            rootDesc.NumParameters = UINT(buf.count)
+            rootDesc.pParameters = buf.baseAddress
+        }
         rootDesc.NumStaticSamplers = 0
         rootDesc.pStaticSamplers = nil
         rootDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT
@@ -540,6 +549,22 @@ public final class D3D12RenderBackend: RenderBackend {
 
         commandList.pointee.lpVtbl.pointee.SetPipelineState(commandList, pipelineResource.pipelineState)
         commandList.pointee.lpVtbl.pointee.SetGraphicsRootSignature(commandList, pipelineResource.rootSignature)
+        // Upload transform matrix to a small CBV and bind to root slot 0
+        if transformBuffer == nil {
+            try? createTransformBuffer()
+        }
+        if let tbuf = transformBuffer {
+            var mapped: UnsafeMutableRawPointer?
+            _ = tbuf.pointee.lpVtbl.pointee.Map(tbuf, 0, nil, &mapped)
+            if let mapped {
+                // Copy 64 bytes (4x4 floats)
+                var m = transform.toFloatArray()
+                m.withUnsafeBytes { bytes in memcpy(mapped, bytes.baseAddress, min(64, bytes.count)) }
+            }
+            tbuf.pointee.lpVtbl.pointee.Unmap(tbuf, 0, nil)
+            let gpuAddress = tbuf.pointee.lpVtbl.pointee.GetGPUVirtualAddress(tbuf)
+            commandList.pointee.lpVtbl.pointee.SetGraphicsRootConstantBufferView(commandList, 0, gpuAddress)
+        }
         commandList.pointee.lpVtbl.pointee.IASetPrimitiveTopology(commandList, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST)
 
         var view = D3D12_VERTEX_BUFFER_VIEW(
@@ -582,6 +607,40 @@ public final class D3D12RenderBackend: RenderBackend {
         try createCommandAllocators()
         try createCommandList()
         try createFence()
+        try createTransformBuffer()
+    }
+
+    private func createTransformBuffer() throws {
+        guard transformBuffer == nil else { return }
+        guard let device else { throw AgentError.internalError("Device unavailable for transform buffer") }
+        var heapProperties = D3D12_HEAP_PROPERTIES(
+            Type: D3D12_HEAP_TYPE_UPLOAD,
+            CPUPageProperty: D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
+            MemoryPoolPreference: D3D12_MEMORY_POOL_UNKNOWN,
+            CreationNodeMask: 0,
+            VisibleNodeMask: 0
+        )
+        var desc = D3D12_RESOURCE_DESC.Buffer(UINT64(256))
+        var resource: UnsafeMutablePointer<ID3D12Resource>?
+        try withUnsafeMutablePointer(to: &resource) { pointer in
+            try pointer.withMemoryRebound(to: Optional<UnsafeMutableRawPointer>.self, capacity: 1) { raw in
+                try checkHRESULT(
+                    device.pointee.lpVtbl.pointee.CreateCommittedResource(
+                        device,
+                        &heapProperties,
+                        D3D12_HEAP_FLAG_NONE,
+                        &desc,
+                        D3D12_RESOURCE_STATE_GENERIC_READ,
+                        nil,
+                        &IID_ID3D12Resource,
+                        raw
+                    ),
+                    "ID3D12Device.CreateCommittedResource(TransformCB)"
+                )
+            }
+        }
+        guard let resource else { throw AgentError.internalError("Failed to create D3D12 transform buffer") }
+        transformBuffer = resource
     }
 
     private func enableDebugLayer() {

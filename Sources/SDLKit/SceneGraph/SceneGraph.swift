@@ -40,9 +40,22 @@ public final class SceneNode {
 }
 
 @MainActor
+public struct Camera {
+    public var view: float4x4
+    public var projection: float4x4
+    public init(view: float4x4, projection: float4x4) { self.view = view; self.projection = projection }
+    public static func identity(aspect: Float = 1.0) -> Camera {
+        let view = float4x4.identity
+        let proj = float4x4.perspective(fovYRadians: .pi/3, aspect: aspect, zNear: 0.1, zFar: 100.0)
+        return Camera(view: view, projection: proj)
+    }
+}
+
+@MainActor
 public struct Scene {
     public var root: SceneNode
-    public init(root: SceneNode) { self.root = root }
+    public var camera: Camera?
+    public init(root: SceneNode, camera: Camera? = nil) { self.root = root; self.camera = camera }
 }
 
 @MainActor
@@ -54,17 +67,24 @@ public enum SceneGraphRenderer {
         scene.root.updateWorldTransform(parent: .identity)
         try backend.beginFrame()
         defer { try? backend.endFrame() }
-        try renderNode(scene.root, backend: backend, colorFormat: colorFormat, depthFormat: depthFormat)
+        let vp: float4x4
+        if let cam = scene.camera {
+            vp = cam.view * cam.projection
+        } else {
+            vp = .identity
+        }
+        try renderNode(scene.root, backend: backend, colorFormat: colorFormat, depthFormat: depthFormat, vp: vp)
     }
 
-    private static func renderNode(_ node: SceneNode, backend: RenderBackend, colorFormat: TextureFormat, depthFormat: TextureFormat?) throws {
+    private static func renderNode(_ node: SceneNode, backend: RenderBackend, colorFormat: TextureFormat, depthFormat: TextureFormat?, vp: float4x4) throws {
         if let mesh = node.mesh, let material = node.material {
             let pipeline = try pipelineFor(material: material, backend: backend, colorFormat: colorFormat, depthFormat: depthFormat)
             var bindings = BindingSet()
             bindings.setValue(mesh.vertexBuffer, for: 0)
-            try backend.draw(mesh: MeshHandle(), pipeline: pipeline, bindings: bindings, pushConstants: nil, transform: node.worldTransform)
+            let mvp = node.worldTransform * vp
+            try backend.draw(mesh: MeshHandle(), pipeline: pipeline, bindings: bindings, pushConstants: nil, transform: mvp)
         }
-        for child in node.children { try renderNode(child, backend: backend, colorFormat: colorFormat, depthFormat: depthFormat) }
+        for child in node.children { try renderNode(child, backend: backend, colorFormat: colorFormat, depthFormat: depthFormat, vp: vp) }
     }
 
     private static func pipelineFor(material: Material, backend: RenderBackend, colorFormat: TextureFormat, depthFormat: TextureFormat?) throws -> PipelineHandle {
@@ -83,4 +103,3 @@ public enum SceneGraphRenderer {
         return handle
     }
 }
-

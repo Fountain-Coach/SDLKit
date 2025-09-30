@@ -314,7 +314,6 @@ public final class MetalRenderBackend: RenderBackend {
                      transform: float4x4) throws {
         _ = mesh
         _ = pushConstants
-        _ = transform
 
         guard let pipelineResource = pipelines[pipeline] else {
             throw AgentError.internalError("Unknown pipeline handle")
@@ -330,6 +329,11 @@ public final class MetalRenderBackend: RenderBackend {
 
         let encoder = try obtainRenderEncoder(for: pipelineResource, commandBuffer: commandBuffer)
         encoder.setRenderPipelineState(pipelineResource.state)
+        // Push transform as vertex bytes at buffer index 1 (matches MSL [[buffer(1)]])
+        var matrix = transform.toFloatArray()
+        matrix.withUnsafeBytes { bytes in
+            encoder.setVertexBytes(bytes.baseAddress!, length: bytes.count, index: 1)
+        }
         encoder.setVertexBuffer(vertexResource.buffer, offset: 0, index: 0)
 
         let vertexCount: Int
