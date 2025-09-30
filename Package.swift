@@ -121,7 +121,8 @@ let package = Package(
                 dependencies: {
                     var deps: [Target.Dependency] = [
                         "CSDL3",
-                        .target(name: "CSDL3IMAGE", condition: .when(platforms: [.macOS, .linux]))
+                        .target(name: "CSDL3IMAGE", condition: .when(platforms: [.macOS, .linux])),
+                        .target(name: "CVulkan", condition: .when(platforms: [.linux]))
                     ]
                     if useYams { deps.append(.product(name: "Yams", package: "Yams")) }
                     return deps
@@ -152,6 +153,16 @@ let package = Package(
                 }(),
                 plugins: [
                     .plugin(name: "ShaderBuildPlugin")
+                ]
+            )
+        )
+
+        targets.append(
+            .systemLibrary(
+                name: "CVulkan",
+                pkgConfig: "vulkan",
+                providers: [
+                    .apt(["libvulkan-dev"]) // Linux
                 ]
             )
         )
