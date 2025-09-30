@@ -4,6 +4,7 @@
 
 #pragma once
 #include <stdint.h>
+#include <stdbool.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -31,6 +32,18 @@ typedef struct SDLKit_Event {
 
 #if __has_include(<SDL3/SDL.h>)
   #include <SDL3/SDL.h>
+  #if __has_include(<SDL3/SDL_properties.h>)
+    #include <SDL3/SDL_properties.h>
+  #endif
+  #if __has_include(<SDL3/SDL_syswm.h>)
+    #include <SDL3/SDL_syswm.h>
+  #endif
+  #if __has_include(<SDL3/SDL_metal.h>)
+    #include <SDL3/SDL_metal.h>
+  #endif
+  #if __has_include(<SDL3/SDL_vulkan.h>)
+    #include <SDL3/SDL_vulkan.h>
+  #endif
   static inline const char *SDLKit_GetError(void) { return SDL_GetError(); }
   static inline int SDLKit_Init(uint32_t flags) { return SDL_Init(flags); }
   static inline SDL_Window *SDLKit_CreateWindow(const char *title, int32_t width, int32_t height, uint32_t flags) {
@@ -110,6 +123,41 @@ typedef struct SDLKit_Event {
   static inline int SDLKit_SetRenderClipRect(SDL_Renderer *renderer, int x, int y, int w, int h) { SDL_Rect r = { x, y, w, h }; return SDL_SetRenderClipRect(renderer, &r); }
   static inline int SDLKit_DisableRenderClipRect(SDL_Renderer *renderer) { return SDL_SetRenderClipRect(renderer, NULL); }
   static inline void SDLKit_GetRenderClipRect(SDL_Renderer *renderer, int *x, int *y, int *w, int *h) { SDL_Rect r; SDL_GetRenderClipRect(renderer, &r); if (x) *x = r.x; if (y) *y = r.y; if (w) *w = r.w; if (h) *h = r.h; }
+
+  static inline void *SDLKit_MetalLayerForWindow(SDL_Window *window) {
+    #if __has_include(<SDL3/SDL_metal.h>)
+      if (!window) return NULL;
+      return SDL_Metal_GetLayer(window);
+    #else
+      (void)window;
+      return NULL;
+    #endif
+  }
+
+  static inline void *SDLKit_Win32HWND(SDL_Window *window) {
+    (void)window;
+    #if defined(SDL_PROP_WINDOW_WIN32_HWND_POINTER)
+      if (!window) return NULL;
+      SDL_PropertiesID props = SDL_GetWindowProperties(window);
+      if (!props) return NULL;
+      return SDL_GetProperty(props, SDL_PROP_WINDOW_WIN32_HWND_POINTER, NULL);
+    #else
+      return NULL;
+    #endif
+  }
+
+  static inline bool SDLKit_CreateVulkanSurface(SDL_Window *window, VkInstance instance, VkSurfaceKHR *surface) {
+    #if __has_include(<SDL3/SDL_vulkan.h>)
+      if (!window || !surface) {
+        if (surface) { *surface = (VkSurfaceKHR)0; }
+        return false;
+      }
+      return SDL_Vulkan_CreateSurface(window, instance, NULL, surface);
+    #else
+      (void)instance; (void)surface;
+      return false;
+    #endif
+  }
 
   static inline void SDLKit__FillEvent(SDLKit_Event *out, const SDL_Event *ev) {
     out->type = SDLKIT_EVENT_NONE;
@@ -204,6 +252,8 @@ typedef struct SDLKit_Event {
   typedef struct SDL_FRect { float x; float y; float w; float h; } SDL_FRect;
   typedef struct SDL_FPoint { float x; float y; } SDL_FPoint;
   typedef struct SDLKit_TTF_Font { int _unused_font; } SDLKit_TTF_Font;
+  typedef struct VkInstance_T *VkInstance;
+  typedef uint64_t VkSurfaceKHR;
   const char *SDLKit_GetError(void);
   int SDLKit_Init(uint32_t flags);
   SDL_Window *SDLKit_CreateWindow(const char *title, int32_t width, int32_t height, uint32_t flags);
@@ -277,6 +327,9 @@ typedef struct SDLKit_Event {
   struct SDL_RWops *SDLKit_RWFromFile(const char *file, const char *mode);
   unsigned int SDLKit_PixelFormat_ABGR8888(void);
   int SDLKit_RenderReadPixels(struct SDL_Renderer *renderer, int x, int y, int w, int h, void *pixels, int pitch);
+  void *SDLKit_MetalLayerForWindow(SDL_Window *window);
+  void *SDLKit_Win32HWND(SDL_Window *window);
+  bool SDLKit_CreateVulkanSurface(SDL_Window *window, VkInstance instance, VkSurfaceKHR *surface);
   void SDLKit_Quit(void);
 
   int SDLKitStub_DestroyRendererCallCount(void);
