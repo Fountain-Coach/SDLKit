@@ -21,6 +21,15 @@ SDLKit is a Swift Package that wraps SDL3 and exposes a Swift‑friendly API and
 - `Sources/SDLKit/Agent/SDLKitGUIAgent.swift:1` — agent with stubbed tool methods.
 - `Tests/SDLKitTests/SDLKitTests.swift:1` — minimal XCTest.
 
+### Planned Extensions
+
+In addition to the existing sources above, upcoming work for the 3D and compute extension will add new folders:
+- `Sources/SDLKit/Graphics/` — platform‑specific backends and a `RenderBackend` protocol.
+- `Sources/SDLKit/Scene/` — scene graph types (`Scene`, `SceneNode`, `Camera`, `Light`, `Mesh`, `Material`).
+- `Sources/SDLKit/Shaders/` — single‑source shader code and build scripts.
+- `Sources/SDLKit/Compute/` — GPU compute interfaces.
+These directories are not yet present in the repository but are described in the implementation strategy and `AGENTS.md`.
+
 ## Using Our SDL Fork
 
 This package is designed to work with the Fountain‑Coach SDL3 fork:
@@ -82,7 +91,7 @@ The agent reads several environment variables at runtime. Key options include:
 - If `font` is omitted, the agent tries `system:default`.
 - If `size` is omitted, the agent uses `16`.
 - `SDLKitState.isTextRenderingEnabled` returns `true` once the optional `SDLKitTTF` product (and SDL_ttf) are linked, allowing 
-  text rendering paths to activate.
+text rendering paths to activate.
 
 macOS CI: not enabled by default. If you need macOS validation, set up a self‑hosted macOS runner and add a job targeting `runs-on: [self-hosted, macOS]`.
 
@@ -113,6 +122,14 @@ See `AGENTS.md:1` for the `sdlkit.gui.v1` tool definitions, error codes, event s
 - Add optional SDL_ttf text rendering and color parsing.
 - Headless/CI execution paths and cross‑platform tests.
 - OpenAPI/tool wiring samples and end‑to‑end examples.
+
+### 3D & Compute Extension Tasks (planned)
+
+- Integrate native GPU contexts (Metal, Direct3D, Vulkan) behind a new `RenderBackend` abstraction.
+- Add a cross‑platform shader pipeline (HLSL → SPIR‑V/DXIL/MSL) via a `ShaderAgent`.
+- Introduce a high‑level scene graph to manage 3D objects, lights and cameras via a `SceneGraphAgent`.
+- Expose GPU compute pipelines to accelerate physics, audio and machine‑learning workloads via a `ComputeAgent`.
+- Document the new agent protocols and extension architecture in `AGENTS.md` and the Implementation Strategy.
 
 ## Contributing
 
@@ -198,3 +215,28 @@ Curl examples:
 - Present: `curl -sX POST localhost:8080/agent/gui/present -d '{"window_id":1}' -H 'Content-Type: application/json'`
 
 Note: GUI requires SDL3 installed and `SDLKIT_GUI_ENABLED=1` in your environment.
+
+## 3D & Compute Extension (pre‑alpha)
+
+We are actively designing and implementing a major extension to SDLKit that brings **cross‑platform 3D rendering** and **GPU compute** support to the framework.  This extension will coexist with the existing 2D agent and will enable advanced graphics and compute workflows within the FountainAI ecosystem.
+
+### Highlights
+
+- **Scene Graph:** A hierarchy of `Scene`, `SceneNode`, `Camera`, `Light`, `Mesh` and `Material` types for organising 3D content.
+- **Multi‑API Rendering:** A `GraphicsAgent` will manage native GPU contexts and backends for **Metal**, **Direct3D** and **Vulkan**, providing a unified `RenderBackend` interface.
+- **Shader Pipeline:** Shaders authored in HLSL will be compiled at build time into platform‑specific formats (MSL/DXIL/SPIR‑V) via a `ShaderAgent`.
+- **GPU Compute:** A `ComputeAgent` will expose compute pipelines to accelerate audio DSP, physics simulations and machine‑learning workloads.
+- **Modular Design:** These capabilities are modularised into dedicated agents (see `AGENTS.md` for full specifications) and will integrate non‑destructively with the existing 2D API.
+
+See the **Implementation Strategy for Extending SDLKit with 3D Graphics, Multi‑API Shaders, and GPU Compute (PDF)** in this repo and **AGENTS.md** for the detailed design and current status.
+
+## Agent Specifications
+
+The 3D & compute extension introduces several specialized agents.  For a high‑level overview, start with `AGENTS.md`.  Each agent has its own detailed specification in a companion Markdown file at the root of this repository:
+
+- `GraphicsAgent.md` — implementation and API contract for the low‑level rendering backend (Metal, Direct3D, Vulkan).
+- `ShaderAgent.md` — compiler toolchain and pipeline creation for shaders (HLSL → SPIR‑V/DXIL/MSL).
+- `ComputeAgent.md` — GPU compute abstractions for tasks such as audio DSP, physics and machine learning.
+- `SceneGraphAgent.md` — high‑level scene graph API (nodes, cameras, lights, meshes, materials) and draw submission protocol.
+
+Consult these documents when contributing to or integrating with the 3D & compute extension.
