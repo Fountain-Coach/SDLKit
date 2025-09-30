@@ -92,7 +92,8 @@ public final class ShaderLibrary {
 
     private static func loadModules(root: URL) -> [ShaderID: ShaderModule] {
         let unlit = makeUnlitTriangleModule(root: root)
-        return [unlit.id: unlit]
+        let lit = makeBasicLitModule(root: root)
+        return [unlit.id: unlit, lit.id: lit]
     }
 
     private static func makeUnlitTriangleModule(root: URL) -> ShaderModule {
@@ -125,6 +126,38 @@ public final class ShaderLibrary {
             // - D3D12: cbuffer at b0
             // - Metal: constant buffer at [[buffer(1)]] (backend sets it)
             // - Vulkan: push constants (backend sets it)
+            bindings: [ .vertex: [ BindingSlot(index: 0, kind: .uniformBuffer) ] ],
+            artifacts: artifacts
+        )
+    }
+
+    private static func makeBasicLitModule(root: URL) -> ShaderModule {
+        let id = ShaderID("basic_lit")
+        let dxilRoot = root.appendingPathComponent("dxil", isDirectory: true)
+        let spirvRoot = root.appendingPathComponent("spirv", isDirectory: true)
+        let metalRoot = root.appendingPathComponent("metal", isDirectory: true)
+        let artifacts = ShaderModuleArtifacts(
+            dxilVertex: ShaderLibrary.existingFile(dxilRoot.appendingPathComponent("basic_lit_vs.dxil")),
+            dxilFragment: ShaderLibrary.existingFile(dxilRoot.appendingPathComponent("basic_lit_ps.dxil")),
+            spirvVertex: ShaderLibrary.existingFile(spirvRoot.appendingPathComponent("basic_lit.vert.spv")),
+            spirvFragment: ShaderLibrary.existingFile(spirvRoot.appendingPathComponent("basic_lit.frag.spv")),
+            metalLibrary: ShaderLibrary.existingFile(metalRoot.appendingPathComponent("basic_lit.metallib"))
+        )
+
+        let layout = VertexLayout(
+            stride: MemoryLayout<Float>.size * 9,
+            attributes: [
+                .init(index: 0, semantic: "POSITION", format: .float3, offset: 0),
+                .init(index: 1, semantic: "NORMAL", format: .float3, offset: MemoryLayout<Float>.size * 3),
+                .init(index: 2, semantic: "COLOR", format: .float3, offset: MemoryLayout<Float>.size * 6)
+            ]
+        )
+
+        return ShaderModule(
+            id: id,
+            vertexEntryPoint: "basic_lit_vs",
+            fragmentEntryPoint: "basic_lit_ps",
+            vertexLayout: layout,
             bindings: [ .vertex: [ BindingSlot(index: 0, kind: .uniformBuffer) ] ],
             artifacts: artifacts
         )

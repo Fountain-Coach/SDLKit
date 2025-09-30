@@ -401,31 +401,32 @@ public final class D3D12RenderBackend: RenderBackend {
             throw AgentError.internalError("Failed to create D3D12 root signature")
         }
 
-        let semanticStrings = ["POSITION", "COLOR"]
-        let semanticArrays = semanticStrings.map { $0.utf8CString }
+        // Build input layout from module.vertexLayout
+        let attributes = module.vertexLayout.attributes
+        let semanticArrays = attributes.map { $0.semantic.utf8CString }
         let semanticPointers = semanticArrays.map { UnsafePointer($0) }
-        let colorOffset = module.vertexLayout.attributes.first(where: { $0.semantic == "COLOR" })?.offset ?? 12
-
-        var inputElements: [D3D12_INPUT_ELEMENT_DESC] = [
-            D3D12_INPUT_ELEMENT_DESC(
-                SemanticName: semanticPointers[0],
-                SemanticIndex: 0,
-                Format: DXGI_FORMAT_R32G32B32_FLOAT,
-                InputSlot: 0,
-                AlignedByteOffset: 0,
-                InputSlotClass: D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA,
-                InstanceDataStepRate: 0
-            ),
-            D3D12_INPUT_ELEMENT_DESC(
-                SemanticName: semanticPointers[1],
-                SemanticIndex: 0,
-                Format: DXGI_FORMAT_R32G32B32_FLOAT,
-                InputSlot: 0,
-                AlignedByteOffset: UINT(colorOffset),
-                InputSlotClass: D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA,
-                InstanceDataStepRate: 0
+        func dxgiFormat(for fmt: VertexFormat) -> DXGI_FORMAT {
+            switch fmt {
+            case .float2: return DXGI_FORMAT_R32G32_FLOAT
+            case .float3: return DXGI_FORMAT_R32G32B32_FLOAT
+            case .float4: return DXGI_FORMAT_R32G32B32A32_FLOAT
+            }
+        }
+        var inputElements: [D3D12_INPUT_ELEMENT_DESC] = []
+        inputElements.reserveCapacity(attributes.count)
+        for (i, attr) in attributes.enumerated() {
+            inputElements.append(
+                D3D12_INPUT_ELEMENT_DESC(
+                    SemanticName: semanticPointers[i],
+                    SemanticIndex: 0,
+                    Format: dxgiFormat(for: attr.format),
+                    InputSlot: 0,
+                    AlignedByteOffset: UINT(attr.offset),
+                    InputSlotClass: D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA,
+                    InstanceDataStepRate: 0
+                )
             )
-        ]
+        }
 
         var pipelineDesc = D3D12_GRAPHICS_PIPELINE_STATE_DESC()
         pipelineDesc.pRootSignature = rootSignature

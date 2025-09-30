@@ -225,10 +225,8 @@ struct DemoApp {
         root.addChild(node)
         root.addChild(node2)
 
-        // Simple camera
-        let aspect: Float = Float(window.config.width) / Float(max(1, window.config.height))
-        let cam = Camera.identity(aspect: aspect)
-        let scene = Scene(root: root, camera: cam)
+        // Scene without camera (NDC space) to keep M1/M2 simple
+        let scene = Scene(root: root)
 
         // Animate rotation for a few frames
         let frames = 90

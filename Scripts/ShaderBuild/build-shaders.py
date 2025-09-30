@@ -11,6 +11,12 @@ MODULES = [
         "source": Path("Shaders/graphics/unlit_triangle.hlsl"),
         "vertex_entry": "unlit_triangle_vs",
         "fragment_entry": "unlit_triangle_ps",
+    },
+    {
+        "name": "basic_lit",
+        "source": Path("Shaders/graphics/basic_lit.hlsl"),
+        "vertex_entry": "basic_lit_vs",
+        "fragment_entry": "basic_lit_ps",
     }
 ]
 

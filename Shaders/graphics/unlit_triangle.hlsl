@@ -1,20 +1,27 @@
+// HLSL reference for unlit triangle with transform (moved under Shaders/graphics for plugin)
 struct VSInput {
-    float3 position : POSITION;
-    float3 color : COLOR0;
+    float3 POSITION : POSITION;
+    float3 COLOR    : COLOR;
 };
 
 struct VSOutput {
     float4 position : SV_Position;
-    float3 color : COLOR0;
+    float3 color    : COLOR;
+};
+
+// Vulkan SPIR-V path: mark as push constants; ignored on DXIL path
+[[vk::push_constant]] cbuffer SceneCB : register(b0)
+{
+    float4x4 uMVP;
 };
 
 VSOutput unlit_triangle_vs(VSInput input) {
-    VSOutput output;
-    output.position = float4(input.position, 1.0f);
-    output.color = input.color;
-    return output;
+    VSOutput o;
+    o.position = mul(float4(input.POSITION, 1.0), uMVP);
+    o.color = input.COLOR;
+    return o;
 }
 
-float4 unlit_triangle_ps(VSOutput input) : SV_Target0 {
-    return float4(input.color, 1.0f);
+float4 unlit_triangle_ps(VSOutput input) : SV_Target {
+    return float4(input.color, 1.0);
 }
