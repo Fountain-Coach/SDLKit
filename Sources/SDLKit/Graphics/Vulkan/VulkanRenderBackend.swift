@@ -43,6 +43,32 @@ public final class VulkanRenderBackend: RenderBackend {
     private var depthImage: VkImage? = nil
     private var depthMemory: VkDeviceMemory? = nil
     private var depthView: VkImageView? = nil
+
+    // Command and sync
+    private var commandPool: VkCommandPool? = nil
+    private var commandBuffers: [VkCommandBuffer?] = []
+    private var imageAvailableSemaphores: [VkSemaphore?] = []
+    private var renderFinishedSemaphores: [VkSemaphore?] = []
+    private var inFlightFences: [VkFence?] = []
+    private var maxFramesInFlight: Int = 2
+    private var currentFrame: Int = 0
+    private var frameActive: Bool = false
+    private var currentImageIndex: UInt32 = 0
+
+    // Pipeline and geometry
+    private struct PipelineResource {
+        var handle: PipelineHandle
+        var pipelineLayout: VkPipelineLayout?
+        var pipeline: VkPipeline?
+        var vertexStride: UInt32
+    }
+    private var pipelines: [PipelineHandle: PipelineResource] = [:]
+    private var builtinPipeline: PipelineHandle? = nil
+
+    // Builtin vertex buffer (pos.xyz + color.xyz)
+    private var builtinVertexBuffer: VkBuffer? = nil
+    private var builtinVertexMemory: VkDeviceMemory? = nil
+    private var builtinVertexCount: Int = 0
     #endif
 
     public required init(window: SDLWindow) throws {
@@ -62,6 +88,24 @@ public final class VulkanRenderBackend: RenderBackend {
         if let dev = device {
             _ = vkDeviceWaitIdle(dev)
             destroySwapchainResources()
+            // Destroy sync objects
+            for s in imageAvailableSemaphores { if let sem = s { vkDestroySemaphore(dev, sem, nil) } }
+            for s in renderFinishedSemaphores { if let sem = s { vkDestroySemaphore(dev, sem, nil) } }
+            for f in inFlightFences { if let ff = f { vkDestroyFence(dev, ff, nil) } }
+            imageAvailableSemaphores.removeAll(); renderFinishedSemaphores.removeAll(); inFlightFences.removeAll()
+            // Destroy builtin buffer
+            if let vb = builtinVertexBuffer { vkDestroyBuffer(dev, vb, nil) }
+            if let vm = builtinVertexMemory { vkFreeMemory(dev, vm, nil) }
+            builtinVertexBuffer = nil; builtinVertexMemory = nil
+            // Destroy pipelines
+            for (_, p) in pipelines {
+                if let pl = p.pipeline { vkDestroyPipeline(dev, pl, nil) }
+                if let layout = p.pipelineLayout { vkDestroyPipelineLayout(dev, layout, nil) }
+            }
+            pipelines.removeAll(); builtinPipeline = nil
+            // Destroy command pool
+            if let pool = commandPool { vkDestroyCommandPool(dev, pool, nil) }
+            commandPool = nil
             vkDestroyDevice(dev, nil)
         }
         if vkSurface != 0, let inst = vkInstance.handle {
@@ -76,8 +120,121 @@ public final class VulkanRenderBackend: RenderBackend {
     }
 
     // MARK: - RenderBackend
-    public func beginFrame() throws { try core.beginFrame() }
-    public func endFrame() throws { try core.endFrame() }
+    public func beginFrame() throws {
+        #if canImport(CVulkan)
+        guard let dev = device, let sc = swapchain, let gq = graphicsQueue else {
+            throw AgentError.internalError("Vulkan device/swapchain not initialized")
+        }
+        try ensureCommandPoolAndSync()
+
+        // Wait for the previous frame to finish
+        if let fence = inFlightFences[currentFrame] {
+            _ = vkWaitForFences(dev, 1, [fence], VK_TRUE, UInt64.max)
+            _ = vkResetFences(dev, 1, [fence])
+        }
+
+        // Acquire next image
+        var imgIndex: UInt32 = 0
+        let acquireRes = vkAcquireNextImageKHR(dev, sc, UInt64.max, imageAvailableSemaphores[currentFrame], nil, &imgIndex)
+        if acquireRes == VK_ERROR_OUT_OF_DATE_KHR {
+            try recreateSwapchain(width: surfaceExtent.width, height: surfaceExtent.height)
+            return try beginFrame() // retry once
+        } else if acquireRes != VK_SUCCESS && acquireRes != VK_SUBOPTIMAL_KHR {
+            throw AgentError.internalError("vkAcquireNextImageKHR failed (res=\(acquireRes))")
+        }
+        currentImageIndex = imgIndex
+
+        // Begin command buffer
+        guard let cmd = commandBuffers[currentFrame] else {
+            throw AgentError.internalError("Command buffer unavailable for frame")
+        }
+        var beginInfo = VkCommandBufferBeginInfo()
+        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO
+        beginInfo.flags = UInt32(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT)
+        _ = withUnsafePointer(to: beginInfo) { ptr in vkBeginCommandBuffer(cmd, ptr) }
+
+        // Begin render pass
+        guard let rp = renderPass, Int(currentImageIndex) < framebuffers.count, let fb = framebuffers[Int(currentImageIndex)] else {
+            throw AgentError.internalError("Render pass or framebuffer not ready")
+        }
+        var clearColor = VkClearValue(color: VkClearColorValue(float32: (0.05, 0.05, 0.08, 1.0)))
+        var clearDepth = VkClearValue(depthStencil: VkClearDepthStencilValue(depth: 1.0, stencil: 0))
+        var clears = [clearColor, clearDepth]
+
+        var rpBegin = VkRenderPassBeginInfo()
+        rpBegin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO
+        rpBegin.renderPass = rp
+        rpBegin.framebuffer = fb
+        rpBegin.renderArea = VkRect2D(offset: VkOffset2D(x: 0, y: 0), extent: surfaceExtent)
+        clears.withUnsafeMutableBufferPointer { buf in
+            rpBegin.clearValueCount = UInt32(buf.count)
+            rpBegin.pClearValues = buf.baseAddress
+        }
+        withUnsafePointer(to: rpBegin) { ptr in
+            vkCmdBeginRenderPass(cmd, ptr, VK_SUBPASS_CONTENTS_INLINE)
+        }
+
+        // Set viewport & scissor dynamically
+        var viewport = VkViewport(x: 0, y: 0, width: Float(surfaceExtent.width), height: Float(surfaceExtent.height), minDepth: 0.0, maxDepth: 1.0)
+        withUnsafePointer(to: &viewport) { vptr in vkCmdSetViewport(cmd, 0, 1, vptr) }
+        var scissor = VkRect2D(offset: VkOffset2D(x: 0, y: 0), extent: surfaceExtent)
+        withUnsafePointer(to: &scissor) { sptr in vkCmdSetScissor(cmd, 0, 1, sptr) }
+
+        frameActive = true
+        #else
+        try core.beginFrame()
+        #endif
+    }
+
+    public func endFrame() throws {
+        #if canImport(CVulkan)
+        guard frameActive, let dev = device, let gq = graphicsQueue, let pq = presentQueue else {
+            throw AgentError.internalError("endFrame called without active frame")
+        }
+        guard let cmd = commandBuffers[currentFrame] else { throw AgentError.internalError("Missing command buffer") }
+        vkCmdEndRenderPass(cmd)
+        _ = vkEndCommandBuffer(cmd)
+
+        // Submit
+        var waitStageMask: VkPipelineStageFlags = UInt32(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT)
+        var waitSemaphore = imageAvailableSemaphores[currentFrame]
+        var signalSemaphore = renderFinishedSemaphores[currentFrame]
+        var cmdLocal = cmd
+        var submit = VkSubmitInfo()
+        submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO
+        submit.waitSemaphoreCount = 1
+        withUnsafePointer(to: &waitSemaphore) { ws in submit.pWaitSemaphores = ws }
+        submit.pWaitDstStageMask = &waitStageMask
+        submit.commandBufferCount = 1
+        withUnsafePointer(to: &cmdLocal) { cp in submit.pCommandBuffers = cp }
+        submit.signalSemaphoreCount = 1
+        withUnsafePointer(to: &signalSemaphore) { sp in submit.pSignalSemaphores = sp }
+
+        _ = withUnsafePointer(to: submit) { ptr in vkQueueSubmit(gq, 1, ptr, inFlightFences[currentFrame]) }
+
+        // Present
+        var pi = VkPresentInfoKHR()
+        pi.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR
+        pi.waitSemaphoreCount = 1
+        withUnsafePointer(to: &signalSemaphore) { sp in pi.pWaitSemaphores = sp }
+        pi.swapchainCount = 1
+        var scOpt = swapchain
+        withUnsafePointer(to: &scOpt) { scPtr in pi.pSwapchains = scPtr }
+        var imageIndexCopy = currentImageIndex
+        withUnsafePointer(to: &imageIndexCopy) { idxPtr in pi.pImageIndices = idxPtr }
+        let presentRes = withUnsafePointer(to: pi) { ptr in vkQueuePresentKHR(pq, ptr) }
+        if presentRes == VK_ERROR_OUT_OF_DATE_KHR || presentRes == VK_SUBOPTIMAL_KHR {
+            try recreateSwapchain(width: surfaceExtent.width, height: surfaceExtent.height)
+        } else if presentRes != VK_SUCCESS {
+            throw AgentError.internalError("vkQueuePresentKHR failed (res=\(presentRes))")
+        }
+
+        currentFrame = (currentFrame + 1) % maxFramesInFlight
+        frameActive = false
+        #else
+        try core.endFrame()
+        #endif
+    }
     public func resize(width: Int, height: Int) throws {
         core.resize(width: width, height: height)
         #if canImport(CVulkan)
@@ -86,7 +243,13 @@ public final class VulkanRenderBackend: RenderBackend {
         }
         #endif
     }
-    public func waitGPU() throws { core.waitGPU() }
+    public func waitGPU() throws {
+        #if canImport(CVulkan)
+        if let dev = device { _ = vkDeviceWaitIdle(dev) }
+        #else
+        core.waitGPU()
+        #endif
+    }
 
     public func createBuffer(bytes: UnsafeRawPointer?, length: Int, usage: BufferUsage) throws -> BufferHandle {
         try core.createBuffer(bytes: bytes, length: length, usage: usage)
@@ -95,9 +258,200 @@ public final class VulkanRenderBackend: RenderBackend {
         core.createTexture(descriptor: descriptor, initialData: initialData)
     }
     public func destroy(_ handle: ResourceHandle) { core.destroy(handle) }
-    public func makePipeline(_ desc: GraphicsPipelineDescriptor) throws -> PipelineHandle { core.makePipeline(desc) }
+    public func makePipeline(_ desc: GraphicsPipelineDescriptor) throws -> PipelineHandle {
+        #if canImport(CVulkan)
+        guard let dev = device else { throw AgentError.internalError("Vulkan device not ready") }
+        let module = try ShaderLibrary.shared.module(for: desc.shader)
+        try module.validateVertexLayout(desc.vertexLayout)
+        if let existing = pipelines.values.first(where: { $0.vertexStride == UInt32(desc.vertexLayout.stride) }) {
+            return existing.handle
+        }
+
+        // Shader modules
+        let vsURL = try module.artifacts.requireSPIRVVertex(for: module.id)
+        let fsURL = module.artifacts.spirvFragment
+        let vsData = try Data(contentsOf: vsURL)
+        var vsModule: VkShaderModule? = nil
+        var fsModule: VkShaderModule? = nil
+        try vsData.withUnsafeBytes { bytes in
+            var smi = VkShaderModuleCreateInfo()
+            smi.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO
+            smi.codeSize = bytes.count
+            smi.pCode = bytes.bindMemory(to: UInt32.self).baseAddress
+            let r = withUnsafePointer(to: smi) { ptr in vkCreateShaderModule(dev, ptr, nil, &vsModule) }
+            if r != VK_SUCCESS || vsModule == nil { throw AgentError.internalError("vkCreateShaderModule(VS) failed (res=\(r))") }
+        }
+        if let fsURL {
+            let fsData = try Data(contentsOf: fsURL)
+            try fsData.withUnsafeBytes { bytes in
+                var smi = VkShaderModuleCreateInfo()
+                smi.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO
+                smi.codeSize = bytes.count
+                smi.pCode = bytes.bindMemory(to: UInt32.self).baseAddress
+                let r = withUnsafePointer(to: smi) { ptr in vkCreateShaderModule(dev, ptr, nil, &fsModule) }
+                if r != VK_SUCCESS || fsModule == nil { throw AgentError.internalError("vkCreateShaderModule(FS) failed (res=\(r))") }
+            }
+        }
+
+        // Pipeline stages
+        var stageInfos: [VkPipelineShaderStageCreateInfo] = []
+        var vsStage = VkPipelineShaderStageCreateInfo()
+        vsStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO
+        vsStage.stage = UInt32(VK_SHADER_STAGE_VERTEX_BIT)
+        vsStage.module = vsModule
+        module.vertexEntryPoint.withCString { namePtr in vsStage.pName = namePtr }
+        stageInfos.append(vsStage)
+        if let fsModule {
+            var fsStage = VkPipelineShaderStageCreateInfo()
+            fsStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO
+            fsStage.stage = UInt32(VK_SHADER_STAGE_FRAGMENT_BIT)
+            fsStage.module = fsModule
+            (module.fragmentEntryPoint ?? "main").withCString { namePtr in fsStage.pName = namePtr }
+            stageInfos.append(fsStage)
+        }
+
+        // Vertex input
+        var binding = VkVertexInputBindingDescription(binding: 0, stride: UInt32(desc.vertexLayout.stride), inputRate: VK_VERTEX_INPUT_RATE_VERTEX)
+        var attributes: [VkVertexInputAttributeDescription] = []
+        for a in desc.vertexLayout.attributes {
+            var attr = VkVertexInputAttributeDescription()
+            attr.binding = 0
+            attr.location = UInt32(a.index)
+            attr.offset = UInt32(a.offset)
+            attr.format = convertVertexFormat(a.format)
+            attributes.append(attr)
+        }
+        var vi = VkPipelineVertexInputStateCreateInfo()
+        vi.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO
+        withUnsafePointer(to: &binding) { bPtr in
+            vi.vertexBindingDescriptionCount = 1
+            vi.pVertexBindingDescriptions = bPtr
+        }
+        attributes.withUnsafeMutableBufferPointer { ab in
+            vi.vertexAttributeDescriptionCount = UInt32(ab.count)
+            vi.pVertexAttributeDescriptions = ab.baseAddress
+        }
+
+        var ia = VkPipelineInputAssemblyStateCreateInfo()
+        ia.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO
+        ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
+        ia.primitiveRestartEnable = VK_FALSE
+
+        var viewportState = VkPipelineViewportStateCreateInfo()
+        viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO
+        viewportState.viewportCount = 1
+        viewportState.scissorCount = 1
+
+        var raster = VkPipelineRasterizationStateCreateInfo()
+        raster.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO
+        raster.depthClampEnable = VK_FALSE
+        raster.rasterizerDiscardEnable = VK_FALSE
+        raster.polygonMode = VK_POLYGON_MODE_FILL
+        raster.cullMode = UInt32(VK_CULL_MODE_NONE.rawValue)
+        raster.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE
+        raster.depthBiasEnable = VK_FALSE
+        raster.lineWidth = 1.0
+
+        var multisample = VkPipelineMultisampleStateCreateInfo()
+        multisample.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO
+        multisample.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT
+        multisample.sampleShadingEnable = VK_FALSE
+
+        var depthStencil = VkPipelineDepthStencilStateCreateInfo()
+        depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO
+        depthStencil.depthTestEnable = VK_TRUE
+        depthStencil.depthWriteEnable = VK_TRUE
+        depthStencil.depthCompareOp = VK_COMPARE_OP_LESS
+        depthStencil.depthBoundsTestEnable = VK_FALSE
+        depthStencil.stencilTestEnable = VK_FALSE
+
+        var colorBlendAttachment = VkPipelineColorBlendAttachmentState()
+        colorBlendAttachment.colorWriteMask = UInt32(VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT)
+        colorBlendAttachment.blendEnable = VK_FALSE
+        var colorBlend = VkPipelineColorBlendStateCreateInfo()
+        colorBlend.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO
+        withUnsafePointer(to: &colorBlendAttachment) { ptr in
+            colorBlend.attachmentCount = 1
+            colorBlend.pAttachments = ptr
+        }
+
+        var dynStates: [VkDynamicState] = [VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR]
+        var dynamic = VkPipelineDynamicStateCreateInfo()
+        dynamic.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO
+        dynStates.withUnsafeMutableBufferPointer { db in
+            dynamic.dynamicStateCount = UInt32(db.count)
+            dynamic.pDynamicStates = db.baseAddress
+        }
+
+        // Pipeline layout (no descriptors)
+        var plInfo = VkPipelineLayoutCreateInfo()
+        plInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO
+        var layout: VkPipelineLayout? = nil
+        var r = withUnsafePointer(to: plInfo) { ptr in vkCreatePipelineLayout(dev, ptr, nil, &layout) }
+        if r != VK_SUCCESS || layout == nil { throw AgentError.internalError("vkCreatePipelineLayout failed (res=\(r))") }
+
+        // Graphics pipeline
+        guard let rp = renderPass else { throw AgentError.internalError("Render pass not ready") }
+        var gpInfo = VkGraphicsPipelineCreateInfo()
+        gpInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO
+        stageInfos.withUnsafeMutableBufferPointer { sb in
+            gpInfo.stageCount = UInt32(sb.count)
+            gpInfo.pStages = sb.baseAddress
+        }
+        withUnsafePointer(to: vi) { gpInfo.pVertexInputState = $0 }
+        withUnsafePointer(to: ia) { gpInfo.pInputAssemblyState = $0 }
+        withUnsafePointer(to: viewportState) { gpInfo.pViewportState = $0 }
+        withUnsafePointer(to: raster) { gpInfo.pRasterizationState = $0 }
+        withUnsafePointer(to: multisample) { gpInfo.pMultisampleState = $0 }
+        withUnsafePointer(to: depthStencil) { gpInfo.pDepthStencilState = $0 }
+        withUnsafePointer(to: colorBlend) { gpInfo.pColorBlendState = $0 }
+        withUnsafePointer(to: dynamic) { gpInfo.pDynamicState = $0 }
+        gpInfo.layout = layout
+        gpInfo.renderPass = rp
+        gpInfo.subpass = 0
+
+        var pipeline: VkPipeline? = nil
+        r = withUnsafePointer(to: gpInfo) { ptr in vkCreateGraphicsPipelines(dev, nil, 1, ptr, nil, &pipeline) }
+        if r != VK_SUCCESS || pipeline == nil { throw AgentError.internalError("vkCreateGraphicsPipelines failed (res=\(r))") }
+
+        // Clean shader modules (no longer needed after pipeline creation)
+        if let m = vsModule { vkDestroyShaderModule(dev, m, nil) }
+        if let m = fsModule { vkDestroyShaderModule(dev, m, nil) }
+
+        let handle = PipelineHandle()
+        let resource = PipelineResource(handle: handle, pipelineLayout: layout, pipeline: pipeline, vertexStride: UInt32(desc.vertexLayout.stride))
+        pipelines[handle] = resource
+        if builtinPipeline == nil { builtinPipeline = handle }
+        return handle
+        #else
+        return core.makePipeline(desc)
+        #endif
+    }
+
     public func draw(mesh: MeshHandle, pipeline: PipelineHandle, bindings: BindingSet, pushConstants: UnsafeRawPointer?, transform: float4x4) throws {
+        #if canImport(CVulkan)
+        _ = mesh; _ = bindings; _ = pushConstants; _ = transform
+        guard frameActive, let cmd = commandBuffers[currentFrame] else {
+            throw AgentError.internalError("draw called outside of beginFrame/endFrame")
+        }
+        guard let resource = pipelines[pipeline] ?? (builtinPipeline.flatMap { pipelines[$0] }) else {
+            throw AgentError.internalError("Unknown pipeline handle")
+        }
+        guard let pipe = resource.pipeline else { throw AgentError.internalError("Pipeline incomplete") }
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe)
+        if let vbuf = builtinVertexBuffer {
+            var buffers = [vbuf]
+            var offsets: [VkDeviceSize] = [0]
+            buffers.withUnsafeMutableBufferPointer { bptr in
+                offsets.withUnsafeMutableBufferPointer { optr in
+                    vkCmdBindVertexBuffers(cmd, 0, 1, bptr.baseAddress, optr.baseAddress)
+                }
+            }
+            vkCmdDraw(cmd, UInt32(builtinVertexCount), 1, 0, 0)
+        }
+        #else
         try core.draw(mesh: mesh, pipeline: pipeline, bindings: bindings, pushConstants: pushConstants, transform: transform)
+        #endif
     }
     public func makeComputePipeline(_ desc: ComputePipelineDescriptor) throws -> ComputePipelineHandle { core.makeComputePipeline(desc) }
     public func dispatchCompute(_ pipeline: ComputePipelineHandle, groupsX: Int, groupsY: Int, groupsZ: Int, bindings: BindingSet, pushConstants: UnsafeRawPointer?) throws {
@@ -287,8 +641,10 @@ public final class VulkanRenderBackend: RenderBackend {
             "Device+Queues ready. gfxQ=\(graphicsIndex) presentQ=\(presentIndex)"
         )
 
-        // Create swapchain and render targets at initial size
+        // Create swapchain and render targets at initial size, then command/sync and builtin geometry
         try recreateSwapchain(width: UInt32(window.config.width), height: UInt32(window.config.height))
+        try ensureCommandPoolAndSync()
+        try createBuiltinTriangleResources()
     }
 
     private func recreateSwapchain(width: UInt32, height: UInt32) throws {
@@ -456,13 +812,163 @@ public final class VulkanRenderBackend: RenderBackend {
         depthFormat = pickSupportedDepthFormat(physicalDevice: pd)
         try createDepthResources(device: dev, physicalDevice: pd)
 
-        // Create render pass
-        try createRenderPass(device: dev)
+        // Create render pass if not yet created
+        if renderPass == nil {
+            try createRenderPass(device: dev)
+        }
 
         // Create framebuffers
         try createFramebuffers(device: dev)
 
         SDLLogger.info("SDLKit.Graphics.Vulkan", "Swapchain created: images=\(swapchainImages.count) extent=\(surfaceExtent.width)x\(surfaceExtent.height)")
+    }
+
+    private func ensureCommandPoolAndSync() throws {
+        guard let dev = device else { throw AgentError.internalError("Device not ready for command pool") }
+        if commandPool == nil {
+            var info = VkCommandPoolCreateInfo()
+            info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO
+            info.queueFamilyIndex = graphicsQueueFamilyIndex
+            info.flags = UInt32(VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT)
+            var pool: VkCommandPool? = nil
+            let r = withUnsafePointer(to: info) { ptr in vkCreateCommandPool(dev, ptr, nil, &pool) }
+            if r != VK_SUCCESS || pool == nil { throw AgentError.internalError("vkCreateCommandPool failed (res=\(r))") }
+            commandPool = pool
+        }
+
+        if commandBuffers.count != maxFramesInFlight {
+            if !commandBuffers.isEmpty {
+                vkFreeCommandBuffers(dev, commandPool, UInt32(commandBuffers.count), commandBuffers)
+            }
+            commandBuffers = Array<VkCommandBuffer?>(repeating: nil, count: maxFramesInFlight)
+            var alloc = VkCommandBufferAllocateInfo()
+            alloc.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO
+            alloc.commandPool = commandPool
+            alloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY
+            alloc.commandBufferCount = UInt32(maxFramesInFlight)
+            let r = withUnsafePointer(to: alloc) { ptr in vkAllocateCommandBuffers(dev, ptr, &commandBuffers) }
+            if r != VK_SUCCESS { throw AgentError.internalError("vkAllocateCommandBuffers failed (res=\(r))") }
+        }
+
+        if imageAvailableSemaphores.count != maxFramesInFlight {
+            // Destroy old sync
+            for s in imageAvailableSemaphores { if let sem = s { vkDestroySemaphore(dev, sem, nil) } }
+            for s in renderFinishedSemaphores { if let sem = s { vkDestroySemaphore(dev, sem, nil) } }
+            for f in inFlightFences { if let ff = f { vkDestroyFence(dev, ff, nil) } }
+            imageAvailableSemaphores.removeAll(); renderFinishedSemaphores.removeAll(); inFlightFences.removeAll()
+
+            var si = VkSemaphoreCreateInfo(); si.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO
+            var fi = VkFenceCreateInfo(); fi.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO; fi.flags = UInt32(VK_FENCE_CREATE_SIGNALED_BIT)
+            for _ in 0..<maxFramesInFlight {
+                var a: VkSemaphore? = nil
+                var b: VkSemaphore? = nil
+                var f: VkFence? = nil
+                _ = withUnsafePointer(to: si) { ptr in vkCreateSemaphore(dev, ptr, nil, &a) }
+                _ = withUnsafePointer(to: si) { ptr in vkCreateSemaphore(dev, ptr, nil, &b) }
+                _ = withUnsafePointer(to: fi) { ptr in vkCreateFence(dev, ptr, nil, &f) }
+                imageAvailableSemaphores.append(a)
+                renderFinishedSemaphores.append(b)
+                inFlightFences.append(f)
+            }
+        }
+    }
+
+    private func createBuiltinTriangleResources() throws {
+        guard let dev = device else { throw AgentError.internalError("Device not ready for triangle") }
+        // Vertex data: 3 vertices, pos.xyz + color.xyz
+        let vertices: [Float] = [
+            -0.6, -0.5, 0.0,  1.0, 0.0, 0.0,
+             0.0,  0.6, 0.0,  0.0, 1.0, 0.0,
+             0.6, -0.5, 0.0,  0.0, 0.0, 1.0
+        ]
+        builtinVertexCount = 3
+
+        // Create staging buffer
+        let dataSize = VkDeviceSize(vertices.count * MemoryLayout<Float>.size)
+        var stagingBuffer: VkBuffer? = nil
+        var stagingMemory: VkDeviceMemory? = nil
+        try createBuffer(size: dataSize, usage: UInt32(VK_BUFFER_USAGE_TRANSFER_SRC_BIT), properties: UInt32(VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT), bufferOut: &stagingBuffer, memoryOut: &stagingMemory)
+        // Map and copy
+        var mapped: UnsafeMutableRawPointer? = nil
+        _ = vkMapMemory(dev, stagingMemory, 0, dataSize, 0, &mapped)
+        if let mapped {
+            vertices.withUnsafeBytes { bytes in
+                memcpy(mapped, bytes.baseAddress, bytes.count)
+            }
+            vkUnmapMemory(dev, stagingMemory)
+        }
+
+        // Create device-local vertex buffer
+        var vbuf: VkBuffer? = nil
+        var vmem: VkDeviceMemory? = nil
+        try createBuffer(size: dataSize, usage: UInt32(VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT), properties: UInt32(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT), bufferOut: &vbuf, memoryOut: &vmem)
+
+        // Copy buffer via one-time command
+        try copyBuffer(src: stagingBuffer, dst: vbuf, size: dataSize)
+
+        // Cleanup staging
+        if let sb = stagingBuffer { vkDestroyBuffer(dev, sb, nil) }
+        if let sm = stagingMemory { vkFreeMemory(dev, sm, nil) }
+
+        builtinVertexBuffer = vbuf
+        builtinVertexMemory = vmem
+    }
+
+    private func createBuffer(size: VkDeviceSize, usage: UInt32, properties: UInt32, bufferOut: inout VkBuffer?, memoryOut: inout VkDeviceMemory?) throws {
+        guard let dev = device, let pd = physicalDevice else { throw AgentError.internalError("Device not ready for buffer") }
+        var info = VkBufferCreateInfo()
+        info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO
+        info.size = size
+        info.usage = usage
+        info.sharingMode = VK_SHARING_MODE_EXCLUSIVE
+        var buffer: VkBuffer? = nil
+        var r = withUnsafePointer(to: info) { ptr in vkCreateBuffer(dev, ptr, nil, &buffer) }
+        if r != VK_SUCCESS || buffer == nil { throw AgentError.internalError("vkCreateBuffer failed (res=\(r))") }
+
+        var req = VkMemoryRequirements()
+        vkGetBufferMemoryRequirements(dev, buffer, &req)
+        var props = VkPhysicalDeviceMemoryProperties()
+        vkGetPhysicalDeviceMemoryProperties(pd, &props)
+        let index = findMemoryTypeIndex(requirements: req, properties: props, required: properties)
+        var alloc = VkMemoryAllocateInfo()
+        alloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO
+        alloc.allocationSize = req.size
+        alloc.memoryTypeIndex = index
+        var memory: VkDeviceMemory? = nil
+        r = withUnsafePointer(to: alloc) { ptr in vkAllocateMemory(dev, ptr, nil, &memory) }
+        if r != VK_SUCCESS || memory == nil { throw AgentError.internalError("vkAllocateMemory(buffer) failed (res=\(r))") }
+        vkBindBufferMemory(dev, buffer, memory, 0)
+        bufferOut = buffer
+        memoryOut = memory
+    }
+
+    private func copyBuffer(src: VkBuffer?, dst: VkBuffer?, size: VkDeviceSize) throws {
+        guard let dev = device, let gq = graphicsQueue, let pool = commandPool, let src = src, let dst = dst else {
+            throw AgentError.internalError("copyBuffer prerequisites missing")
+        }
+        // Allocate a temporary command buffer
+        var alloc = VkCommandBufferAllocateInfo()
+        alloc.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO
+        alloc.commandPool = pool
+        alloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY
+        alloc.commandBufferCount = 1
+        var cmd: VkCommandBuffer? = nil
+        var r = withUnsafePointer(to: alloc) { ptr in vkAllocateCommandBuffers(dev, ptr, &cmd) }
+        if r != VK_SUCCESS || cmd == nil { throw AgentError.internalError("vkAllocateCommandBuffers(copy) failed (res=\(r))") }
+        var begin = VkCommandBufferBeginInfo()
+        begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO
+        begin.flags = UInt32(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT)
+        _ = withUnsafePointer(to: begin) { ptr in vkBeginCommandBuffer(cmd, ptr) }
+        var region = VkBufferCopy(srcOffset: 0, dstOffset: 0, size: size)
+        withUnsafePointer(to: &region) { rp in vkCmdCopyBuffer(cmd, src, dst, 1, rp) }
+        _ = vkEndCommandBuffer(cmd)
+        var submit = VkSubmitInfo()
+        submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO
+        submit.commandBufferCount = 1
+        withUnsafePointer(to: &cmd) { cp in submit.pCommandBuffers = cp }
+        _ = withUnsafePointer(to: submit) { sp in vkQueueSubmit(gq, 1, sp, nil) }
+        _ = vkQueueWaitIdle(gq)
+        vkFreeCommandBuffers(dev, pool, 1, [cmd])
     }
 
     private func pickSupportedDepthFormat(physicalDevice: VkPhysicalDevice) -> VkFormat {
@@ -648,11 +1154,19 @@ public final class VulkanRenderBackend: RenderBackend {
         }
     }
 
+    private func convertVertexFormat(_ format: VertexFormat) -> VkFormat {
+        switch format {
+        case .float2: return VK_FORMAT_R32G32_SFLOAT
+        case .float3: return VK_FORMAT_R32G32B32_SFLOAT
+        case .float4: return VK_FORMAT_R32G32B32A32_SFLOAT
+        }
+    }
+
     private func destroySwapchainResources() {
         guard let dev = device else { return }
         for i in 0..<framebuffers.count { if let fb = framebuffers[i] { vkDestroyFramebuffer(dev, fb, nil) } }
         framebuffers.removeAll()
-        if let rp = renderPass { vkDestroyRenderPass(dev, rp, nil); renderPass = nil }
+        // Keep renderPass; it does not depend on swapchain extent
         for i in 0..<swapchainImageViews.count { if let v = swapchainImageViews[i] { vkDestroyImageView(dev, v, nil) } }
         swapchainImageViews.removeAll()
         if let dv = depthView { vkDestroyImageView(dev, dv, nil); depthView = nil }
@@ -660,7 +1174,6 @@ public final class VulkanRenderBackend: RenderBackend {
         if let dm = depthMemory { vkFreeMemory(dev, dm, nil); depthMemory = nil }
         if let sc = swapchain { vkDestroySwapchainKHR(dev, sc, nil); swapchain = nil }
     }
-    #endif
     #endif
 }
 #endif
