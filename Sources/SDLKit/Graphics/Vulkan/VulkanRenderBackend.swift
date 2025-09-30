@@ -20,6 +20,8 @@ public final class VulkanRenderBackend: RenderBackend {
     private var vkInstance = VulkanMinimalInstance()
     private var vkSurface: VkSurfaceKHR? = nil
     #if canImport(CVulkan)
+    // Validation
+    private var debugMessenger: VkDebugUtilsMessengerEXT? = nil
     // Device/Queues
     private var physicalDevice: VkPhysicalDevice? = nil
     private var device: VkDevice? = nil
@@ -108,11 +110,15 @@ public final class VulkanRenderBackend: RenderBackend {
             commandPool = nil
             vkDestroyDevice(dev, nil)
         }
-        if vkSurface != 0, let inst = vkInstance.handle {
+        if let inst = vkInstance.handle {
             if let surf = vkSurface {
                 vkDestroySurfaceKHR(inst, surf, nil)
+                vkSurface = nil
             }
-            vkSurface = nil
+            if let messenger = debugMessenger {
+                destroyDebugMessenger(instance: inst, messenger: messenger)
+                debugMessenger = nil
+            }
         }
         #endif
         try? waitGPU()
@@ -128,9 +134,11 @@ public final class VulkanRenderBackend: RenderBackend {
         try ensureCommandPoolAndSync()
 
         // Wait for the previous frame to finish
-        if let fence = inFlightFences[currentFrame] {
-            _ = vkWaitForFences(dev, 1, [fence], VK_TRUE, UInt64.max)
-            _ = vkResetFences(dev, 1, [fence])
+        if var fence = inFlightFences[currentFrame] {
+            withUnsafePointer(to: &fence) { fptr in
+                _ = vkWaitForFences(dev, 1, fptr, VK_TRUE, UInt64.max)
+                _ = vkResetFences(dev, 1, fptr)
+            }
         }
 
         // Acquire next image
@@ -218,8 +226,9 @@ public final class VulkanRenderBackend: RenderBackend {
         pi.waitSemaphoreCount = 1
         withUnsafePointer(to: &signalSemaphore) { sp in pi.pWaitSemaphores = sp }
         pi.swapchainCount = 1
-        var scOpt = swapchain
-        withUnsafePointer(to: &scOpt) { scPtr in pi.pSwapchains = scPtr }
+        guard let scNonOpt = swapchain else { throw AgentError.internalError("Swapchain missing") }
+        var scLocal = scNonOpt
+        withUnsafePointer(to: &scLocal) { scPtr in pi.pSwapchains = scPtr }
         var imageIndexCopy = currentImageIndex
         withUnsafePointer(to: &imageIndexCopy) { idxPtr in pi.pImageIndices = idxPtr }
         let presentRes = withUnsafePointer(to: pi) { ptr in vkQueuePresentKHR(pq, ptr) }
@@ -252,12 +261,83 @@ public final class VulkanRenderBackend: RenderBackend {
     }
 
     public func createBuffer(bytes: UnsafeRawPointer?, length: Int, usage: BufferUsage) throws -> BufferHandle {
-        try core.createBuffer(bytes: bytes, length: length, usage: usage)
+        #if canImport(CVulkan)
+        guard length > 0 else { throw AgentError.invalidArgument("Buffer length must be > 0") }
+        guard let dev = device else { throw AgentError.internalError("Vulkan device not ready") }
+
+        let size = VkDeviceSize(length)
+        let handle = BufferHandle()
+
+        func buildUsageFlags(for usage: BufferUsage) -> UInt32 {
+            var flags: UInt32 = 0
+            switch usage {
+            case .vertex: flags |= UInt32(VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT)
+            case .index: flags |= UInt32(VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT)
+            case .uniform: flags |= UInt32(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT)
+            case .storage: flags |= UInt32(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT)
+            case .staging: flags |= UInt32(VK_BUFFER_USAGE_TRANSFER_SRC_BIT)
+            }
+            return flags
+        }
+
+        func memProps(for usage: BufferUsage) -> UInt32 {
+            switch usage {
+            case .staging:
+                return UInt32(VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
+            default:
+                return UInt32(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
+            }
+        }
+
+        var buffer: VkBuffer? = nil
+        var memory: VkDeviceMemory? = nil
+        let usageFlags = buildUsageFlags(for: usage)
+        let desiredProps = memProps(for: usage)
+        try createBuffer(size: size, usage: usageFlags, properties: desiredProps, bufferOut: &buffer, memoryOut: &memory)
+
+        if let bytes {
+            if (desiredProps & UInt32(VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)) != 0 {
+                var mapped: UnsafeMutableRawPointer? = nil
+                _ = vkMapMemory(dev, memory, 0, size, 0, &mapped)
+                if let mapped { memcpy(mapped, bytes, length); vkUnmapMemory(dev, memory) }
+            } else {
+                // Create staging and copy
+                var stagingBuffer: VkBuffer? = nil
+                var stagingMemory: VkDeviceMemory? = nil
+                try createBuffer(size: size, usage: UInt32(VK_BUFFER_USAGE_TRANSFER_SRC_BIT), properties: UInt32(VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT), bufferOut: &stagingBuffer, memoryOut: &stagingMemory)
+                var mapped: UnsafeMutableRawPointer? = nil
+                _ = vkMapMemory(dev, stagingMemory, 0, size, 0, &mapped)
+                if let mapped { memcpy(mapped, bytes, length); vkUnmapMemory(dev, stagingMemory) }
+                try copyBuffer(src: stagingBuffer, dst: buffer, size: size)
+                if let sb = stagingBuffer { vkDestroyBuffer(dev, sb, nil) }
+                if let sm = stagingMemory { vkFreeMemory(dev, sm, nil) }
+            }
+        }
+
+        let res = BufferResource(buffer: buffer, memory: memory, length: length, usage: usage)
+        buffers[handle] = res
+        return handle
+        #else
+        return try core.createBuffer(bytes: bytes, length: length, usage: usage)
+        #endif
     }
     public func createTexture(descriptor: TextureDescriptor, initialData: TextureInitialData?) throws -> TextureHandle {
         core.createTexture(descriptor: descriptor, initialData: initialData)
     }
-    public func destroy(_ handle: ResourceHandle) { core.destroy(handle) }
+    public func destroy(_ handle: ResourceHandle) {
+        #if canImport(CVulkan)
+        switch handle {
+        case .buffer(let h):
+            if let res = buffers.removeValue(forKey: h), let dev = device {
+                if let b = res.buffer { vkDestroyBuffer(dev, b, nil) }
+                if let m = res.memory { vkFreeMemory(dev, m, nil) }
+            }
+        default:
+            break
+        }
+        #endif
+        core.destroy(handle)
+    }
     public func makePipeline(_ desc: GraphicsPipelineDescriptor) throws -> PipelineHandle {
         #if canImport(CVulkan)
         guard let dev = device else { throw AgentError.internalError("Vulkan device not ready") }
@@ -299,15 +379,13 @@ public final class VulkanRenderBackend: RenderBackend {
         vsStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO
         vsStage.stage = UInt32(VK_SHADER_STAGE_VERTEX_BIT)
         vsStage.module = vsModule
-        module.vertexEntryPoint.withCString { namePtr in vsStage.pName = namePtr }
-        stageInfos.append(vsStage)
+        var fsStageOpt: VkPipelineShaderStageCreateInfo? = nil
         if let fsModule {
             var fsStage = VkPipelineShaderStageCreateInfo()
             fsStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO
             fsStage.stage = UInt32(VK_SHADER_STAGE_FRAGMENT_BIT)
             fsStage.module = fsModule
-            (module.fragmentEntryPoint ?? "main").withCString { namePtr in fsStage.pName = namePtr }
-            stageInfos.append(fsStage)
+            fsStageOpt = fsStage
         }
 
         // Vertex input
@@ -394,24 +472,93 @@ public final class VulkanRenderBackend: RenderBackend {
         guard let rp = renderPass else { throw AgentError.internalError("Render pass not ready") }
         var gpInfo = VkGraphicsPipelineCreateInfo()
         gpInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO
-        stageInfos.withUnsafeMutableBufferPointer { sb in
-            gpInfo.stageCount = UInt32(sb.count)
-            gpInfo.pStages = sb.baseAddress
-        }
-        withUnsafePointer(to: vi) { gpInfo.pVertexInputState = $0 }
-        withUnsafePointer(to: ia) { gpInfo.pInputAssemblyState = $0 }
-        withUnsafePointer(to: viewportState) { gpInfo.pViewportState = $0 }
-        withUnsafePointer(to: raster) { gpInfo.pRasterizationState = $0 }
-        withUnsafePointer(to: multisample) { gpInfo.pMultisampleState = $0 }
-        withUnsafePointer(to: depthStencil) { gpInfo.pDepthStencilState = $0 }
-        withUnsafePointer(to: colorBlend) { gpInfo.pColorBlendState = $0 }
-        withUnsafePointer(to: dynamic) { gpInfo.pDynamicState = $0 }
-        gpInfo.layout = layout
-        gpInfo.renderPass = rp
-        gpInfo.subpass = 0
 
-        var pipeline: VkPipeline? = nil
-        r = withUnsafePointer(to: gpInfo) { ptr in vkCreateGraphicsPipelines(dev, nil, 1, ptr, nil, &pipeline) }
+        var vsNameCStr = Array(module.vertexEntryPoint.utf8CString)
+        let fsNameCStrArr: [CChar]? = module.fragmentEntryPoint.map { Array($0.utf8CString) }
+
+        let createResult: VkResult = vsNameCStr.withUnsafeMutableBufferPointer { vsBuf in
+            vsStage.pName = vsBuf.baseAddress
+            // Build stageInfos within the lifetime of entry name buffers
+            if var fsStage = fsStageOpt, let fsNameArr = fsNameCStrArr {
+                return fsNameArr.withUnsafeBufferPointer { fsBuf in
+                    fsStage.pName = fsBuf.baseAddress
+                    stageInfos = [vsStage, fsStage]
+                    return stageInfos.withUnsafeMutableBufferPointer { sb in
+                        gpInfo.stageCount = UInt32(sb.count)
+                        gpInfo.pStages = sb.baseAddress
+                        return withUnsafePointer(to: vi) { viPtr in
+                            gpInfo.pVertexInputState = viPtr
+                            return withUnsafePointer(to: ia) { iaPtr in
+                                gpInfo.pInputAssemblyState = iaPtr
+                                return withUnsafePointer(to: viewportState) { vpPtr in
+                                    gpInfo.pViewportState = vpPtr
+                                    return withUnsafePointer(to: raster) { rsPtr in
+                                        gpInfo.pRasterizationState = rsPtr
+                                        return withUnsafePointer(to: multisample) { msPtr in
+                                            gpInfo.pMultisampleState = msPtr
+                                            return withUnsafePointer(to: depthStencil) { dsPtr in
+                                                gpInfo.pDepthStencilState = dsPtr
+                                                return withUnsafePointer(to: colorBlend) { cbPtr in
+                                                    gpInfo.pColorBlendState = cbPtr
+                                                    return withUnsafePointer(to: dynamic) { dyPtr in
+                                                        gpInfo.pDynamicState = dyPtr
+                                                        gpInfo.layout = layout
+                                                        gpInfo.renderPass = rp
+                                                        gpInfo.subpass = 0
+                                                        var pipelineLocal: VkPipeline? = nil
+                                                        let cr = withUnsafePointer(to: gpInfo) { ptr in vkCreateGraphicsPipelines(dev, nil, 1, ptr, nil, &pipelineLocal) }
+                                                        if cr == VK_SUCCESS { pipeline = pipelineLocal }
+                                                        return cr
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                stageInfos = [vsStage]
+                return stageInfos.withUnsafeMutableBufferPointer { sb in
+                    gpInfo.stageCount = UInt32(sb.count)
+                    gpInfo.pStages = sb.baseAddress
+                    return withUnsafePointer(to: vi) { viPtr in
+                        gpInfo.pVertexInputState = viPtr
+                        return withUnsafePointer(to: ia) { iaPtr in
+                            gpInfo.pInputAssemblyState = iaPtr
+                            return withUnsafePointer(to: viewportState) { vpPtr in
+                                gpInfo.pViewportState = vpPtr
+                                return withUnsafePointer(to: raster) { rsPtr in
+                                    gpInfo.pRasterizationState = rsPtr
+                                    return withUnsafePointer(to: multisample) { msPtr in
+                                        gpInfo.pMultisampleState = msPtr
+                                        return withUnsafePointer(to: depthStencil) { dsPtr in
+                                            gpInfo.pDepthStencilState = dsPtr
+                                            return withUnsafePointer(to: colorBlend) { cbPtr in
+                                                gpInfo.pColorBlendState = cbPtr
+                                                return withUnsafePointer(to: dynamic) { dyPtr in
+                                                    gpInfo.pDynamicState = dyPtr
+                                                    gpInfo.layout = layout
+                                                    gpInfo.renderPass = rp
+                                                    gpInfo.subpass = 0
+                                                    var pipelineLocal: VkPipeline? = nil
+                                                    let cr = withUnsafePointer(to: gpInfo) { ptr in vkCreateGraphicsPipelines(dev, nil, 1, ptr, nil, &pipelineLocal) }
+                                                    if cr == VK_SUCCESS { pipeline = pipelineLocal }
+                                                    return cr
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let r = createResult
         if r != VK_SUCCESS || pipeline == nil { throw AgentError.internalError("vkCreateGraphicsPipelines failed (res=\(r))") }
 
         // Clean shader modules (no longer needed after pipeline creation)
@@ -439,15 +586,24 @@ public final class VulkanRenderBackend: RenderBackend {
         }
         guard let pipe = resource.pipeline else { throw AgentError.internalError("Pipeline incomplete") }
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe)
-        if let vbuf = builtinVertexBuffer {
-            var buffers = [vbuf]
+        let vbufToUse: VkBuffer?
+        let vertexCount: UInt32
+        if let boundHandle = bindings.value(for: 0, as: BufferHandle.self), let res = buffers[boundHandle], let buf = res.buffer, resource.vertexStride > 0 {
+            vbufToUse = buf
+            vertexCount = UInt32(max(1, res.length / Int(resource.vertexStride)))
+        } else {
+            vbufToUse = builtinVertexBuffer
+            vertexCount = UInt32(builtinVertexCount)
+        }
+        if let vbuf = vbufToUse {
+            var buffersArr = [vbuf]
             var offsets: [VkDeviceSize] = [0]
-            buffers.withUnsafeMutableBufferPointer { bptr in
+            buffersArr.withUnsafeMutableBufferPointer { bptr in
                 offsets.withUnsafeMutableBufferPointer { optr in
                     vkCmdBindVertexBuffers(cmd, 0, 1, bptr.baseAddress, optr.baseAddress)
                 }
             }
-            vkCmdDraw(cmd, UInt32(builtinVertexCount), 1, 0, 0)
+            vkCmdDraw(cmd, vertexCount, 1, 0, 0)
         }
         #else
         try core.draw(mesh: mesh, pipeline: pipeline, bindings: bindings, pushConstants: pushConstants, transform: transform)
@@ -472,13 +628,37 @@ public final class VulkanRenderBackend: RenderBackend {
             throw error
         }
 
-        let extCount = UInt32(requiredExtensions.count)
-        let cStrings: [UnsafeMutablePointer<CChar>] = requiredExtensions.map { strdup($0) }
+        var extensions = requiredExtensions
+        var layers: [String] = []
+        let enableValidation: Bool = {
+            let env = ProcessInfo.processInfo.environment["SDLKIT_VK_VALIDATION"]?.lowercased()
+            return env == "1" || env == "true" || env == "yes"
+        }()
+        if enableValidation {
+            if !extensions.contains(where: { $0 == String(cString: VK_EXT_DEBUG_UTILS_EXTENSION_NAME) }) {
+                extensions.append(String(cString: VK_EXT_DEBUG_UTILS_EXTENSION_NAME))
+            }
+            layers.append("VK_LAYER_KHRONOS_validation")
+        }
+
+        let extCount = UInt32(extensions.count)
+        let cStrings: [UnsafeMutablePointer<CChar>] = extensions.map { strdup($0) }
         defer { cStrings.forEach { free($0) } }
 
         var extPointerArray: [UnsafePointer<CChar>?] = cStrings.map { UnsafePointer($0) }
-        let result = extPointerArray.withUnsafeBufferPointer { buf -> Int32 in
-            VulkanMinimalCreateInstanceWithExtensions(buf.baseAddress, extCount, &vkInstance)
+        let result: Int32 = extPointerArray.withUnsafeBufferPointer { extBuf in
+            if layers.isEmpty {
+                return VulkanMinimalCreateInstanceWithExtensions(extBuf.baseAddress, extCount, &vkInstance)
+            } else {
+                // Build layers array
+                let lCStrs: [UnsafeMutablePointer<CChar>] = layers.map { strdup($0) }
+                defer { lCStrs.forEach { free($0) } }
+                var lPtrs: [UnsafePointer<CChar>?] = lCStrs.map { UnsafePointer($0) }
+                let lCount = UInt32(layers.count)
+                return lPtrs.withUnsafeBufferPointer { lBuf in
+                    VulkanMinimalCreateInstanceWithExtensionsAndLayers(extBuf.baseAddress, extCount, lBuf.baseAddress, lCount, &vkInstance)
+                }
+            }
         }
         guard result == VK_SUCCESS, vkInstance.handle != nil else {
             throw AgentError.internalError("Vulkan instance creation failed (code=\(result))")
@@ -495,8 +675,13 @@ public final class VulkanRenderBackend: RenderBackend {
 
         SDLLogger.info(
             "SDLKit.Graphics.Vulkan",
-            "Instance+Surface ready. extCount=\(requiredExtensions.count) surface=\(String(describing: vkSurface))"
+            "Instance+Surface ready. extCount=\(extensions.count) validation=\(enableValidation) surface=\(String(describing: vkSurface))"
         )
+        #if canImport(CVulkan)
+        if enableValidation, let inst = vkInstance.handle {
+            setupDebugMessenger(instance: inst)
+        }
+        #endif
     }
 
     #if canImport(CVulkan)
@@ -1154,6 +1339,83 @@ public final class VulkanRenderBackend: RenderBackend {
         }
     }
 
+    // MARK: - Validation (debug utils)
+    #if canImport(CVulkan)
+    private static let validationVerbosity: VkDebugUtilsMessageSeverityFlagsEXT = {
+        let env = ProcessInfo.processInfo.environment["SDLKIT_VK_VALIDATION_VERBOSE"]?.lowercased()
+        if env == "1" || env == "true" || env == "yes" {
+            return VkDebugUtilsMessageSeverityFlagsEXT(
+                VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT.rawValue |
+                VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT.rawValue |
+                VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT.rawValue |
+                VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT.rawValue
+            )
+        }
+        return VkDebugUtilsMessageSeverityFlagsEXT(
+            VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT.rawValue |
+            VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT.rawValue
+        )
+    }()
+
+    private static let validationTypes: VkDebugUtilsMessageTypeFlagsEXT = VkDebugUtilsMessageTypeFlagsEXT(
+        VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT.rawValue |
+        VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT.rawValue |
+        VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT.rawValue
+    )
+
+    private static let debugCallback: @convention(c) (
+        VkDebugUtilsMessageSeverityFlagBitsEXT,
+        VkDebugUtilsMessageTypeFlagsEXT,
+        UnsafePointer<VkDebugUtilsMessengerCallbackDataEXT>?,
+        UnsafeMutableRawPointer?
+    ) -> VkBool32 = { severity, _, callbackData, _ in
+        guard let data = callbackData?.pointee else { return 0 }
+        let message = data.pMessage.map { String(cString: $0) } ?? "<no message>"
+        switch severity {
+        case VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT:
+            SDLLogger.error("SDLKit.Graphics.Vulkan", message)
+        case VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT:
+            SDLLogger.warn("SDLKit.Graphics.Vulkan", message)
+        case VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT:
+            SDLLogger.info("SDLKit.Graphics.Vulkan", message)
+        default:
+            SDLLogger.debug("SDLKit.Graphics.Vulkan", message)
+        }
+        return 0
+    }
+
+    private func setupDebugMessenger(instance: VkInstance) {
+        var createInfo = VkDebugUtilsMessengerCreateInfoEXT()
+        createInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT
+        createInfo.messageSeverity = Self.validationVerbosity
+        createInfo.messageType = Self.validationTypes
+        createInfo.pfnUserCallback = VulkanRenderBackend.debugCallback
+
+        let createFn: PFN_vkVoidFunction? = "vkCreateDebugUtilsMessengerEXT".withCString { namePtr in
+            vkGetInstanceProcAddr(instance, namePtr)
+        }
+        guard let createFn else { return }
+        typealias CreatePFN = @convention(c) (VkInstance?, UnsafePointer<VkDebugUtilsMessengerCreateInfoEXT>?, UnsafePointer<VkAllocationCallbacks>?, UnsafeMutablePointer<VkDebugUtilsMessengerEXT?>?) -> VkResult
+        let typedCreate = unsafeBitCast(createFn, to: CreatePFN.self)
+
+        var messenger: VkDebugUtilsMessengerEXT? = nil
+        let res = withUnsafePointer(to: createInfo) { ptr in typedCreate(instance, ptr, nil, &messenger) }
+        if res == VK_SUCCESS {
+            debugMessenger = messenger
+        }
+    }
+
+    private func destroyDebugMessenger(instance: VkInstance, messenger: VkDebugUtilsMessengerEXT) {
+        let destroyFn: PFN_vkVoidFunction? = "vkDestroyDebugUtilsMessengerEXT".withCString { namePtr in
+            vkGetInstanceProcAddr(instance, namePtr)
+        }
+        guard let destroyFn else { return }
+        typealias DestroyPFN = @convention(c) (VkInstance?, VkDebugUtilsMessengerEXT?, UnsafePointer<VkAllocationCallbacks>?) -> Void
+        let typedDestroy = unsafeBitCast(destroyFn, to: DestroyPFN.self)
+        typedDestroy(instance, messenger, nil)
+    }
+    #endif
+
     private func convertVertexFormat(_ format: VertexFormat) -> VkFormat {
         switch format {
         case .float2: return VK_FORMAT_R32G32_SFLOAT
@@ -1177,3 +1439,10 @@ public final class VulkanRenderBackend: RenderBackend {
     #endif
 }
 #endif
+    private struct BufferResource {
+        var buffer: VkBuffer?
+        var memory: VkDeviceMemory?
+        var length: Int
+        var usage: BufferUsage
+    }
+    private var buffers: [BufferHandle: BufferResource] = [:]

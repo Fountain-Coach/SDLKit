@@ -62,6 +62,13 @@ VkResult VulkanMinimalCreateInstanceWithExtensions(const char *const *extensions
                                                   uint32_t extensionCount,
                                                   VulkanMinimalInstance *instance);
 
+// Create an instance enabling the provided extensions and layers.
+VkResult VulkanMinimalCreateInstanceWithExtensionsAndLayers(const char *const *extensions,
+                                                           uint32_t extensionCount,
+                                                           const char *const *layers,
+                                                           uint32_t layerCount,
+                                                           VulkanMinimalInstance *instance);
+
 #ifdef __cplusplus
 }
 #endif
