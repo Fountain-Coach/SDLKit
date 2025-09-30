@@ -1,5 +1,6 @@
 #include <stdlib.h>
 #include <string.h>
+#include <stdbool.h>
 #include "../CSDL3/shim.h"
 
 // Minimal stub implementations that satisfy the shim symbol surface when SDL3
@@ -327,6 +328,24 @@ unsigned int SDLKit_PixelFormat_ABGR8888(void) {
 int SDLKit_RenderReadPixels(struct SDL_Renderer *renderer, int x, int y, int w, int h, void *pixels, int pitch) {
     (void)renderer; (void)x; (void)y; (void)w; (void)h; (void)pixels; (void)pitch;
     return -1;
+}
+
+void *SDLKit_MetalLayerForWindow(SDL_Window *window) {
+    (void)window;
+    return NULL;
+}
+
+void *SDLKit_Win32HWND(SDL_Window *window) {
+    (void)window;
+    return NULL;
+}
+
+bool SDLKit_CreateVulkanSurface(SDL_Window *window, VkInstance instance, VkSurfaceKHR *surface) {
+    (void)window; (void)instance;
+    if (surface) {
+        *surface = (VkSurfaceKHR)0;
+    }
+    return false;
 }
 
 void SDLKit_Quit(void) {

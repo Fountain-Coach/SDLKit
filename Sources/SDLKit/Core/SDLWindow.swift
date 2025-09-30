@@ -1,6 +1,24 @@
 import Foundation
+#if canImport(QuartzCore)
+import QuartzCore
+#endif
+#if canImport(Metal)
+import Metal
+#endif
 #if canImport(CSDL3)
 import CSDL3
+#endif
+#if canImport(Vulkan)
+import Vulkan
+#endif
+#if !canImport(Vulkan)
+public typealias VkInstance = OpaquePointer?
+public typealias VkSurfaceKHR = UInt64
+#endif
+#if canImport(QuartzCore)
+public typealias SDLKitMetalLayer = CAMetalLayer
+#else
+public typealias SDLKitMetalLayer = AnyObject
 #endif
 
 @MainActor
@@ -20,6 +38,49 @@ public final class SDLWindow {
         public var height: Int
         public var title: String
         public init(x: Int, y: Int, width: Int, height: Int, title: String) { self.x = x; self.y = y; self.width = width; self.height = height; self.title = title }
+    }
+
+    @MainActor
+    public struct NativeHandles {
+        public let metalLayer: SDLKitMetalLayer?
+        public let win32HWND: UnsafeMutableRawPointer?
+        #if canImport(CSDL3) && !HEADLESS_CI
+        private let windowHandle: UnsafeMutablePointer<SDL_Window>
+        #endif
+
+        #if canImport(CSDL3) && !HEADLESS_CI
+        fileprivate init(window: UnsafeMutablePointer<SDL_Window>) {
+            self.windowHandle = window
+            #if canImport(QuartzCore)
+            if let pointer = SDLKit_MetalLayerForWindow(window) {
+                self.metalLayer = Unmanaged<SDLKitMetalLayer>.fromOpaque(pointer).takeUnretainedValue()
+            } else {
+                self.metalLayer = nil
+            }
+            #else
+            self.metalLayer = nil
+            #endif
+            self.win32HWND = SDLKit_Win32HWND(window)
+        }
+        #else
+        fileprivate init() {
+            self.metalLayer = nil
+            self.win32HWND = nil
+        }
+        #endif
+
+        public func createVulkanSurface(instance: VkInstance) throws -> VkSurfaceKHR {
+            #if canImport(CSDL3) && !HEADLESS_CI
+            var surface: VkSurfaceKHR = 0
+            if !SDLKit_CreateVulkanSurface(windowHandle, instance, &surface) {
+                throw AgentError.internalError(SDLCore.lastError())
+            }
+            return surface
+            #else
+            _ = instance
+            throw AgentError.sdlUnavailable
+            #endif
+        }
     }
 
     public let config: Config
@@ -159,6 +220,15 @@ public final class SDLWindow {
         SDLKit_GetWindowSize(win, &w, &h)
         let title = String(cString: SDLKit_GetWindowTitle(win))
         return Info(x: Int(x), y: Int(y), width: Int(w), height: Int(h), title: title)
+        #else
+        throw AgentError.sdlUnavailable
+        #endif
+    }
+
+    public func nativeHandles() throws -> NativeHandles {
+        #if canImport(CSDL3) && !HEADLESS_CI
+        guard let win = handle else { throw AgentError.internalError("Window not opened") }
+        return NativeHandles(window: win)
         #else
         throw AgentError.sdlUnavailable
         #endif

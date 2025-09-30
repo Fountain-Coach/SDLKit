@@ -157,6 +157,11 @@ open class SDLKitGUIAgent {
         return try bundle.window.info()
     }
 
+    public func nativeHandles(windowId: Int) throws -> SDLWindow.NativeHandles {
+        guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }
+        return try bundle.window.nativeHandles()
+    }
+
     public func centerWindow(windowId: Int) throws {
         guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }
         try bundle.window.center()
