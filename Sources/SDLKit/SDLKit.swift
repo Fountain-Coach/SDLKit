@@ -28,6 +28,22 @@ public enum SDLKitConfig {
         return parsed
     }
 
+    public static var renderBackendOverride: String? {
+        guard let raw = ProcessInfo.processInfo.environment["SDLKIT_RENDER_BACKEND"] else {
+            return nil
+        }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    public static var demoForceLegacy2D: Bool {
+        guard let raw = ProcessInfo.processInfo.environment["SDLKIT_DEMO_FORCE_2D"] else {
+            return false
+        }
+        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return value == "1" || value == "true" || value == "yes"
+    }
+
     public enum PresentPolicy { case auto, explicit }
 }
 

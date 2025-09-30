@@ -106,10 +106,13 @@ let windowId = try agent.openWindow(title: "SDLKit", width: 800, height: 600)
 agent.closeWindow(windowId: windowId)
 ```
 
-### Demo (macOS)
+### Triangle Demo (Metal/D3D12/Vulkan)
 
 - Run: `swift run SDLKitDemo`
-- Shows clear, rectangle, line, circle; attempts text if SDL_ttf is available. To enable autolink for text, the demo depends on `SDLKitTTF`.
+- By default the app opens a window, selects the platform backend (Metal on macOS, D3D12 on Windows, Vulkan on Linux), uploads a static triangle, and walks a `beginFrame → draw → endFrame` loop using the new `RenderBackend` protocol.
+- Override the backend with `SDLKIT_RENDER_BACKEND=metal|d3d12|vulkan swift run SDLKitDemo` (useful for testing platform shims).
+- Force the legacy 2D smoke test instead of the triangle with `SDLKIT_DEMO_FORCE_2D=1 swift run SDLKitDemo`.
+- The previous rectangle/line/circle/text showcase still runs in legacy mode and continues to honor SDL_ttf availability.
 
 ## Agent Contract
 
