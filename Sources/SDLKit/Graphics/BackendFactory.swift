@@ -205,12 +205,14 @@ public class StubRenderBackend: RenderBackend {
     }
 }
 
+#if !canImport(Metal)
 @MainActor
 public final class MetalRenderBackend: StubRenderBackend {
     required public init(window: SDLWindow) throws {
         try super.init(kind: .metal, window: window)
     }
 }
+#endif
 
 @MainActor
 public final class D3D12RenderBackend: StubRenderBackend {
