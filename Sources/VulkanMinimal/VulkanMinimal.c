@@ -78,3 +78,42 @@ void VulkanMinimalDestroyInstance(VulkanMinimalInstance *instance) {
     }
     instance->handle = NULL;
 }
+
+VkResult VulkanMinimalCreateInstanceWithExtensions(const char *const *extensions,
+                                                  uint32_t extensionCount,
+                                                  VulkanMinimalInstance *instance) {
+    if (!instance) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+
+    memset(instance, 0, sizeof(*instance));
+
+    if (!VulkanMinimalEnsureLoaded()) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+
+    const char appName[] = "SDLKitDemo";
+    const char engineName[] = "SDLKit";
+
+    VkApplicationInfo appInfo;
+    memset(&appInfo, 0, sizeof(appInfo));
+    appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+    appInfo.pApplicationName = appName;
+    appInfo.applicationVersion = VulkanMinimalMakeVersion(1, 0, 0);
+    appInfo.pEngineName = engineName;
+    appInfo.engineVersion = VulkanMinimalMakeVersion(0, 1, 0);
+    appInfo.apiVersion = VK_API_VERSION_1_0;
+
+    VkInstanceCreateInfo createInfo;
+    memset(&createInfo, 0, sizeof(createInfo));
+    createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+    createInfo.pApplicationInfo = &appInfo;
+    createInfo.enabledExtensionCount = extensionCount;
+    createInfo.ppEnabledExtensionNames = extensions;
+
+    VkResult result = pfn_vkCreateInstance(&createInfo, NULL, &instance->handle);
+    if (result != VK_SUCCESS) {
+        instance->handle = NULL;
+    }
+    return result;
+}

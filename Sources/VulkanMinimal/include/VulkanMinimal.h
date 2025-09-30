@@ -57,6 +57,11 @@ static inline uint32_t VulkanMinimalMakeVersion(uint32_t major, uint32_t minor, 
 VkResult VulkanMinimalCreateInstance(VulkanMinimalInstance *instance);
 void VulkanMinimalDestroyInstance(VulkanMinimalInstance *instance);
 
+// Create an instance enabling the provided instance extensions.
+VkResult VulkanMinimalCreateInstanceWithExtensions(const char *const *extensions,
+                                                  uint32_t extensionCount,
+                                                  VulkanMinimalInstance *instance);
+
 #ifdef __cplusplus
 }
 #endif

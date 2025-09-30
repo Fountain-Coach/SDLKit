@@ -159,6 +159,19 @@ typedef struct SDLKit_Event {
     #endif
   }
 
+  // Query required Vulkan instance extensions for the window.
+  // On success, returns 1 and sets *pCount to the number of required extensions and
+  // *names to an array of const char* owned by SDL. Callers should not free or modify.
+  static inline int SDLKit_Vulkan_GetInstanceExtensions(SDL_Window *window, unsigned int *pCount, const char *const **names) {
+    #if __has_include(<SDL3/SDL_vulkan.h>)
+      return SDL_Vulkan_GetInstanceExtensions(window, pCount, names);
+    #else
+      if (pCount) { *pCount = 0; }
+      if (names) { *names = NULL; }
+      return 0;
+    #endif
+  }
+
   static inline void SDLKit__FillEvent(SDLKit_Event *out, const SDL_Event *ev) {
     out->type = SDLKIT_EVENT_NONE;
     out->x = out->y = 0;

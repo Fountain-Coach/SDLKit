@@ -226,12 +226,14 @@ public final class D3D12RenderBackend: StubRenderBackend {
 }
 #endif
 
+#if !os(Linux)
 @MainActor
 public final class VulkanRenderBackend: StubRenderBackend {
     required public init(window: SDLWindow) throws {
         try super.init(kind: .vulkan, window: window)
     }
 }
+#endif
 
 @MainActor
 public enum RenderBackendFactory {

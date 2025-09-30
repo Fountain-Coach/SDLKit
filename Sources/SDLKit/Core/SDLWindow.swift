@@ -81,6 +81,31 @@ public final class SDLWindow {
             throw AgentError.sdlUnavailable
             #endif
         }
+
+        public func vulkanInstanceExtensions() throws -> [String] {
+            #if canImport(CSDL3) && !HEADLESS_CI
+            var count: UInt32 = 0
+            var namesPtr: UnsafePointer<UnsafePointer<CChar>?>? = nil
+            let ok = withUnsafeMutablePointer(to: &count) { countPtr in
+                withUnsafeMutablePointer(to: &namesPtr) { namesPtrPtr in
+                    namesPtrPtr.withMemoryRebound(to: Optional<UnsafePointer<CChar>>.self, capacity: 1) { rebound in
+                        SDLKit_Vulkan_GetInstanceExtensions(windowHandle, countPtr, rebound) != 0
+                    }
+                }
+            }
+            guard ok, count > 0, let namesBase = namesPtr else { return [] }
+            var result: [String] = []
+            result.reserveCapacity(Int(count))
+            for i in 0..<Int(count) {
+                if let cstr = namesBase.advanced(by: i).pointee {
+                    result.append(String(cString: cstr))
+                }
+            }
+            return result
+            #else
+            throw AgentError.sdlUnavailable
+            #endif
+        }
     }
 
     public let config: Config
