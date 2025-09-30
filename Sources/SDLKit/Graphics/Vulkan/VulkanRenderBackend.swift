@@ -464,6 +464,14 @@ public final class VulkanRenderBackend: RenderBackend {
         // Pipeline layout (no descriptors)
         var plInfo = VkPipelineLayoutCreateInfo()
         plInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO
+        var pcRange = VkPushConstantRange()
+        pcRange.stageFlags = UInt32(VK_SHADER_STAGE_VERTEX_BIT)
+        pcRange.offset = 0
+        pcRange.size = 64 // 4x4 float matrix
+        withUnsafePointer(to: &pcRange) { ptr in
+            plInfo.pushConstantRangeCount = 1
+            plInfo.pPushConstantRanges = ptr
+        }
         var layout: VkPipelineLayout? = nil
         var r = withUnsafePointer(to: plInfo) { ptr in vkCreatePipelineLayout(dev, ptr, nil, &layout) }
         if r != VK_SUCCESS || layout == nil { throw AgentError.internalError("vkCreatePipelineLayout failed (res=\(r))") }
@@ -586,6 +594,13 @@ public final class VulkanRenderBackend: RenderBackend {
         }
         guard let pipe = resource.pipeline else { throw AgentError.internalError("Pipeline incomplete") }
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe)
+        // Push transform as 4x4 floats (column-major)
+        if let layout = resource.pipelineLayout {
+            var mat = transform.toFloatArray()
+            mat.withUnsafeBytes { bytes in
+                _ = vkCmdPushConstants(cmd, layout, UInt32(VK_SHADER_STAGE_VERTEX_BIT), 0, UInt32(bytes.count), bytes.baseAddress)
+            }
+        }
         let vbufToUse: VkBuffer?
         let vertexCount: UInt32
         if let boundHandle = bindings.value(for: 0, as: BufferHandle.self), let res = buffers[boundHandle], let buf = res.buffer, resource.vertexStride > 0 {

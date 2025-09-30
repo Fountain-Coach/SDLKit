@@ -62,7 +62,7 @@ struct DemoApp {
         }
 
         do {
-            try runTriangleDemo(on: platform)
+            try runSceneGraphDemo(on: platform)
         } catch {
             print("Triangle demo failed (\(error)); falling back to legacy 2D showcase")
             try runLegacy2DDemo(on: platform, agent: agent)
@@ -191,6 +191,43 @@ struct DemoApp {
             )
             try backend.endFrame()
             Thread.sleep(forTimeInterval: 1.0 / 30.0)
+        }
+    }
+
+    @MainActor
+    private static func runSceneGraphDemo(on platform: DemoPlatform) throws {
+        let window = SDLWindow(config: .init(title: "SDLKit SceneGraph", width: 640, height: 480))
+        try window.open()
+        defer { window.close() }
+        try window.show()
+
+        let backend = try RenderBackendFactory.makeBackend(window: window)
+        defer { try? backend.waitGPU() }
+
+        // Build a simple triangle vertex buffer (pos.xyz + color.xyz)
+        struct Vertex { var position: (Float, Float, Float); var color: (Float, Float, Float) }
+        let vertices: [Vertex] = [
+            .init(position: (-0.6, -0.5, 0), color: (1, 0, 0)),
+            .init(position: ( 0.0,  0.6, 0), color: (0, 1, 0)),
+            .init(position: ( 0.6, -0.5, 0), color: (0, 0, 1))
+        ]
+        let vertexBuffer = try vertices.withUnsafeBytes { buf in
+            try backend.createBuffer(bytes: buf.baseAddress, length: buf.count, usage: .vertex)
+        }
+
+        // Create scene graph
+        let mesh = Mesh(vertexBuffer: vertexBuffer, vertexCount: vertices.count)
+        let material = Material(shader: ShaderID("unlit_triangle"))
+        let node = SceneNode(name: "Triangle", transform: .identity, mesh: mesh, material: material)
+        let scene = Scene(root: node)
+
+        // Animate rotation for a few frames
+        let frames = 90
+        for i in 0..<frames {
+            let t = Float(i) * (Float.pi / 90.0)
+            node.localTransform = .rotationZ(t)
+            try SceneGraphRenderer.updateAndRender(scene: scene, backend: backend)
+            Thread.sleep(forTimeInterval: 1.0 / 60.0)
         }
     }
 
