@@ -88,8 +88,8 @@ public struct TextureInitialData {
     public init(mipLevelData: [Data] = []) { self.mipLevelData = mipLevelData }
 }
 
-public struct VertexLayout {
-    public struct Attribute {
+public struct VertexLayout: Equatable {
+    public struct Attribute: Equatable {
         public var index: Int
         public var semantic: String
         public var format: VertexFormat
@@ -109,7 +109,7 @@ public struct VertexLayout {
     }
 }
 
-public enum VertexFormat {
+public enum VertexFormat: Equatable {
     case float2
     case float3
     case float4
@@ -154,22 +154,19 @@ public enum TextureUsage {
 
 public struct GraphicsPipelineDescriptor {
     public var label: String?
-    public var vertexShader: ShaderID
-    public var fragmentShader: ShaderID?
+    public var shader: ShaderID
     public var vertexLayout: VertexLayout
     public var colorFormats: [TextureFormat]
     public var depthFormat: TextureFormat?
     public var sampleCount: Int
     public init(label: String? = nil,
-                vertexShader: ShaderID,
-                fragmentShader: ShaderID?,
+                shader: ShaderID,
                 vertexLayout: VertexLayout,
                 colorFormats: [TextureFormat],
                 depthFormat: TextureFormat? = nil,
                 sampleCount: Int = 1) {
         self.label = label
-        self.vertexShader = vertexShader
-        self.fragmentShader = fragmentShader
+        self.shader = shader
         self.vertexLayout = vertexLayout
         self.colorFormats = colorFormats
         self.depthFormat = depthFormat

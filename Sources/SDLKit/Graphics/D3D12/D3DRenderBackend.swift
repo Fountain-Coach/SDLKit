@@ -21,6 +21,7 @@ public final class D3D12RenderBackend: RenderBackend {
     private struct PipelineResource {
         let handle: PipelineHandle
         let descriptor: GraphicsPipelineDescriptor
+        let module: ShaderModule
         let rootSignature: UnsafeMutablePointer<ID3D12RootSignature>
         let pipelineState: UnsafeMutablePointer<ID3D12PipelineState>
         let vertexStride: Int
@@ -70,6 +71,7 @@ public final class D3D12RenderBackend: RenderBackend {
 
     private var frameActive = false
     private var debugLayerEnabled = false
+    private let shaderLibrary = ShaderLibrary.shared
 
     public required init(window: SDLWindow) throws {
         self.window = window
@@ -315,21 +317,25 @@ public final class D3D12RenderBackend: RenderBackend {
     }
 
     public func makePipeline(_ desc: GraphicsPipelineDescriptor) throws -> PipelineHandle {
-        if let existing = pipelines.values.first(where: { $0.descriptor.vertexShader == desc.vertexShader && $0.descriptor.fragmentShader == desc.fragmentShader }) {
+        if let existing = pipelines.values.first(where: { $0.descriptor.shader == desc.shader }) {
             return existing.handle
-        }
-        guard desc.vertexShader.rawValue == "unlit_triangle_vs" else {
-            throw AgentError.invalidArgument("Only unlit_triangle shaders are currently supported in the D3D12 backend")
-        }
-        if let fragment = desc.fragmentShader, fragment.rawValue != "unlit_triangle_fs" {
-            throw AgentError.invalidArgument("Only unlit_triangle shaders are currently supported in the D3D12 backend")
         }
         guard let device else {
             throw AgentError.internalError("D3D12 device unavailable")
         }
 
-        let vertexShader = try loadShaderData(named: "unlit_triangle_vs.dxil")
-        let pixelShader = try? loadShaderData(named: "unlit_triangle_fs.dxil")
+        let module = try shaderLibrary.module(for: desc.shader)
+        try module.validateVertexLayout(desc.vertexLayout)
+
+        let vertexShaderURL = try module.artifacts.requireDXILVertex(for: module.id)
+        let vertexShader = try Data(contentsOf: vertexShaderURL)
+        let pixelShaderURL = try module.artifacts.dxilFragmentURL(for: module.id)
+        let pixelShader: Data?
+        if let url = pixelShaderURL {
+            pixelShader = try Data(contentsOf: url)
+        } else {
+            pixelShader = nil
+        }
 
         var rootDesc = D3D12_ROOT_SIGNATURE_DESC()
         rootDesc.NumParameters = 0
@@ -389,7 +395,7 @@ public final class D3D12RenderBackend: RenderBackend {
         let semanticStrings = ["POSITION", "COLOR"]
         let semanticArrays = semanticStrings.map { $0.utf8CString }
         let semanticPointers = semanticArrays.map { UnsafePointer($0) }
-        let colorOffset = desc.vertexLayout.attributes.first(where: { $0.semantic == "COLOR" })?.offset ?? 12
+        let colorOffset = module.vertexLayout.attributes.first(where: { $0.semantic == "COLOR" })?.offset ?? 12
 
         var inputElements: [D3D12_INPUT_ELEMENT_DESC] = [
             D3D12_INPUT_ELEMENT_DESC(
@@ -496,9 +502,10 @@ public final class D3D12RenderBackend: RenderBackend {
         pipelines[handle] = PipelineResource(
             handle: handle,
             descriptor: desc,
+            module: module,
             rootSignature: rootSignature,
             pipelineState: pipelineState,
-            vertexStride: desc.vertexLayout.stride
+            vertexStride: module.vertexLayout.stride
         )
         if builtinPipeline == nil {
             builtinPipeline = handle
@@ -954,53 +961,18 @@ public final class D3D12RenderBackend: RenderBackend {
             try createBuffer(bytes: bytes.baseAddress, length: length, usage: .vertex)
         }
         if builtinPipeline == nil {
-            let layout = VertexLayout(
-                stride: MemoryLayout<Float>.size * 6,
-                attributes: [
-                    .init(index: 0, semantic: "POSITION", format: .float3, offset: 0),
-                    .init(index: 1, semantic: "COLOR", format: .float3, offset: MemoryLayout<Float>.size * 3)
-                ]
-            )
+            let module = try shaderLibrary.module(for: ShaderID("unlit_triangle"))
             _ = try makePipeline(
                 GraphicsPipelineDescriptor(
                     label: "unlit_triangle",
-                    vertexShader: ShaderID("unlit_triangle_vs"),
-                    fragmentShader: ShaderID("unlit_triangle_fs"),
-                    vertexLayout: layout,
+                    shader: module.id,
+                    vertexLayout: module.vertexLayout,
                     colorFormats: [.bgra8Unorm],
                     depthFormat: .depth32Float,
                     sampleCount: 1
                 )
             )
         }
-    }
-
-    private func loadShaderData(named name: String) throws -> Data {
-        let fileManager = FileManager.default
-        var searchPaths: [URL] = []
-        if let overridePath = ProcessInfo.processInfo.environment["SDLKIT_SHADER_OUTPUT_DIR"], !overridePath.isEmpty {
-            let url = URL(fileURLWithPath: overridePath)
-            if fileManager.fileExists(atPath: url.path) {
-                if url.pathExtension.lowercased() == "dxil" {
-                    if url.lastPathComponent == name {
-                        return try Data(contentsOf: url)
-                    }
-                } else {
-                    searchPaths.append(url)
-                }
-            }
-        }
-        let cwd = URL(fileURLWithPath: fileManager.currentDirectoryPath)
-        searchPaths.append(cwd.appendingPathComponent("ShaderAgentOutput/d3d12"))
-        searchPaths.append(cwd.appendingPathComponent("Generated/d3d12"))
-
-        for base in searchPaths {
-            let candidate = base.appendingPathComponent(name)
-            if fileManager.fileExists(atPath: candidate.path) {
-                return try Data(contentsOf: candidate)
-            }
-        }
-        throw AgentError.internalError("DXIL shader \(name) not found. Ensure ShaderAgent has produced Direct3D binaries.")
     }
 
     private func createPipelineState(desc: inout D3D12_GRAPHICS_PIPELINE_STATE_DESC, into output: inout UnsafeMutablePointer<ID3D12PipelineState>?) throws {

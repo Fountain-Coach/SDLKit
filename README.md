@@ -55,6 +55,25 @@ This package is designed to work with the Fountain‑Coach SDL3 fork:
 - Build: `swift build`
 - Test: `swift test`
 
+### Shader toolchain prerequisites
+
+Compiling the cross-platform shader library requires external tools:
+
+- [DirectX Shader Compiler (DXC)](https://github.com/microsoft/DirectXShaderCompiler)
+- [SPIRV-Cross](https://github.com/KhronosGroup/SPIRV-Cross)
+- Apple’s Metal toolchain (`metal` and `metallib`) from Xcode command line tools (macOS only)
+- Python 3 (for the shader build helper script)
+
+Install them on your platform and ensure they are available on `PATH` before building shaders.
+
+The SwiftPM `ShaderBuildPlugin` target runs automatically when the `SDLKit` module builds. To invoke it manually (for example to pre-populate shader caches) run:
+
+```bash
+python3 Scripts/ShaderBuild/build-shaders.py "$(pwd)" .build/shader-cache
+```
+
+Generated artifacts are copied into `Sources/SDLKit/Generated/{dxil,spirv,metal}` and shipped with the library bundle.
+
 ### Headless CI mode
 
 - CI runs without installing SDL3 and compiles in headless mode using a build define.
