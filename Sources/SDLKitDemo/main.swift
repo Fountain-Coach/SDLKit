@@ -167,21 +167,13 @@ struct DemoApp {
             stub.register(mesh: mesh, vertexBuffer: vertexBuffer, vertexCount: vertices.count)
         }
 
-        let stride = MemoryLayout<Vertex>.stride
-        let colorOffset = MemoryLayout<Vertex>.offset(of: \.color) ?? MemoryLayout<(Float, Float, Float)>.stride
-        let vertexLayout = VertexLayout(
-            stride: stride,
-            attributes: [
-                .init(index: 0, semantic: "POSITION", format: .float3, offset: 0),
-                .init(index: 1, semantic: "COLOR", format: .float3, offset: colorOffset)
-            ]
-        )
+        let shaderModule = try ShaderLibrary.shared.module(for: ShaderID("unlit_triangle"))
+        let vertexLayout = shaderModule.vertexLayout
 
         let pipeline = try backend.makePipeline(
             GraphicsPipelineDescriptor(
                 label: "unlit_triangle",
-                vertexShader: ShaderID("unlit_triangle_vs"),
-                fragmentShader: ShaderID("unlit_triangle_fs"),
+                shader: shaderModule.id,
                 vertexLayout: vertexLayout,
                 colorFormats: [.bgra8Unorm]
             )

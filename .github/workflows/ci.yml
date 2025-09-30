@@ -33,6 +33,19 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-swift-6.1-jammy-build-
 
+      - name: Cache shader artifacts
+        uses: actions/cache@v4
+        with:
+          path: Sources/SDLKit/Generated
+          key: ${{ runner.os }}-shader-${{ hashFiles('Shaders/**', 'Plugins/ShaderBuildPlugin/**', 'Scripts/ShaderBuild/**') }}
+          restore-keys: |
+            ${{ runner.os }}-shader-
+
+      - name: Build shader bundle (best effort)
+        run: |
+          python3 Scripts/ShaderBuild/build-shaders.py "$PWD" .build/shader-cache
+        continue-on-error: true
+
       - name: Build and test
         env:
           SDLKIT_GUI_ENABLED: 'false'

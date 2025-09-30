@@ -127,6 +127,9 @@ let package = Package(
                     return deps
                 }(),
                 path: "Sources/SDLKit",
+                resources: [
+                    .copy("Generated")
+                ],
                 cSettings: {
                     var flags: [CSetting] = []
                     if let inc = env["SDL3_INCLUDE_DIR"], !inc.isEmpty {
@@ -146,7 +149,10 @@ let package = Package(
                     // Fallback common lib roots
                     flags.append(.unsafeFlags(["-L/usr/local/lib"]))
                     return flags
-                }()
+                }(),
+                plugins: [
+                    .plugin(name: "ShaderBuildPlugin")
+                ]
             )
         )
 
@@ -183,6 +189,13 @@ let package = Package(
                     .target(name: "VulkanMinimal", condition: .when(platforms: [.linux]))
                 ],
                 path: "Sources/SDLKitDemo"
+            )
+        )
+
+        targets.append(
+            .plugin(
+                name: "ShaderBuildPlugin",
+                capability: .buildTool()
             )
         )
 

@@ -134,7 +134,10 @@ final class StubRenderBackendCore {
     func makePipeline(_ desc: GraphicsPipelineDescriptor) -> PipelineHandle {
         let handle = PipelineHandle()
         pipelines[handle] = PipelineResource(descriptor: desc)
-        SDLLogger.debug("SDLKit.Graphics", "makePipeline id=\(handle.rawValue) label=\(desc.label ?? "<nil>")")
+        SDLLogger.debug(
+            "SDLKit.Graphics",
+            "makePipeline id=\(handle.rawValue) label=\(desc.label ?? "<nil>") shader=\(desc.shader.rawValue)"
+        )
         return handle
     }
 

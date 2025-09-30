@@ -39,7 +39,8 @@ public final class MetalRenderBackend: RenderBackend {
     private var depthTexture: MTLTexture?
     private var lastSubmittedCommandBuffer: MTLCommandBuffer?
 
-    private let shaderLibrary: MTLLibrary
+    private let shaderLibrary: ShaderLibrary
+    private var metalLibraries: [ShaderID: MTLLibrary] = [:]
     private var drawableSize: CGSize
     private var depthPixelFormat: MTLPixelFormat?
 
@@ -88,7 +89,7 @@ public final class MetalRenderBackend: RenderBackend {
         self.drawableSize = initialSize
         layer.drawableSize = CGSize(width: initialSize.width * scale, height: initialSize.height * scale)
 
-        self.shaderLibrary = try MetalRenderBackend.loadShaderLibrary(device: device)
+        self.shaderLibrary = ShaderLibrary.shared
 
         guard let triangle = MetalRenderBackend.makeTriangleVertexBuffer(device: device) else {
             throw AgentError.internalError("Failed to allocate builtin Metal triangle buffer")
@@ -240,13 +241,17 @@ public final class MetalRenderBackend: RenderBackend {
     }
 
     public func makePipeline(_ desc: GraphicsPipelineDescriptor) throws -> PipelineHandle {
-        let vertexDescriptor = try makeVertexDescriptor(from: desc.vertexLayout)
+        let module = try shaderLibrary.module(for: desc.shader)
+        try module.validateVertexLayout(desc.vertexLayout)
+
+        let vertexDescriptor = try makeVertexDescriptor(from: module.vertexLayout)
+        let library = try loadMetalLibrary(for: module)
 
         let pipelineDescriptor = MTLRenderPipelineDescriptor()
-        pipelineDescriptor.label = desc.label ?? desc.vertexShader.rawValue
-        pipelineDescriptor.vertexFunction = try makeFunction(named: desc.vertexShader.rawValue)
-        if let fragment = desc.fragmentShader {
-            pipelineDescriptor.fragmentFunction = try makeFunction(named: fragment.rawValue)
+        pipelineDescriptor.label = desc.label ?? module.id.rawValue
+        pipelineDescriptor.vertexFunction = try makeFunction(module.vertexEntryPoint, library: library)
+        if let fragment = module.fragmentEntryPoint {
+            pipelineDescriptor.fragmentFunction = try makeFunction(fragment, library: library)
         }
         pipelineDescriptor.vertexDescriptor = vertexDescriptor
         pipelineDescriptor.sampleCount = desc.sampleCount
@@ -293,7 +298,7 @@ public final class MetalRenderBackend: RenderBackend {
         let resource = PipelineResource(
             state: pipelineState,
             descriptor: desc,
-            vertexStride: max(1, desc.vertexLayout.stride),
+            vertexStride: max(1, module.vertexLayout.stride),
             colorPixelFormats: colorPixelFormats,
             depthPixelFormat: depthAttachmentPixelFormat
         )
@@ -427,9 +432,9 @@ public final class MetalRenderBackend: RenderBackend {
         depthTexture?.label = "SDLKit.Depth"
     }
 
-    private func makeFunction(named name: String) throws -> MTLFunction {
-        guard let function = shaderLibrary.makeFunction(name: name) else {
-            throw AgentError.internalError("Shader function \(name) not found in metallib")
+    private func makeFunction(_ entry: String, library: MTLLibrary) throws -> MTLFunction {
+        guard let function = library.makeFunction(name: entry) else {
+            throw AgentError.internalError("Shader function \(entry) not found in metallib")
         }
         return function
     }
@@ -450,37 +455,15 @@ public final class MetalRenderBackend: RenderBackend {
         return descriptor
     }
 
-    private static func loadShaderLibrary(device: MTLDevice) throws -> MTLLibrary {
-        let url = try locateShaderLibrary()
-        SDLLogger.info("SDLKit.Graphics.Metal", "Loading metallib from \(url.path)")
-        return try device.makeLibrary(URL: url)
-    }
-
-    private static func locateShaderLibrary() throws -> URL {
-        let fileManager = FileManager.default
-        var searchPaths: [URL] = []
-        if let overridePath = ProcessInfo.processInfo.environment["SDLKIT_SHADER_OUTPUT_DIR"], !overridePath.isEmpty {
-            let overrideURL = URL(fileURLWithPath: overridePath)
-            if overrideURL.pathExtension == "metallib" {
-                if fileManager.fileExists(atPath: overrideURL.path) {
-                    return overrideURL
-                }
-            } else {
-                searchPaths.append(overrideURL)
-            }
+    private func loadMetalLibrary(for module: ShaderModule) throws -> MTLLibrary {
+        if let cached = metalLibraries[module.id] {
+            return cached
         }
-        let cwd = URL(fileURLWithPath: fileManager.currentDirectoryPath)
-        searchPaths.append(cwd.appendingPathComponent("ShaderAgentOutput/metal"))
-        searchPaths.append(cwd.appendingPathComponent("Generated/metal"))
-
-        for base in searchPaths {
-            let candidate = base.appendingPathComponent("unlit_triangle.metallib")
-            if fileManager.fileExists(atPath: candidate.path) {
-                return candidate
-            }
-        }
-
-        throw AgentError.internalError("unlit_triangle.metallib not found. Ensure ShaderAgent has produced Metal binaries.")
+        let url = try module.artifacts.requireMetalLibrary(for: module.id)
+        SDLLogger.info("SDLKit.Graphics.Metal", "Loading metallib for \(module.id.rawValue) from \(url.path)")
+        let library = try device.makeLibrary(URL: url)
+        metalLibraries[module.id] = library
+        return library
     }
 
     private static func makeTriangleVertexBuffer(device: MTLDevice) -> (handle: BufferHandle, buffer: MTLBuffer, count: Int)? {
