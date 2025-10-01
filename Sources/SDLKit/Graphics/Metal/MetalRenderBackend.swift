@@ -7,7 +7,7 @@ import AppKit
 #endif
 
 @MainActor
-public final class MetalRenderBackend: RenderBackend {
+public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
     private struct BufferResource {
         let buffer: MTLBuffer
         let length: Int
@@ -38,6 +38,8 @@ public final class MetalRenderBackend: RenderBackend {
     private var currentRenderPassDescriptor: MTLRenderPassDescriptor?
     private var depthTexture: MTLTexture?
     private var lastSubmittedCommandBuffer: MTLCommandBuffer?
+    private var captureRequested: Bool = false
+    private var lastCaptureHash: String?
 
     private let shaderLibrary: ShaderLibrary
     private var metalLibraries: [ShaderID: MTLLibrary] = [:]
@@ -144,6 +146,23 @@ public final class MetalRenderBackend: RenderBackend {
         if let encoder = currentRenderEncoder {
             encoder.endEncoding()
             currentRenderEncoder = nil
+        }
+
+        if captureRequested {
+            let width = drawable.texture.width
+            let height = drawable.texture.height
+            let bpp = 4
+            let bytesPerRow = width * bpp
+            let length = bytesPerRow * height
+            var data = Data(count: length)
+            data.withUnsafeMutableBytes { buf in
+                if let base = buf.baseAddress {
+                    let region = MTLRegionMake2D(0, 0, width, height)
+                    drawable.texture.getBytes(base, bytesPerRow: bytesPerRow, from: region, mipmapLevel: 0)
+                }
+            }
+            lastCaptureHash = MetalRenderBackend.hashHex(data: data)
+            captureRequested = false
         }
 
         commandBuffer.present(drawable)
@@ -553,6 +572,26 @@ public final class MetalRenderBackend: RenderBackend {
         default:
             return 4
         }
+    }
+
+    // MARK: - GoldenImageCapturable
+    public func requestCapture() { captureRequested = true }
+    public func takeCaptureHash() throws -> String {
+        guard let h = lastCaptureHash else { throw AgentError.internalError("No capture hash available; call requestCapture() before endFrame") }
+        return h
+    }
+
+    private static func hashHex(data: Data) -> String {
+        // FNV-1a 64-bit
+        var hash: UInt64 = 0xcbf29ce484222325
+        let prime: UInt64 = 0x100000001b3
+        data.withUnsafeBytes { (buf: UnsafeRawBufferPointer) in
+            for byte in buf {
+                hash ^= UInt64(byte)
+                hash = hash &* prime
+            }
+        }
+        return String(format: "%016llx", hash)
     }
 }
 #endif

@@ -196,6 +196,13 @@ public enum ResourceHandle: Hashable {
     case mesh(MeshHandle)
 }
 
+// Optional protocol: backends may support golden-image capture for tests.
+// Call `requestCapture()` before ending a frame, then fetch the hash via `takeCaptureHash()`.
+public protocol GoldenImageCapturable {
+    func requestCapture()
+    func takeCaptureHash() throws -> String
+}
+
 @MainActor
 public struct RenderSurface {
     public let window: SDLWindow
