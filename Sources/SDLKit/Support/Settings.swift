@@ -1,0 +1,73 @@
+import Foundation
+#if canImport(FountainStore)
+import FountainStore
+#endif
+
+// Centralized non-secret settings persistence backed by FountainStore.
+// Keys: simple names like "render.backend.override", "vk.validation", etc.
+public enum SettingsStore {
+    public static func getString(_ key: String) -> String? {
+        #if canImport(FountainStore)
+        return FSSettingsBridge.get(key)
+        #else
+        return nil
+        #endif
+    }
+
+    public static func setString(_ key: String, _ value: String) {
+        #if canImport(FountainStore)
+        FSSettingsBridge.set(key, value)
+        #else
+        _ = (key, value)
+        #endif
+    }
+
+    public static func getBool(_ key: String) -> Bool? {
+        if let s = getString(key) {
+            let v = s.lowercased()
+            if ["1","true","yes","on"].contains(v) { return true }
+            if ["0","false","no","off"].contains(v) { return false }
+        }
+        return nil
+    }
+
+    public static func setBool(_ key: String, _ value: Bool) {
+        setString(key, value ? "1" : "0")
+    }
+}
+
+#if canImport(FountainStore)
+import FountainStore
+
+private struct SettingDoc: Codable, Identifiable { let id: String; let value: String }
+
+private enum FSSettingsBridge {
+    static func path() -> URL {
+        let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+        return cwd.appendingPathComponent(".fountain/sdlkit", isDirectory: true)
+    }
+    static func get(_ key: String) -> String? {
+        runBlocking {
+            let store = try await FountainStore.open(.init(path: path()))
+            let coll = await store.collection("settings", of: SettingDoc.self)
+            return try await coll.get(id: key)?.value
+        }
+    }
+    static func set(_ key: String, _ value: String) {
+        _ = runBlocking {
+            let store = try await FountainStore.open(.init(path: path()))
+            let coll = await store.collection("settings", of: SettingDoc.self)
+            try await coll.put(SettingDoc(id: key, value: value))
+            return true
+        }
+    }
+    private static func runBlocking<T>(_ body: @escaping () async throws -> T) -> T? {
+        let sem = DispatchSemaphore(value: 0)
+        var result: T?
+        Task { do { result = try await body() } catch { result = nil }; sem.signal() }
+        sem.wait()
+        return result
+    }
+}
+#endif
+

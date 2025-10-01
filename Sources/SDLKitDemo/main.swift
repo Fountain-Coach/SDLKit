@@ -235,6 +235,11 @@ struct DemoApp {
         let view = float4x4.lookAt(eye: (0, 0, 2), center: (0, 0, 0), up: (0, 1, 0))
         let proj = float4x4.perspective(fovYRadians: .pi/3, aspect: aspect, zNear: 0.1, zFar: 100.0)
         var scene = Scene(root: root, camera: Camera(view: view, projection: proj))
+        // Optional: override light direction from SecretStore if present
+        if let data = try? Secrets.retrieve(key: "light_dir"), let s = data.flatMap({ String(data: $0, encoding: .utf8) }) {
+            let parts = s.split(separator: ",").compactMap { Float($0.trimmingCharacters(in: .whitespaces)) }
+            if parts.count >= 3 { scene.lightDirection = (parts[0], parts[1], parts[2]) }
+        }
 
         // Animate rotation for a few frames
         let frames = 180

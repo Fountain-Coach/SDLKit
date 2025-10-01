@@ -18,6 +18,7 @@ public enum GoldenRefs {
     public static func setExpected(_ value: String, for key: String) {
         #if canImport(FountainStore)
         FSBridge.setString(value, forKey: key)
+        SettingsStore.setString("golden.last.key", key)
         #else
         // No-op in fallback mode
         _ = (value, key)

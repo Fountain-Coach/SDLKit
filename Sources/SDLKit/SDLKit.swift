@@ -12,6 +12,9 @@ public enum SDLKitConfig {
     }
 
     public static var presentPolicy: PresentPolicy {
+        if let s = SettingsStore.getString("present.policy")?.lowercased() {
+            return s == "auto" ? .auto : .explicit
+        }
         let env = ProcessInfo.processInfo.environment["SDLKIT_PRESENT_POLICY"]?.lowercased()
         return env == "auto" ? .auto : .explicit
     }
@@ -29,19 +32,24 @@ public enum SDLKitConfig {
     }
 
     public static var renderBackendOverride: String? {
-        guard let raw = ProcessInfo.processInfo.environment["SDLKIT_RENDER_BACKEND"] else {
-            return nil
+        // Prefer persisted setting; fallback to env
+        if let s = SettingsStore.getString("render.backend.override"), !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return s
         }
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
+        if let raw = ProcessInfo.processInfo.environment["SDLKIT_RENDER_BACKEND"] {
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        return nil
     }
 
     public static var demoForceLegacy2D: Bool {
-        guard let raw = ProcessInfo.processInfo.environment["SDLKIT_DEMO_FORCE_2D"] else {
-            return false
+        if let persisted = SettingsStore.getBool("demo.force2d") { return persisted }
+        if let raw = ProcessInfo.processInfo.environment["SDLKIT_DEMO_FORCE_2D"] {
+            let value = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            return value == "1" || value == "true" || value == "yes"
         }
-        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return value == "1" || value == "true" || value == "yes"
+        return false
     }
 
     public enum PresentPolicy { case auto, explicit }
@@ -64,4 +72,3 @@ public enum SDLKitState {
         #endif
     }
 }
-

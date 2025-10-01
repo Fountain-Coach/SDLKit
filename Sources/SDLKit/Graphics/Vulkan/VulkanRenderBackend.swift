@@ -743,7 +743,7 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
 
         var extensions = requiredExtensions
         var layers: [String] = []
-        let enableValidation: Bool = {
+        let enableValidation: Bool = SettingsStore.getBool("vk.validation") ?? {
             let env = ProcessInfo.processInfo.environment["SDLKIT_VK_VALIDATION"]?.lowercased()
             return env == "1" || env == "true" || env == "yes"
         }()
