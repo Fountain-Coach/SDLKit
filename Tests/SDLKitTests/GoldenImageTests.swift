@@ -24,9 +24,18 @@ final class GoldenImageTests: XCTestCase {
             // Build a simple lit scene (cube) with fixed light & camera
             let mesh = try MeshFactory.makeLitCube(backend: backend, size: 1.2)
             let tintedBaseColor: (Float, Float, Float, Float) = (0.6, 0.45, 0.9, 1.0)
+            let pixels: [UInt8] = [
+                255,   0,   0, 255,
+                  0, 255,   0, 255,
+                  0,   0, 255, 255,
+                255, 255, 255, 255
+            ]
+            let textureDescriptor = TextureDescriptor(width: 2, height: 2, mipLevels: 1, format: .rgba8Unorm, usage: .shaderRead)
+            let textureData = TextureInitialData(mipLevelData: [Data(pixels)])
+            let textureHandle = try backend.createTexture(descriptor: textureDescriptor, initialData: textureData)
             let material = Material(
                 shader: ShaderID("basic_lit"),
-                params: .init(lightDirection: (0.3, -0.5, 0.8), baseColor: tintedBaseColor)
+                params: .init(lightDirection: (0.3, -0.5, 0.8), baseColor: tintedBaseColor, texture: textureHandle)
             )
             let node = SceneNode(name: "Cube", transform: .identity, mesh: mesh, material: material)
             let root = SceneNode(name: "Root")

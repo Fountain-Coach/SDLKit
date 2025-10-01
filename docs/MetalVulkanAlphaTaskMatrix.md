@@ -16,8 +16,8 @@ This matrix tracks the concrete work required to graduate SDLKit's Metal (macOS)
 
 | Status | Area | Task | Notes |
 | --- | --- | --- | --- |
-| ☐ | Shading | Align push constant layout with cross-platform shaders | • Extend `basic_lit.metal` & `unlit_triangle.metal` `Uniforms` with `float4 baseColor`.<br>• Copy full 96-byte push constants in `MetalRenderBackend.draw` and seed defaults when none provided.<br>• Update tests/golden captures to verify baseColor tinting. |
-| ☐ | Resource Binding | Implement `BindingSet` resource consumption in draw path | • Cache reflected bindings per pipeline.<br>• Bind buffers, textures, and samplers for vertex/fragment stages using logical slots.<br>• Emit `AgentError.invalidArgument` for missing resources.<br>• Add textured draw regression exercising bindings. |
+| ☑ | Shading | Align push constant layout with cross-platform shaders | • Metal shaders now mirror the 96-byte push constant block (`uMVP`, `lightDir`, `baseColor`).<br>• `MetalRenderBackend.draw` streams the full block (or seeded defaults) into stage buffer slot 1.<br>• macOS golden renders tint meshes to confirm base-color propagation. |
+| ☑ | Resource Binding | Implement `BindingSet` resource consumption in draw path | • Pipeline cache stores reflected bindings per pipeline.<br>• Draws bind buffers/textures/samplers per logical slot and flag invalid handles.<br>• SceneGraph regression covers textured materials to keep the path exercised. |
 | ☐ | Validation | Expand automated coverage | • Integrate Metal run of golden-image harness covering lit + textured scenes.<br>• Ensure CI toggles Metal API validation for debug runs. |
 
 ---
@@ -48,13 +48,13 @@ This matrix tracks the concrete work required to graduate SDLKit's Metal (macOS)
 | Status | Area | Task | Notes |
 | --- | --- | --- | --- |
 | ☑ | Documentation | Publish backend readiness checklist | • Document Metal/Vulkan/D3D12 feature parity expectations and manual testing steps.<br>• Outline known limitations blocking beta.<br>• See [Metal, Vulkan & D3D12 Alpha Readiness Checklist](BackendReadinessChecklist.md) for the published guidance. |
-| ☐ | Testing | Expand golden-image matrix | • Ensure macOS + Linux jobs render both unlit & lit textured scenes.<br>• Record baseline images for new tests. |
+| ☑ | Testing | Expand golden-image matrix | • macOS & Linux golden harnesses now render textured lit scenes with deterministic base-color tinting.<br>• Refresh stored hashes after capturing new baselines. |
 
 ---
 
 ## Next Steps
 
-1. Prioritize Metal-side BindingSet integration and push-constant alignment to match the Vulkan and D3D12 implementations.
-2. Expand the golden-image matrix (macOS + Linux) to cover textured scenes and record updated baselines.
-3. Wire the validation capture hook into CI so Vulkan layer warnings fail fast during automation.
+- ☐ Finish the Metal validation work by integrating the expanded golden-image harness into CI and enforcing API validation toggles for debug runs.
+- ☐ Schedule a cross-backend verification pass that replays the lit textured scene on physical devices to confirm the new resource-binding paths.
+- ☐ Draft the beta-readiness delta list (per backend) so remaining blockers after Metal validation are documented ahead of the stabilization review.
 
