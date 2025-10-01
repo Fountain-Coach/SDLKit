@@ -4,7 +4,6 @@ import XCTest
 final class ShaderArtifactsTests: XCTestCase {
     private struct Module {
         let name: String
-        let source: URL
         let expectedArtifacts: [URL]
     }
 
@@ -15,14 +14,12 @@ final class ShaderArtifactsTests: XCTestCase {
             .deletingLastPathComponent() // SDLKitTests
             .deletingLastPathComponent() // Tests
 
-        let shaderRoot = packageRoot.appendingPathComponent("Shaders/graphics", isDirectory: true)
         let generatedRoot = packageRoot
             .appendingPathComponent("Sources/SDLKit/Generated", isDirectory: true)
 
         let modules: [Module] = [
             Module(
                 name: "unlit_triangle",
-                source: shaderRoot.appendingPathComponent("unlit_triangle.hlsl"),
                 expectedArtifacts: [
                     generatedRoot.appendingPathComponent("dxil/unlit_triangle_vs.dxil"),
                     generatedRoot.appendingPathComponent("dxil/unlit_triangle_ps.dxil"),
@@ -33,7 +30,6 @@ final class ShaderArtifactsTests: XCTestCase {
             ),
             Module(
                 name: "basic_lit",
-                source: shaderRoot.appendingPathComponent("basic_lit.hlsl"),
                 expectedArtifacts: [
                     generatedRoot.appendingPathComponent("dxil/basic_lit_vs.dxil"),
                     generatedRoot.appendingPathComponent("dxil/basic_lit_ps.dxil"),
@@ -49,16 +45,21 @@ final class ShaderArtifactsTests: XCTestCase {
         for module in modules {
             try ShaderArtifactMaterializer.materializeArtifactsIfNeeded(at: module.expectedArtifacts)
 
-            let shaderAttributes = try fm.attributesOfItem(atPath: module.source.path)
-            let shaderTimestamp = try XCTUnwrap(shaderAttributes[.modificationDate] as? Date, "Missing modification date for \(module.source.path)")
-
             for artifactURL in module.expectedArtifacts {
                 let path = artifactURL.path
                 XCTAssertTrue(fm.fileExists(atPath: path), "Missing shader artifact: \(path)")
 
-                let attributes = try fm.attributesOfItem(atPath: path)
-                let artifactTimestamp = try XCTUnwrap(attributes[.modificationDate] as? Date, "Missing modification date for \(path)")
-                XCTAssertGreaterThanOrEqual(artifactTimestamp, shaderTimestamp, "Shader artifact outdated: \(path)")
+                let artifactData = try Data(contentsOf: artifactURL)
+                let base64URL = artifactURL.appendingPathExtension("b64")
+
+                XCTAssertTrue(fm.fileExists(atPath: base64URL.path), "Missing committed shader payload: \(base64URL.path)")
+                let base64String = try String(contentsOf: base64URL, encoding: .utf8)
+                let stripped = base64String.filter { !$0.isWhitespace }
+                let decodedData = Data(base64Encoded: stripped)
+                XCTAssertNotNil(decodedData, "Committed shader payload for \(base64URL.path) is not valid base64")
+                if let decodedData {
+                    XCTAssertEqual(artifactData, decodedData, "Materialized shader artifact does not match committed payload: \(path)")
+                }
             }
 
             do {
