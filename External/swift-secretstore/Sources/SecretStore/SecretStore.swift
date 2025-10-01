@@ -25,7 +25,7 @@ public final class FileKeystore: SecretStore {
     }
 
     public func storeSecret(_ data: Data, for key: String) throws {
-        try queue.sync {
+        try queue.syncVoid {
             var contents = try loadContents()
             contents[key] = data.base64EncodedString()
             try writeContents(contents)
@@ -33,7 +33,7 @@ public final class FileKeystore: SecretStore {
     }
 
     public func retrieveSecret(for key: String) throws -> Data? {
-        try queue.sync {
+        return try queue.sync {
             guard let encoded = try loadContents()[key] else { return nil }
             guard let decoded = Data(base64Encoded: encoded) else {
                 throw SecretStoreError.invalidEncoding
@@ -43,7 +43,7 @@ public final class FileKeystore: SecretStore {
     }
 
     public func deleteSecret(for key: String) throws {
-        try queue.sync {
+        try queue.syncVoid {
             var contents = try loadContents()
             contents.removeValue(forKey: key)
             try writeContents(contents)
@@ -115,7 +115,7 @@ private final class InMemoryKeystore: SecretStore {
     private let queue = DispatchQueue(label: "SecretStore.InMemory")
 
     func storeSecret(_ data: Data, for key: String) throws {
-        queue.sync { storage[key] = data }
+        queue.syncVoid { storage[key] = data }
     }
 
     func retrieveSecret(for key: String) throws -> Data? {
@@ -123,7 +123,13 @@ private final class InMemoryKeystore: SecretStore {
     }
 
     func deleteSecret(for key: String) throws {
-        queue.sync { storage.removeValue(forKey: key) }
+        queue.syncVoid { storage.removeValue(forKey: key) }
+    }
+}
+
+private extension DispatchQueue {
+    func syncVoid(_ work: () throws -> Void) rethrows {
+        try sync(execute: work)
     }
 }
 

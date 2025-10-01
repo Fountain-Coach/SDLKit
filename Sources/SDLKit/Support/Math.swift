@@ -92,9 +92,9 @@ public extension float4x4 {
         let xlen = max(0.000001, sqrtf(xx*xx + xy*xy + xz*xz))
         xx /= xlen; xy /= xlen; xz /= xlen
 
-        var yx = zy*xz - zz*xy
-        var yy = zz*xx - zx*xz
-        var yz = zx*xy - zy*xx
+        let yx = zy*xz - zz*xy
+        let yy = zz*xx - zx*xz
+        let yz = zx*xy - zy*xx
 
         let tx = -(xx*ex + xy*ey + xz*ez)
         let ty = -(yx*ex + yy*ey + yz*ez)

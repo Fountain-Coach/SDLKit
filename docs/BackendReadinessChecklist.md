@@ -1,6 +1,6 @@
-# Metal & Vulkan Alpha Readiness Checklist
+# Metal, Vulkan & D3D12 Alpha Readiness Checklist
 
-This checklist documents the current expectations, validation steps, and known gaps for stabilizing SDLKit's Metal and Vulkan backends during the alpha milestone. It is intended for engineers and QA reviewers scheduling verification work prior to declaring feature parity across desktop platforms.
+This checklist documents the current expectations, validation steps, and known gaps for stabilizing SDLKit's Metal, Vulkan, and Direct3D 12 backends during the alpha milestone. It is intended for engineers and QA reviewers scheduling verification work prior to declaring feature parity across desktop platforms.
 
 ## Usage
 
@@ -12,13 +12,13 @@ This checklist documents the current expectations, validation steps, and known g
 
 ## Feature Parity Expectations
 
-| Capability | Metal (macOS) | Vulkan (Linux) | Notes |
-| --- | --- | --- | --- |
-| Unlit triangle sample | ✅ | ✅ | Both backends render `unlit_triangle` shader without validation errors.
-| Lit mesh rendering | ✅ | ✅ | Requires `basic_lit` shader push constants (MVP, light direction, base color) to match cross-platform layout.
-| Texture sampling | ⚠️ Pending BindingSet integration | ✅ Descriptor-set binding with fallback sampler | Vulkan textured draws exercise the new BindingSet path; Metal integration remains in progress.
-| Resize handling | ✅ | ⚠️ Requires additional testing | Vulkan swapchain recreation validated on latest driver stack but needs soak testing.
-| GPU compute interop | ⚠️ Planned post-alpha | ⚠️ Planned post-alpha | Compute integration begins after graphics alpha stabilization.
+| Capability | Metal (macOS) | Vulkan (Linux) | D3D12 (Windows) | Notes |
+| --- | --- | --- | --- | --- |
+| Unlit triangle sample | ✅ | ✅ | ✅ | All backends render `unlit_triangle` shader without validation errors.
+| Lit mesh rendering | ✅ | ✅ | ✅ | Requires `basic_lit` shader push constants (MVP, light direction, base color) to match cross-platform layout.
+| Texture sampling | ⚠️ Pending BindingSet integration | ✅ Descriptor-set binding with fallback sampler | ✅ Descriptor heap binding with static samplers | Vulkan and D3D12 textured draws exercise the new BindingSet path; Metal integration remains in progress.
+| Resize handling | ✅ | ⚠️ Requires additional testing | ✅ | Vulkan swapchain recreation validated on latest driver stack but needs soak testing.
+| GPU compute interop | ⚠️ Planned post-alpha | ⚠️ Planned post-alpha | ⚠️ Planned post-alpha | Compute integration begins after graphics alpha stabilization.
 
 Legend: ✅ — Verified in current builds, ⚠️ — Partial or pending follow-up work.
 
