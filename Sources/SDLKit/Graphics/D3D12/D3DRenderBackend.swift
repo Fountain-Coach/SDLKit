@@ -5,7 +5,7 @@ import Direct3D12
 import DXGI
 
 @MainActor
-public final class D3D12RenderBackend: RenderBackend {
+public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
     private enum Constants {
         static let frameCount = 2
         static let preferredBackBufferFormat: DXGI_FORMAT = DXGI_FORMAT_B8G8R8A8_UNORM
@@ -73,6 +73,12 @@ public final class D3D12RenderBackend: RenderBackend {
     private var frameActive = false
     private var debugLayerEnabled = false
     private let shaderLibrary = ShaderLibrary.shared
+
+    // Capture state
+    private var captureRequested: Bool = false
+    private var lastCaptureHash: String?
+    private var readbackBuffer: UnsafeMutablePointer<ID3D12Resource>?
+    private var readbackBufferSize: UINT64 = 0
 
     public required init(window: SDLWindow) throws {
         self.window = window
@@ -164,16 +170,70 @@ public final class D3D12RenderBackend: RenderBackend {
             throw AgentError.internalError("D3D12 command resources unavailable")
         }
 
-        var barrier = D3D12_RESOURCE_BARRIER()
-        barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION
-        barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE
-        barrier.Transition = D3D12_RESOURCE_TRANSITION_BARRIER(
-            pResource: frames[Int(frameIndex)].renderTarget,
-            Subresource: D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
-            StateBefore: D3D12_RESOURCE_STATE_RENDER_TARGET,
-            StateAfter: D3D12_RESOURCE_STATE_PRESENT
-        )
-        commandList.pointee.lpVtbl.pointee.ResourceBarrier(commandList, 1, &barrier)
+        // Optional capture: transition to COPY_SOURCE, copy to readback buffer, then to PRESENT
+        if captureRequested, let rt = frames[Int(frameIndex)].renderTarget {
+            var desc = D3D12_RESOURCE_DESC()
+            desc = rt.pointee.lpVtbl.pointee.GetDesc(rt)
+            var footprint = D3D12_PLACED_SUBRESOURCE_FOOTPRINT()
+            var numRows: UINT = 0
+            var rowSize: UINT64 = 0
+            var totalBytes: UINT64 = 0
+            var subresourceDesc = desc
+            withUnsafeMutablePointer(to: &footprint) { fptr in
+                withUnsafeMutablePointer(to: &numRows) { nr in
+                    withUnsafeMutablePointer(to: &rowSize) { rs in
+                        withUnsafeMutablePointer(to: &totalBytes) { tb in
+                            device?.pointee.lpVtbl.pointee.GetCopyableFootprints(device, &subresourceDesc, 0, 1, fptr, nr, rs, tb, &totalBytes)
+                        }
+                    }
+                }
+            }
+
+            if readbackBuffer == nil || readbackBufferSize < totalBytes {
+                if var rb = readbackBuffer { releaseCOM(&rb); readbackBuffer = nil }
+                var heapProps = D3D12_HEAP_PROPERTIES(Type: D3D12_HEAP_TYPE_READBACK, CPUPageProperty: D3D12_CPU_PAGE_PROPERTY_UNKNOWN, MemoryPoolPreference: D3D12_MEMORY_POOL_UNKNOWN, CreationNodeMask: 0, VisibleNodeMask: 0)
+                var bufferDesc = D3D12_RESOURCE_DESC.Buffer(totalBytes)
+                var rb: UnsafeMutablePointer<ID3D12Resource>?
+                try withUnsafeMutablePointer(to: &rb) { pointer in
+                    try pointer.withMemoryRebound(to: Optional<UnsafeMutableRawPointer>.self, capacity: 1) { raw in
+                        try checkHRESULT(device!.pointee.lpVtbl.pointee.CreateCommittedResource(device, &heapProps, D3D12_HEAP_FLAG_NONE, &bufferDesc, D3D12_RESOURCE_STATE_COPY_DEST, nil, &IID_ID3D12Resource, raw), "CreateCommittedResource(readback)")
+                    }
+                }
+                readbackBuffer = rb
+                readbackBufferSize = totalBytes
+            }
+
+            // Transition RENDER_TARGET -> COPY_SOURCE
+            var toCopy = D3D12_RESOURCE_BARRIER()
+            toCopy.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION
+            toCopy.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE
+            toCopy.Transition = D3D12_RESOURCE_TRANSITION_BARRIER(pResource: rt, Subresource: D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, StateBefore: D3D12_RESOURCE_STATE_RENDER_TARGET, StateAfter: D3D12_RESOURCE_STATE_COPY_SOURCE)
+            commandList.pointee.lpVtbl.pointee.ResourceBarrier(commandList, 1, &toCopy)
+
+            // Copy texture to readback buffer
+            var src = D3D12_TEXTURE_COPY_LOCATION(pResource: rt, Type: D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX, Anonymous: D3D12_TEXTURE_COPY_LOCATION._Anonymous(subresourceIndex: 0))
+            var dst = D3D12_TEXTURE_COPY_LOCATION(pResource: readbackBuffer, Type: D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT, Anonymous: D3D12_TEXTURE_COPY_LOCATION._Anonymous(placedFootprint: footprint))
+            var box: D3D12_BOX? = nil
+            commandList.pointee.lpVtbl.pointee.CopyTextureRegion(commandList, &dst, 0, 0, 0, &src, &box)
+
+            // Transition COPY_SOURCE -> PRESENT
+            var toPresent = D3D12_RESOURCE_BARRIER()
+            toPresent.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION
+            toPresent.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE
+            toPresent.Transition = D3D12_RESOURCE_TRANSITION_BARRIER(pResource: rt, Subresource: D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, StateBefore: D3D12_RESOURCE_STATE_COPY_SOURCE, StateAfter: D3D12_RESOURCE_STATE_PRESENT)
+            commandList.pointee.lpVtbl.pointee.ResourceBarrier(commandList, 1, &toPresent)
+        } else {
+            var barrier = D3D12_RESOURCE_BARRIER()
+            barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION
+            barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE
+            barrier.Transition = D3D12_RESOURCE_TRANSITION_BARRIER(
+                pResource: frames[Int(frameIndex)].renderTarget,
+                Subresource: D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+                StateBefore: D3D12_RESOURCE_STATE_RENDER_TARGET,
+                StateAfter: D3D12_RESOURCE_STATE_PRESENT
+            )
+            commandList.pointee.lpVtbl.pointee.ResourceBarrier(commandList, 1, &barrier)
+        }
 
         try checkHRESULT(commandList.pointee.lpVtbl.pointee.Close(commandList), "ID3D12GraphicsCommandList.Close")
 
@@ -186,6 +246,37 @@ public final class D3D12RenderBackend: RenderBackend {
         let fenceValue = fenceValues[currentFrame] + 1
         fenceValues[currentFrame] = fenceValue
         try checkHRESULT(commandQueue.pointee.lpVtbl.pointee.Signal(commandQueue, fence, fenceValue), "ID3D12CommandQueue.Signal")
+
+        // If capture requested, wait for GPU and compute hash now
+        if captureRequested {
+            try checkHRESULT(commandQueue.pointee.lpVtbl.pointee.Signal(commandQueue, fence, fenceValues[Int(frameIndex)] + 1), "ID3D12CommandQueue.Signal(capture)")
+            fenceValues[Int(frameIndex)] += 1
+            try waitForFence(value: fenceValues[Int(frameIndex)])
+            if let rb = readbackBuffer {
+                var mapped: UnsafeMutableRawPointer?
+                try checkHRESULT(rb.pointee.lpVtbl.pointee.Map(rb, 0, nil, &mapped), "ID3D12Resource.Map(readback)")
+                if let mapped, let rt = frames[Int(frameIndex)].renderTarget {
+                    var desc = rt.pointee.lpVtbl.pointee.GetDesc(rt)
+                    var footprint = D3D12_PLACED_SUBRESOURCE_FOOTPRINT()
+                    var numRows: UINT = 0
+                    var rowSize: UINT64 = 0
+                    var totalBytes: UINT64 = 0
+                    device?.pointee.lpVtbl.pointee.GetCopyableFootprints(device, &desc, 0, 1, &footprint, &numRows, &rowSize, &totalBytes)
+                    let width = Int(desc.Width)
+                    let height = Int(desc.Height)
+                    let rowPitch = Int(footprint.Footprint.RowPitch)
+                    var data = Data(count: rowPitch * height)
+                    data.withUnsafeMutableBytes { buf in
+                        if let base = buf.baseAddress {
+                            memcpy(base, mapped, rowPitch * height)
+                        }
+                    }
+                    lastCaptureHash = D3D12RenderBackend.hashHexRowMajor(data: data, width: width, height: height, rowPitch: rowPitch, bpp: 4)
+                }
+                rb.pointee.lpVtbl.pointee.Unmap(rb, 0, nil)
+            }
+            captureRequested = false
+        }
 
         frameIndex = swapChain.pointee.lpVtbl.pointee.GetCurrentBackBufferIndex(swapChain)
         try waitForFrameCompletion(Int(frameIndex))
@@ -1077,6 +1168,29 @@ public final class D3D12RenderBackend: RenderBackend {
             try checkHRESULT(fence.pointee.lpVtbl.pointee.SetEventOnCompletion(fence, value, fenceEvent), "ID3D12Fence.SetEventOnCompletion")
             WaitForSingleObject(fenceEvent, INFINITE)
         }
+    }
+
+    // MARK: - GoldenImageCapturable
+    public func requestCapture() { captureRequested = true }
+    public func takeCaptureHash() throws -> String {
+        guard let h = lastCaptureHash else { throw AgentError.internalError("No capture hash available; call requestCapture() before endFrame") }
+        return h
+    }
+
+    private static func hashHexRowMajor(data: Data, width: Int, height: Int, rowPitch: Int, bpp: Int) -> String {
+        var hash: UInt64 = 0xcbf29ce484222325
+        let prime: UInt64 = 0x100000001b3
+        data.withUnsafeBytes { (buf: UnsafeRawBufferPointer) in
+            for y in 0..<height {
+                let rowStart = y * rowPitch
+                for x in 0..<(width * bpp) {
+                    let byte = buf[rowStart + x]
+                    hash ^= UInt64(byte)
+                    hash = hash &* prime
+                }
+            }
+        }
+        return String(format: "%016llx", hash)
     }
 
     // MARK: - Cleanup

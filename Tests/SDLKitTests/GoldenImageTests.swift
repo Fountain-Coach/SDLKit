@@ -46,5 +46,52 @@ final class GoldenImageTests: XCTestCase {
         throw XCTSkip("Golden image test only supported on macOS in this harness")
         #endif
     }
-}
 
+    func testSceneGraphGoldenHash_Vulkan() async throws {
+        #if os(Linux)
+        let shouldRun = ProcessInfo.processInfo.environment["SDLKIT_GOLDEN"]
+        guard shouldRun == "1" else { throw XCTSkip("Golden test disabled") }
+        try await MainActor.run {
+            let window = SDLWindow(config: .init(title: "GoldenTestVK", width: 256, height: 256))
+            try window.open(); defer { window.close() }; try window.show()
+            let backend = try RenderBackendFactory.makeBackend(window: window, override: "vulkan")
+            guard let cap = backend as? GoldenImageCapturable else { throw XCTSkip("No capture") }
+            let mesh = try MeshFactory.makeLitCube(backend: backend, size: 1.1)
+            let material = Material(shader: ShaderID("basic_lit"), params: .init(lightDirection: (0.3,-0.5,0.8), baseColor: (1,1,1,1)))
+            let node = SceneNode(name: "Cube", transform: .identity, mesh: mesh, material: material)
+            let root = SceneNode(name: "Root"); root.addChild(node)
+            let scene = Scene(root: root, camera: .identity(aspect: 1.0), lightDirection: (0.3,-0.5,0.8))
+            cap.requestCapture()
+            try SceneGraphRenderer.updateAndRender(scene: scene, backend: backend)
+            let hash = try cap.takeCaptureHash()
+            if let expected = ProcessInfo.processInfo.environment["SDLKIT_GOLDEN_REF"], !expected.isEmpty { XCTAssertEqual(hash, expected) } else { print("VK Golden hash: \(hash)") }
+        }
+        #else
+        throw XCTSkip("Vulkan golden test only on Linux")
+        #endif
+    }
+
+    func testSceneGraphGoldenHash_D3D12() async throws {
+        #if os(Windows)
+        let shouldRun = ProcessInfo.processInfo.environment["SDLKIT_GOLDEN"]
+        guard shouldRun == "1" else { throw XCTSkip("Golden test disabled") }
+        try await MainActor.run {
+            let window = SDLWindow(config: .init(title: "GoldenTestDX12", width: 256, height: 256))
+            try window.open(); defer { window.close() }; try window.show()
+            let backend = try RenderBackendFactory.makeBackend(window: window, override: "d3d12")
+            guard let cap = backend as? GoldenImageCapturable else { throw XCTSkip("No capture") }
+            let mesh = try MeshFactory.makeLitCube(backend: backend, size: 1.1)
+            let material = Material(shader: ShaderID("basic_lit"), params: .init(lightDirection: (0.3,-0.5,0.8), baseColor: (1,1,1,1)))
+            let node = SceneNode(name: "Cube", transform: .identity, mesh: mesh, material: material)
+            let root = SceneNode(name: "Root"); root.addChild(node)
+            let scene = Scene(root: root, camera: .identity(aspect: 1.0), lightDirection: (0.3,-0.5,0.8))
+            cap.requestCapture()
+            try SceneGraphRenderer.updateAndRender(scene: scene, backend: backend)
+            let hash = try cap.takeCaptureHash()
+            if let expected = ProcessInfo.processInfo.environment["SDLKIT_GOLDEN_REF"], !expected.isEmpty { XCTAssertEqual(hash, expected) } else { print("DX12 Golden hash: \(hash)") }
+        }
+        #else
+        throw XCTSkip("D3D12 golden test only on Windows")
+        #endif
+    }
+}

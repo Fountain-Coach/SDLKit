@@ -11,7 +11,7 @@ import CVulkan
 #endif
 
 @MainActor
-public final class VulkanRenderBackend: RenderBackend {
+public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
     private let window: SDLWindow
     private let surface: RenderSurface
     private var core: StubRenderBackendCore
@@ -71,6 +71,13 @@ public final class VulkanRenderBackend: RenderBackend {
     private var builtinVertexBuffer: VkBuffer? = nil
     private var builtinVertexMemory: VkDeviceMemory? = nil
     private var builtinVertexCount: Int = 0
+
+    // Capture state (golden image test)
+    private var captureRequested: Bool = false
+    private var captureBuffer: VkBuffer? = nil
+    private var captureMemory: VkDeviceMemory? = nil
+    private var captureBufferSize: VkDeviceSize = 0
+    private var lastCaptureHash: String?
     #endif
 
     public required init(window: SDLWindow) throws {
@@ -201,6 +208,58 @@ public final class VulkanRenderBackend: RenderBackend {
         }
         guard let cmd = commandBuffers[currentFrame] else { throw AgentError.internalError("Missing command buffer") }
         vkCmdEndRenderPass(cmd)
+
+        // Optional capture: copy swapchain image to host-visible buffer
+        if captureRequested, let scImages = swapchainImages[Int(currentImageIndex)], let dev = device {
+            let pixelSize: VkDeviceSize = 4
+            let bytesNeeded = VkDeviceSize(surfaceExtent.width) * VkDeviceSize(surfaceExtent.height) * pixelSize
+            if captureBuffer == nil || captureBufferSize < bytesNeeded {
+                if let oldB = captureBuffer { vkDestroyBuffer(dev, oldB, nil); captureBuffer = nil }
+                if let oldM = captureMemory { vkFreeMemory(dev, oldM, nil); captureMemory = nil }
+                var buf: VkBuffer? = nil
+                var mem: VkDeviceMemory? = nil
+                try createBuffer(size: bytesNeeded, usage: UInt32(VK_BUFFER_USAGE_TRANSFER_DST_BIT), properties: UInt32(VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT), bufferOut: &buf, memoryOut: &mem)
+                captureBuffer = buf
+                captureMemory = mem
+                captureBufferSize = bytesNeeded
+            }
+
+            // Barrier: PRESENT -> TRANSFER_SRC
+            var barrier = VkImageMemoryBarrier()
+            barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER
+            barrier.srcAccessMask = 0
+            barrier.dstAccessMask = UInt32(VK_ACCESS_TRANSFER_READ_BIT)
+            barrier.oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
+            barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+            barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED
+            barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED
+            barrier.image = scImages
+            barrier.subresourceRange = VkImageSubresourceRange(aspectMask: UInt32(VK_IMAGE_ASPECT_COLOR_BIT), baseMipLevel: 0, levelCount: 1, baseArrayLayer: 0, layerCount: 1)
+            withUnsafePointer(to: &barrier) { bptr in
+                vkCmdPipelineBarrier(cmd, UInt32(VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT), UInt32(VK_PIPELINE_STAGE_TRANSFER_BIT), 0, 0, nil, 0, nil, 1, bptr)
+            }
+
+            // Copy to buffer
+            var region = VkBufferImageCopy()
+            region.bufferOffset = 0
+            region.bufferRowLength = 0 // tightly packed
+            region.bufferImageHeight = 0
+            region.imageSubresource = VkImageSubresourceLayers(aspectMask: UInt32(VK_IMAGE_ASPECT_COLOR_BIT), mipLevel: 0, baseArrayLayer: 0, layerCount: 1)
+            region.imageOffset = VkOffset3D(x: 0, y: 0, z: 0)
+            region.imageExtent = VkExtent3D(width: surfaceExtent.width, height: surfaceExtent.height, depth: 1)
+            withUnsafePointer(to: &region) { rptr in
+                vkCmdCopyImageToBuffer(cmd, scImages, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, captureBuffer, 1, rptr)
+            }
+
+            // Barrier: TRANSFER_SRC -> PRESENT
+            barrier.srcAccessMask = UInt32(VK_ACCESS_TRANSFER_READ_BIT)
+            barrier.dstAccessMask = 0
+            barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+            barrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
+            withUnsafePointer(to: &barrier) { bptr in
+                vkCmdPipelineBarrier(cmd, UInt32(VK_PIPELINE_STAGE_TRANSFER_BIT), UInt32(VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT), 0, 0, nil, 0, nil, 1, bptr)
+            }
+        }
         _ = vkEndCommandBuffer(cmd)
 
         // Submit
@@ -236,6 +295,22 @@ public final class VulkanRenderBackend: RenderBackend {
             try recreateSwapchain(width: surfaceExtent.width, height: surfaceExtent.height)
         } else if presentRes != VK_SUCCESS {
             throw AgentError.internalError("vkQueuePresentKHR failed (res=\(presentRes))")
+        }
+
+        if captureRequested {
+            // Wait for GPU to finish so buffer is ready, then map and hash
+            _ = vkQueueWaitIdle(gq)
+            if let mem = captureMemory {
+                var mapped: UnsafeMutableRawPointer? = nil
+                _ = vkMapMemory(dev, mem, 0, captureBufferSize, 0, &mapped)
+                if let mapped {
+                    let count = Int(captureBufferSize)
+                    let data = Data(bytes: mapped, count: count)
+                    lastCaptureHash = VulkanRenderBackend.hashHex(data: data)
+                }
+                vkUnmapMemory(dev, mem)
+            }
+            captureRequested = false
         }
 
         currentFrame = (currentFrame + 1) % maxFramesInFlight
@@ -320,6 +395,22 @@ public final class VulkanRenderBackend: RenderBackend {
         #else
         return try core.createBuffer(bytes: bytes, length: length, usage: usage)
         #endif
+    }
+
+    // MARK: - GoldenImageCapturable
+    public func requestCapture() { captureRequested = true }
+    public func takeCaptureHash() throws -> String {
+        guard let h = lastCaptureHash else { throw AgentError.internalError("No capture hash available; call requestCapture() before endFrame") }
+        return h
+    }
+
+    private static func hashHex(data: Data) -> String {
+        var hash: UInt64 = 0xcbf29ce484222325
+        let prime: UInt64 = 0x100000001b3
+        data.withUnsafeBytes { (buf: UnsafeRawBufferPointer) in
+            for byte in buf { hash ^= UInt64(byte); hash = hash &* prime }
+        }
+        return String(format: "%016llx", hash)
     }
     public func createTexture(descriptor: TextureDescriptor, initialData: TextureInitialData?) throws -> TextureHandle {
         core.createTexture(descriptor: descriptor, initialData: initialData)
