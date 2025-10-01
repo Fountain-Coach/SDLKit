@@ -35,6 +35,16 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
         let indexFormat: IndexFormat
     }
 
+    private struct ComputePipelineResource {
+        let handle: ComputePipelineHandle
+        let descriptor: ComputePipelineDescriptor
+        let module: ComputeShaderModule
+        let rootSignature: UnsafeMutablePointer<ID3D12RootSignature>
+        let pipelineState: UnsafeMutablePointer<ID3D12PipelineState>
+        let uniformParameterIndices: [Int: Int]
+        let storageParameterIndices: [Int: Int]
+    }
+
     private struct FrameResources {
         var renderTarget: UnsafeMutablePointer<ID3D12Resource>?
         var commandAllocator: UnsafeMutablePointer<ID3D12CommandAllocator>?
@@ -74,6 +84,7 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
 
     private var buffers: [BufferHandle: BufferResource] = [:]
     private var pipelines: [PipelineHandle: PipelineResource] = [:]
+    private var computePipelines: [ComputePipelineHandle: ComputePipelineResource] = [:]
     private var meshes: [MeshHandle: MeshResource] = [:]
 
     private var builtinPipeline: PipelineHandle?
@@ -445,8 +456,13 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
                 releaseCOM(&state)
                 releaseCOM(&signature)
             }
-        case .computePipeline:
-            break
+        case .computePipeline(let handle):
+            if let resource = computePipelines.removeValue(forKey: handle) {
+                var state: UnsafeMutablePointer<ID3D12PipelineState>? = resource.pipelineState
+                var signature: UnsafeMutablePointer<ID3D12RootSignature>? = resource.rootSignature
+                releaseCOM(&state)
+                releaseCOM(&signature)
+            }
         case .mesh(let meshHandle):
             meshes.removeValue(forKey: meshHandle)
         }
@@ -731,18 +747,177 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
     }
 
     public func makeComputePipeline(_ desc: ComputePipelineDescriptor) throws -> ComputePipelineHandle {
-        _ = desc
-        throw AgentError.notImplemented
+        guard let device else {
+            throw AgentError.internalError("D3D12 device unavailable")
+        }
+        let module = try shaderLibrary.computeModule(for: desc.shader)
+        if let existing = computePipelines.values.first(where: { $0.descriptor.shader == desc.shader }) {
+            return existing.handle
+        }
+
+        var rootParameters: [D3D12_ROOT_PARAMETER] = []
+        var uniformIndices: [Int: Int] = [:]
+        var storageIndices: [Int: Int] = [:]
+        for slot in module.bindings {
+            switch slot.kind {
+            case .uniformBuffer:
+                var param = D3D12_ROOT_PARAMETER()
+                param.ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV
+                param.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL
+                param.Anonymous.Descriptor = D3D12_ROOT_DESCRIPTOR(ShaderRegister: UINT(slot.index), RegisterSpace: 0)
+                uniformIndices[slot.index] = rootParameters.count
+                rootParameters.append(param)
+            case .storageBuffer:
+                var param = D3D12_ROOT_PARAMETER()
+                param.ParameterType = D3D12_ROOT_PARAMETER_TYPE_UAV
+                param.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL
+                param.Anonymous.Descriptor = D3D12_ROOT_DESCRIPTOR(ShaderRegister: UINT(slot.index), RegisterSpace: 0)
+                storageIndices[slot.index] = rootParameters.count
+                rootParameters.append(param)
+            case .sampledTexture, .storageTexture, .sampler:
+                throw AgentError.notImplemented("Texture and sampler bindings for D3D12 compute pipelines are not yet supported")
+            }
+        }
+
+        var rootSignature: UnsafeMutablePointer<ID3D12RootSignature>?
+        var rootDesc = D3D12_ROOT_SIGNATURE_DESC()
+        var serializedRoot: UnsafeMutablePointer<ID3DBlob>?
+        var errorBlob: UnsafeMutablePointer<ID3DBlob>?
+        try rootParameters.withUnsafeMutableBufferPointer { paramsBuffer in
+            rootDesc.NumParameters = UINT(paramsBuffer.count)
+            rootDesc.pParameters = paramsBuffer.baseAddress
+            rootDesc.NumStaticSamplers = 0
+            rootDesc.pStaticSamplers = nil
+            rootDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_NONE
+
+            let serializeResult = withUnsafePointer(to: &rootDesc) { descPointer -> HRESULT in
+                descPointer.withMemoryRebound(to: D3D12_ROOT_SIGNATURE_DESC.self, capacity: 1) { rebound in
+                    D3D12SerializeRootSignature(rebound, D3D_ROOT_SIGNATURE_VERSION_1, &serializedRoot, &errorBlob)
+                }
+            }
+            if serializeResult < 0 {
+                let message: String
+                if let errorBlob, let pointer = errorBlob.pointee.lpVtbl.pointee.GetBufferPointer(errorBlob) {
+                    let length = errorBlob.pointee.lpVtbl.pointee.GetBufferSize(errorBlob)
+                    let data = Data(bytes: pointer, count: length)
+                    message = String(data: data, encoding: .utf8) ?? "Unknown"
+                } else {
+                    message = String(format: "HRESULT=0x%08X", UInt32(bitPattern: serializeResult))
+                }
+                releaseCOM(&errorBlob)
+                releaseCOM(&serializedRoot)
+                throw AgentError.internalError("D3D12 compute root signature serialization failed: \(message)")
+            }
+        }
+        releaseCOM(&errorBlob)
+
+        if let serializedRoot {
+            let pointer = serializedRoot.pointee.lpVtbl.pointee.GetBufferPointer(serializedRoot)
+            let size = serializedRoot.pointee.lpVtbl.pointee.GetBufferSize(serializedRoot)
+            try withUnsafeMutablePointer(to: &rootSignature) { ptr in
+                try ptr.withMemoryRebound(to: Optional<UnsafeMutableRawPointer>.self, capacity: 1) { raw in
+                    try checkHRESULT(
+                        device.pointee.lpVtbl.pointee.CreateRootSignature(
+                            device,
+                            0,
+                            pointer,
+                            size,
+                            &IID_ID3D12RootSignature,
+                            raw
+                        ),
+                        "ID3D12Device.CreateRootSignature"
+                    )
+                }
+            }
+        }
+        releaseCOM(&serializedRoot)
+
+        guard let rootSignature else {
+            throw AgentError.internalError("Failed to create D3D12 compute root signature")
+        }
+
+        let shaderURL = try module.artifacts.requireDXIL(for: module.id)
+        let shaderData = try Data(contentsOf: shaderURL)
+        var pipelineState: UnsafeMutablePointer<ID3D12PipelineState>?
+        try shaderData.withUnsafeBytes { bytes in
+            guard let pointer = bytes.baseAddress else {
+                throw AgentError.internalError("DXIL compute shader buffer is empty")
+            }
+            var desc = D3D12_COMPUTE_PIPELINE_STATE_DESC()
+            desc.pRootSignature = rootSignature
+            desc.Flags = D3D12_PIPELINE_STATE_FLAG_NONE
+            desc.CS = D3D12_SHADER_BYTECODE(pShaderBytecode: pointer, BytecodeLength: bytes.count)
+            try withUnsafeMutablePointer(to: &pipelineState) { ptr in
+                try ptr.withMemoryRebound(to: Optional<UnsafeMutableRawPointer>.self, capacity: 1) { raw in
+                    try checkHRESULT(
+                        device.pointee.lpVtbl.pointee.CreateComputePipelineState(device, &desc, &IID_ID3D12PipelineState, raw),
+                        "ID3D12Device.CreateComputePipelineState"
+                    )
+                }
+            }
+        }
+
+        guard let pipelineState else {
+            var signature: UnsafeMutablePointer<ID3D12RootSignature>? = rootSignature
+            releaseCOM(&signature)
+            throw AgentError.internalError("Failed to create D3D12 compute pipeline state")
+        }
+
+        let handle = ComputePipelineHandle()
+        let resource = ComputePipelineResource(
+            handle: handle,
+            descriptor: desc,
+            module: module,
+            rootSignature: rootSignature,
+            pipelineState: pipelineState,
+            uniformParameterIndices: uniformIndices,
+            storageParameterIndices: storageIndices
+        )
+        computePipelines[handle] = resource
+        SDLLogger.debug("SDLKit.Graphics.D3D12", "makeComputePipeline id=\(handle.rawValue) shader=\(module.id.rawValue)")
+        return handle
     }
 
     public func dispatchCompute(_ pipeline: ComputePipelineHandle, groupsX: Int, groupsY: Int, groupsZ: Int, bindings: BindingSet, pushConstants: UnsafeRawPointer?) throws {
-        _ = pipeline
-        _ = groupsX
-        _ = groupsY
-        _ = groupsZ
-        _ = bindings
-        _ = pushConstants
-        throw AgentError.notImplemented
+        guard frameActive else {
+            throw AgentError.internalError("dispatchCompute called outside of beginFrame/endFrame")
+        }
+        guard let commandList else {
+            throw AgentError.internalError("D3D12 command list unavailable for compute dispatch")
+        }
+        guard let resource = computePipelines[pipeline] else {
+            throw AgentError.internalError("Unknown compute pipeline handle")
+        }
+
+        commandList.pointee.lpVtbl.pointee.SetPipelineState(commandList, resource.pipelineState)
+        commandList.pointee.lpVtbl.pointee.SetComputeRootSignature(commandList, resource.rootSignature)
+
+        for (slot, parameterIndex) in resource.uniformParameterIndices {
+            guard let handle: BufferHandle = bindings.value(for: slot, as: BufferHandle.self),
+                  let buffer = buffers[handle] else {
+                throw AgentError.invalidArgument("Missing uniform buffer binding at slot \(slot)")
+            }
+            let gpuAddress = buffer.resource.pointee.lpVtbl.pointee.GetGPUVirtualAddress(buffer.resource)
+            commandList.pointee.lpVtbl.pointee.SetComputeRootConstantBufferView(commandList, UINT(parameterIndex), gpuAddress)
+        }
+
+        for (slot, parameterIndex) in resource.storageParameterIndices {
+            guard let handle: BufferHandle = bindings.value(for: slot, as: BufferHandle.self),
+                  let buffer = buffers[handle] else {
+                throw AgentError.invalidArgument("Missing storage buffer binding at slot \(slot)")
+            }
+            let gpuAddress = buffer.resource.pointee.lpVtbl.pointee.GetGPUVirtualAddress(buffer.resource)
+            commandList.pointee.lpVtbl.pointee.SetComputeRootUnorderedAccessView(commandList, UINT(parameterIndex), gpuAddress)
+        }
+
+        if resource.module.pushConstantSize > 0, pushConstants != nil {
+            SDLLogger.warn("SDLKit.Graphics.D3D12", "Compute push constants are not yet supported; ignoring data for shader \(resource.module.id.rawValue)")
+        }
+
+        let dispatchX = max(1, groupsX)
+        let dispatchY = max(1, groupsY)
+        let dispatchZ = max(1, groupsZ)
+        commandList.pointee.lpVtbl.pointee.Dispatch(commandList, UINT(dispatchX), UINT(dispatchY), UINT(dispatchZ))
     }
 
     // MARK: - Initialization
@@ -1265,6 +1440,13 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
     // MARK: - Cleanup
 
     private func releaseResources() {
+        for (_, resource) in computePipelines {
+            var state: UnsafeMutablePointer<ID3D12PipelineState>? = resource.pipelineState
+            var signature: UnsafeMutablePointer<ID3D12RootSignature>? = resource.rootSignature
+            releaseCOM(&state)
+            releaseCOM(&signature)
+        }
+        computePipelines.removeAll()
         for (_, resource) in pipelines {
             var state: UnsafeMutablePointer<ID3D12PipelineState>? = resource.pipelineState
             var signature: UnsafeMutablePointer<ID3D12RootSignature>? = resource.rootSignature

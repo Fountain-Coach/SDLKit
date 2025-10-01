@@ -67,6 +67,16 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
     private var pipelines: [PipelineHandle: PipelineResource] = [:]
     private var builtinPipeline: PipelineHandle? = nil
 
+    private struct ComputePipelineResource {
+        var handle: ComputePipelineHandle
+        var pipelineLayout: VkPipelineLayout?
+        var pipeline: VkPipeline?
+        var descriptorSetLayout: VkDescriptorSetLayout?
+        var descriptorPool: VkDescriptorPool?
+        var module: ComputeShaderModule
+    }
+    private var computePipelines: [ComputePipelineHandle: ComputePipelineResource] = [:]
+
     private struct MeshResource {
         let vertexBuffer: BufferHandle
         let vertexCount: Int
@@ -129,6 +139,13 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
                 if let layout = p.pipelineLayout { vkDestroyPipelineLayout(dev, layout, nil) }
             }
             pipelines.removeAll(); builtinPipeline = nil
+            for (_, p) in computePipelines {
+                if let pipeline = p.pipeline { vkDestroyPipeline(dev, pipeline, nil) }
+                if let layout = p.pipelineLayout { vkDestroyPipelineLayout(dev, layout, nil) }
+                if let setLayout = p.descriptorSetLayout { vkDestroyDescriptorSetLayout(dev, setLayout, nil) }
+                if let pool = p.descriptorPool { vkDestroyDescriptorPool(dev, pool, nil) }
+            }
+            computePipelines.removeAll()
             // Destroy command pool
             if let pool = commandPool { vkDestroyCommandPool(dev, pool, nil) }
             commandPool = nil
@@ -489,6 +506,17 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
             }
         case .mesh(let h):
             meshes.removeValue(forKey: h)
+        case .computePipeline(let handle):
+            if var resource = computePipelines.removeValue(forKey: handle), let dev = device {
+                if let pipeline = resource.pipeline { vkDestroyPipeline(dev, pipeline, nil) }
+                if let layout = resource.pipelineLayout { vkDestroyPipelineLayout(dev, layout, nil) }
+                if let setLayout = resource.descriptorSetLayout { vkDestroyDescriptorSetLayout(dev, setLayout, nil) }
+                if let pool = resource.descriptorPool { vkDestroyDescriptorPool(dev, pool, nil) }
+                resource.pipeline = nil
+                resource.pipelineLayout = nil
+                resource.descriptorSetLayout = nil
+                resource.descriptorPool = nil
+            }
         default:
             break
         }
@@ -796,9 +824,321 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
         try core.draw(mesh: mesh, pipeline: pipeline, bindings: bindings, pushConstants: pushConstants, transform: transform)
         #endif
     }
-    public func makeComputePipeline(_ desc: ComputePipelineDescriptor) throws -> ComputePipelineHandle { core.makeComputePipeline(desc) }
+    public func makeComputePipeline(_ desc: ComputePipelineDescriptor) throws -> ComputePipelineHandle {
+        #if canImport(CVulkan)
+        guard let dev = device else { throw AgentError.internalError("Vulkan device not ready") }
+        let module = try ShaderLibrary.shared.computeModule(for: desc.shader)
+        if let existing = computePipelines.values.first(where: { $0.module.id == module.id }) {
+            return existing.handle
+        }
+
+        let spirvURL = try module.artifacts.requireSPIRV(for: module.id)
+        let spirvData = try Data(contentsOf: spirvURL)
+        var shaderModule: VkShaderModule? = nil
+        try spirvData.withUnsafeBytes { bytes in
+            var info = VkShaderModuleCreateInfo()
+            info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO
+            info.codeSize = bytes.count
+            info.pCode = bytes.bindMemory(to: UInt32.self).baseAddress
+            let result = withUnsafePointer(to: info) { ptr in vkCreateShaderModule(dev, ptr, nil, &shaderModule) }
+            if result != VK_SUCCESS || shaderModule == nil {
+                throw AgentError.internalError("vkCreateShaderModule(CS) failed (res=\(result))")
+            }
+        }
+
+        var descriptorBindings: [VkDescriptorSetLayoutBinding] = []
+        var descriptorTypeCounts: [VkDescriptorType: UInt32] = [:]
+        for slot in module.bindings {
+            let descriptorType: VkDescriptorType
+            switch slot.kind {
+            case .uniformBuffer:
+                descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
+            case .storageBuffer:
+                descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
+            case .sampledTexture, .storageTexture, .sampler:
+                if let shaderModule { vkDestroyShaderModule(dev, shaderModule, nil) }
+                throw AgentError.notImplemented("Vulkan compute textures and samplers are not yet supported")
+            }
+            var binding = VkDescriptorSetLayoutBinding()
+            binding.binding = UInt32(slot.index)
+            binding.descriptorCount = 1
+            binding.stageFlags = UInt32(VK_SHADER_STAGE_COMPUTE_BIT)
+            binding.descriptorType = descriptorType
+            descriptorBindings.append(binding)
+            descriptorTypeCounts[descriptorType, default: 0] += 1
+        }
+
+        var descriptorSetLayout: VkDescriptorSetLayout? = nil
+        if !descriptorBindings.isEmpty {
+            var layoutInfo = VkDescriptorSetLayoutCreateInfo()
+            layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
+            layoutInfo.bindingCount = UInt32(descriptorBindings.count)
+            let layoutResult = descriptorBindings.withUnsafeMutableBufferPointer { buf -> VkResult in
+                layoutInfo.pBindings = buf.baseAddress
+                return withUnsafePointer(to: layoutInfo) { ptr in vkCreateDescriptorSetLayout(dev, ptr, nil, &descriptorSetLayout) }
+            }
+            if layoutResult != VK_SUCCESS || descriptorSetLayout == nil {
+                if let shaderModule { vkDestroyShaderModule(dev, shaderModule, nil) }
+                throw AgentError.internalError("vkCreateDescriptorSetLayout failed (res=\(layoutResult))")
+            }
+        }
+
+        var setLayouts: [VkDescriptorSetLayout?] = []
+        if let descriptorSetLayout { setLayouts.append(descriptorSetLayout) }
+
+        var pushRanges: [VkPushConstantRange] = []
+        if module.pushConstantSize > 0 {
+            var range = VkPushConstantRange()
+            range.stageFlags = UInt32(VK_SHADER_STAGE_COMPUTE_BIT)
+            range.offset = 0
+            range.size = UInt32(module.pushConstantSize)
+            pushRanges.append(range)
+        }
+
+        var pipelineLayout: VkPipelineLayout? = nil
+        var pipelineLayoutInfo = VkPipelineLayoutCreateInfo()
+        pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO
+        let pipelineLayoutResult = setLayouts.withUnsafeMutableBufferPointer { layoutBuf in
+            pushRanges.withUnsafeMutableBufferPointer { rangeBuf in
+                pipelineLayoutInfo.setLayoutCount = UInt32(layoutBuf.count)
+                pipelineLayoutInfo.pSetLayouts = layoutBuf.baseAddress
+                pipelineLayoutInfo.pushConstantRangeCount = UInt32(rangeBuf.count)
+                pipelineLayoutInfo.pPushConstantRanges = rangeBuf.baseAddress
+                return withUnsafePointer(to: pipelineLayoutInfo) { ptr in vkCreatePipelineLayout(dev, ptr, nil, &pipelineLayout) }
+            }
+        }
+        if pipelineLayoutResult != VK_SUCCESS || pipelineLayout == nil {
+            if let setLayout = descriptorSetLayout { vkDestroyDescriptorSetLayout(dev, setLayout, nil) }
+            if let shaderModule { vkDestroyShaderModule(dev, shaderModule, nil) }
+            throw AgentError.internalError("vkCreatePipelineLayout(compute) failed (res=\(pipelineLayoutResult))")
+        }
+
+        var pipeline: VkPipeline? = nil
+        var stage = VkPipelineShaderStageCreateInfo()
+        stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO
+        stage.stage = UInt32(VK_SHADER_STAGE_COMPUTE_BIT)
+        stage.module = shaderModule
+        var entryPoint = Array(module.entryPoint.utf8CString)
+        let pipelineResult = entryPoint.withUnsafeMutableBufferPointer { nameBuf -> VkResult in
+            stage.pName = nameBuf.baseAddress
+            var createInfo = VkComputePipelineCreateInfo()
+            createInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO
+            createInfo.stage = stage
+            createInfo.layout = pipelineLayout
+            return withUnsafePointer(to: createInfo) { ptr in vkCreateComputePipelines(dev, nil, 1, ptr, nil, &pipeline) }
+        }
+        if let shaderModule { vkDestroyShaderModule(dev, shaderModule, nil) }
+        if pipelineResult != VK_SUCCESS || pipeline == nil {
+            if let layout = pipelineLayout { vkDestroyPipelineLayout(dev, layout, nil) }
+            if let setLayout = descriptorSetLayout { vkDestroyDescriptorSetLayout(dev, setLayout, nil) }
+            throw AgentError.internalError("vkCreateComputePipelines failed (res=\(pipelineResult))")
+        }
+
+        var descriptorPool: VkDescriptorPool? = nil
+        if !descriptorTypeCounts.isEmpty {
+            var poolSizes: [VkDescriptorPoolSize] = []
+            for (key, value) in descriptorTypeCounts {
+                var size = VkDescriptorPoolSize()
+                size.type = key
+                size.descriptorCount = value * UInt32(maxFramesInFlight)
+                poolSizes.append(size)
+            }
+            var poolInfo = VkDescriptorPoolCreateInfo()
+            poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO
+            poolInfo.poolSizeCount = UInt32(poolSizes.count)
+            poolInfo.maxSets = UInt32(max(maxFramesInFlight, 1))
+            poolInfo.flags = UInt32(VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT)
+            let poolResult = poolSizes.withUnsafeMutableBufferPointer { buf -> VkResult in
+                poolInfo.pPoolSizes = buf.baseAddress
+                return withUnsafePointer(to: poolInfo) { ptr in vkCreateDescriptorPool(dev, ptr, nil, &descriptorPool) }
+            }
+            if poolResult != VK_SUCCESS || descriptorPool == nil {
+                if let pool = descriptorPool { vkDestroyDescriptorPool(dev, pool, nil) }
+                if let layout = pipelineLayout { vkDestroyPipelineLayout(dev, layout, nil) }
+                if let setLayout = descriptorSetLayout { vkDestroyDescriptorSetLayout(dev, setLayout, nil) }
+                if let pipeline = pipeline { vkDestroyPipeline(dev, pipeline, nil) }
+                throw AgentError.internalError("vkCreateDescriptorPool failed (res=\(poolResult))")
+            }
+        }
+
+        let handle = ComputePipelineHandle()
+        let resource = ComputePipelineResource(
+            handle: handle,
+            pipelineLayout: pipelineLayout,
+            pipeline: pipeline,
+            descriptorSetLayout: descriptorSetLayout,
+            descriptorPool: descriptorPool,
+            module: module
+        )
+        computePipelines[handle] = resource
+        SDLLogger.debug("SDLKit.Graphics.Vulkan", "makeComputePipeline id=\(handle.rawValue) shader=\(module.id.rawValue)")
+        return handle
+        #else
+        return core.makeComputePipeline(desc)
+        #endif
+    }
+
     public func dispatchCompute(_ pipeline: ComputePipelineHandle, groupsX: Int, groupsY: Int, groupsZ: Int, bindings: BindingSet, pushConstants: UnsafeRawPointer?) throws {
+        #if canImport(CVulkan)
+        guard !frameActive else {
+            throw AgentError.invalidArgument("dispatchCompute cannot be called while a render frame is active on Vulkan")
+        }
+        guard let dev = device, let queue = graphicsQueue, let pool = commandPool else {
+            throw AgentError.internalError("Vulkan compute resources not initialized")
+        }
+        guard let resource = computePipelines[pipeline] else {
+            throw AgentError.internalError("Unknown Vulkan compute pipeline")
+        }
+
+        var descriptorSet: VkDescriptorSet? = nil
+        var bufferInfos: [VkDescriptorBufferInfo] = []
+        var writes: [VkWriteDescriptorSet] = []
+        if !resource.module.bindings.isEmpty {
+            guard let layout = resource.descriptorSetLayout, let descriptorPool = resource.descriptorPool else {
+                throw AgentError.internalError("Descriptor resources missing for Vulkan compute pipeline")
+            }
+            var allocInfo = VkDescriptorSetAllocateInfo()
+            allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO
+            allocInfo.descriptorPool = descriptorPool
+            var layouts: [VkDescriptorSetLayout?] = [layout]
+            let allocResult = layouts.withUnsafeMutableBufferPointer { buf -> VkResult in
+                allocInfo.descriptorSetCount = UInt32(buf.count)
+                allocInfo.pSetLayouts = buf.baseAddress
+                return withUnsafePointer(to: allocInfo) { ptr in vkAllocateDescriptorSets(dev, ptr, &descriptorSet) }
+            }
+            if allocResult != VK_SUCCESS || descriptorSet == nil {
+                throw AgentError.internalError("vkAllocateDescriptorSets failed (res=\(allocResult))")
+            }
+
+            for slot in resource.module.bindings {
+                let descriptorType: VkDescriptorType
+                switch slot.kind {
+                case .uniformBuffer:
+                    descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
+                case .storageBuffer:
+                    descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
+                case .sampledTexture, .storageTexture, .sampler:
+                    throw AgentError.notImplemented("Vulkan compute textures and samplers are not yet supported")
+                }
+                guard let handle: BufferHandle = bindings.value(for: slot.index, as: BufferHandle.self),
+                      let bufferRes = buffers[handle],
+                      let buffer = bufferRes.buffer else {
+                    throw AgentError.invalidArgument("Missing buffer binding for compute slot \(slot.index)")
+                }
+                var info = VkDescriptorBufferInfo()
+                info.buffer = buffer
+                info.offset = 0
+                info.range = VkDeviceSize(bufferRes.length)
+                bufferInfos.append(info)
+
+                var write = VkWriteDescriptorSet()
+                write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
+                write.dstSet = descriptorSet
+                write.dstBinding = UInt32(slot.index)
+                write.descriptorCount = 1
+                write.descriptorType = descriptorType
+                writes.append(write)
+            }
+
+            bufferInfos.withUnsafeMutableBufferPointer { bufferPtr in
+                writes.withUnsafeMutableBufferPointer { writePtr in
+                    for index in 0..<writePtr.count {
+                        writePtr[index].pBufferInfo = bufferPtr.baseAddress?.advanced(by: index)
+                    }
+                    _ = vkUpdateDescriptorSets(dev, UInt32(writePtr.count), writePtr.baseAddress, 0, nil)
+                }
+            }
+        }
+
+        var commandBuffer: VkCommandBuffer? = nil
+        var allocInfo = VkCommandBufferAllocateInfo()
+        allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO
+        allocInfo.commandPool = pool
+        allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY
+        allocInfo.commandBufferCount = 1
+        let allocRes = withUnsafePointer(to: allocInfo) { ptr in vkAllocateCommandBuffers(dev, ptr, &commandBuffer) }
+        if allocRes != VK_SUCCESS || commandBuffer == nil {
+            if var set = descriptorSet, let descriptorPool = resource.descriptorPool {
+                withUnsafePointer(to: &set) { ptr in _ = vkFreeDescriptorSets(dev, descriptorPool, 1, ptr) }
+            }
+            throw AgentError.internalError("vkAllocateCommandBuffers(compute) failed (res=\(allocRes))")
+        }
+
+        guard var commandBufferHandle = commandBuffer else {
+            throw AgentError.internalError("vkAllocateCommandBuffers returned nil command buffer")
+        }
+
+        var beginInfo = VkCommandBufferBeginInfo()
+        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO
+        beginInfo.flags = UInt32(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT)
+        _ = withUnsafePointer(to: beginInfo) { ptr in vkBeginCommandBuffer(commandBufferHandle, ptr) }
+
+        var memoryBarrier = VkMemoryBarrier()
+        memoryBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER
+        memoryBarrier.srcAccessMask = UInt32(VK_ACCESS_HOST_WRITE_BIT)
+        memoryBarrier.dstAccessMask = UInt32(VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT)
+        _ = withUnsafePointer(to: memoryBarrier) { barrierPtr in
+            vkCmdPipelineBarrier(
+                commandBufferHandle,
+                UInt32(VK_PIPELINE_STAGE_HOST_BIT),
+                UInt32(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT),
+                0,
+                1,
+                barrierPtr,
+                0,
+                nil,
+                0,
+                nil
+            )
+        }
+
+        if let pipelineHandle = resource.pipeline {
+            vkCmdBindPipeline(commandBufferHandle, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineHandle)
+        }
+        if let layout = resource.pipelineLayout, let descriptorSet = descriptorSet {
+            var sets = [descriptorSet]
+            sets.withUnsafeMutableBufferPointer { buf in
+                vkCmdBindDescriptorSets(commandBufferHandle, VK_PIPELINE_BIND_POINT_COMPUTE, layout, 0, UInt32(buf.count), buf.baseAddress, 0, nil)
+            }
+        }
+        if let layout = resource.pipelineLayout, let pushConstants, resource.module.pushConstantSize > 0 {
+            _ = vkCmdPushConstants(commandBufferHandle, layout, UInt32(VK_SHADER_STAGE_COMPUTE_BIT), 0, UInt32(resource.module.pushConstantSize), pushConstants)
+        }
+
+        vkCmdDispatch(commandBufferHandle, UInt32(max(1, groupsX)), UInt32(max(1, groupsY)), UInt32(max(1, groupsZ)))
+
+        _ = vkEndCommandBuffer(commandBufferHandle)
+
+        var fenceInfo = VkFenceCreateInfo()
+        fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO
+        var fence: VkFence? = nil
+        _ = vkCreateFence(dev, &fenceInfo, nil, &fence)
+
+        var submitInfo = VkSubmitInfo()
+        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO
+        var cmdBuffers = [commandBufferHandle]
+        let submitResult = cmdBuffers.withUnsafeMutableBufferPointer { buf -> VkResult in
+            submitInfo.commandBufferCount = UInt32(buf.count)
+            submitInfo.pCommandBuffers = buf.baseAddress
+            return withUnsafePointer(to: submitInfo) { ptr in vkQueueSubmit(queue, 1, ptr, fence) }
+        }
+        if submitResult != VK_SUCCESS {
+            SDLLogger.error("SDLKit.Graphics.Vulkan", "vkQueueSubmit(compute) failed (res=\(submitResult))")
+        }
+        if var fenceHandle = fence {
+            withUnsafePointer(to: &fenceHandle) { ptr in _ = vkWaitForFences(dev, 1, ptr, VK_TRUE, UInt64.max) }
+            vkDestroyFence(dev, fenceHandle, nil)
+        }
+
+        withUnsafePointer(to: &commandBufferHandle) { ptr in vkFreeCommandBuffers(dev, pool, 1, ptr) }
+
+        if var descriptorSet = descriptorSet, let descriptorPool = resource.descriptorPool {
+            withUnsafePointer(to: &descriptorSet) { ptr in _ = vkFreeDescriptorSets(dev, descriptorPool, 1, ptr) }
+        }
+
+        #else
         try core.dispatchCompute(pipeline, groupsX: groupsX, groupsY: groupsY, groupsZ: groupsZ, bindings: bindings, pushConstants: pushConstants)
+        #endif
     }
 
     // MARK: - Vulkan init

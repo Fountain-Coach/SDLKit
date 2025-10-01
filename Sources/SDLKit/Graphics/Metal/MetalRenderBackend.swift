@@ -21,6 +21,11 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
         let depthPixelFormat: MTLPixelFormat?
     }
 
+    private struct ComputePipelineResource {
+        let state: MTLComputePipelineState
+        let module: ComputeShaderModule
+    }
+
     private struct MeshResource {
         let vertexBuffer: BufferHandle
         let vertexCount: Int
@@ -39,6 +44,7 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
     private var buffers: [BufferHandle: BufferResource] = [:]
     private var textures: [TextureHandle: MTLTexture] = [:]
     private var pipelines: [PipelineHandle: PipelineResource] = [:]
+    private var computePipelines: [ComputePipelineHandle: ComputePipelineResource] = [:]
     private var meshes: [MeshHandle: MeshResource] = [:]
 
     private var currentDrawable: CAMetalDrawable?
@@ -263,10 +269,10 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
             textures.removeValue(forKey: h)
         case .pipeline(let h):
             pipelines.removeValue(forKey: h)
+        case .computePipeline(let h):
+            computePipelines.removeValue(forKey: h)
         case .mesh(let h):
             meshes.removeValue(forKey: h)
-        case .computePipeline:
-            break
         }
     }
 
@@ -431,8 +437,21 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
     }
 
     public func makeComputePipeline(_ desc: ComputePipelineDescriptor) throws -> ComputePipelineHandle {
-        SDLLogger.warn("SDLKit.Graphics.Metal", "Compute pipelines are not yet implemented")
-        throw AgentError.notImplemented
+        let module = try shaderLibrary.computeModule(for: desc.shader)
+        let library = try loadMetalLibrary(for: module)
+        let function = try makeFunction(module.entryPoint, library: library)
+        let state: MTLComputePipelineState
+        do {
+            state = try device.makeComputePipelineState(function: function)
+        } catch {
+            SDLLogger.error("SDLKit.Graphics.Metal", "Failed to create compute pipeline state: \(error)")
+            throw error
+        }
+
+        let handle = ComputePipelineHandle()
+        computePipelines[handle] = ComputePipelineResource(state: state, module: module)
+        SDLLogger.debug("SDLKit.Graphics.Metal", "makeComputePipeline id=\(handle.rawValue) label=\(desc.label ?? module.id.rawValue)")
+        return handle
     }
 
     public func dispatchCompute(_ pipeline: ComputePipelineHandle,
@@ -441,14 +460,68 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
                                  groupsZ: Int,
                                  bindings: BindingSet,
                                  pushConstants: UnsafeRawPointer?) throws {
-        _ = pipeline
-        _ = groupsX
-        _ = groupsY
-        _ = groupsZ
-        _ = bindings
-        _ = pushConstants
-        SDLLogger.warn("SDLKit.Graphics.Metal", "dispatchCompute is not implemented")
-        throw AgentError.notImplemented
+        guard let resource = computePipelines[pipeline] else {
+            throw AgentError.internalError("Unknown compute pipeline handle")
+        }
+        if let encoder = currentRenderEncoder {
+            throw AgentError.invalidArgument("Cannot dispatch compute while a render pass is active (encoder=\(encoder))")
+        }
+
+        let commandBuffer: MTLCommandBuffer
+        let ownsCommandBuffer: Bool
+        if let active = currentCommandBuffer {
+            commandBuffer = active
+            ownsCommandBuffer = false
+        } else {
+            guard let buffer = commandQueue.makeCommandBuffer() else {
+                throw AgentError.internalError("Unable to allocate Metal command buffer for compute dispatch")
+            }
+            buffer.label = "SDLKit.Compute"
+            commandBuffer = buffer
+            ownsCommandBuffer = true
+        }
+
+        guard let encoder = commandBuffer.makeComputeCommandEncoder() else {
+            throw AgentError.internalError("Failed to create Metal compute command encoder")
+        }
+        encoder.label = "SDLKit.ComputeDispatch"
+        encoder.setComputePipelineState(resource.state)
+
+        for slot in resource.module.bindings {
+            switch slot.kind {
+            case .uniformBuffer, .storageBuffer:
+                guard let handle: BufferHandle = bindings.value(for: slot.index, as: BufferHandle.self),
+                      let bufferResource = buffers[handle] else {
+                    encoder.endEncoding()
+                    throw AgentError.invalidArgument("Missing buffer binding for compute slot \(slot.index)")
+                }
+                encoder.setBuffer(bufferResource.buffer, offset: 0, index: slot.index)
+            case .sampledTexture, .storageTexture:
+                guard let handle: TextureHandle = bindings.value(for: slot.index, as: TextureHandle.self),
+                      let texture = textures[handle] else {
+                    encoder.endEncoding()
+                    throw AgentError.invalidArgument("Missing texture binding for compute slot \(slot.index)")
+                }
+                encoder.setTexture(texture, index: slot.index)
+            case .sampler:
+                // Samplers are not yet modeled as resources in SDLKit; ignore silently for now.
+                break
+            }
+        }
+
+        let threadgroupSize = resource.module.threadgroupSize
+        let tgWidth = max(1, threadgroupSize.0 > 0 ? threadgroupSize.0 : resource.state.threadExecutionWidth)
+        let tgHeight = max(1, threadgroupSize.1)
+        let tgDepth = max(1, threadgroupSize.2)
+        let threadsPerThreadgroup = MTLSize(width: tgWidth, height: tgHeight, depth: tgDepth)
+        let threadgroups = MTLSize(width: max(1, groupsX), height: max(1, groupsY), depth: max(1, groupsZ))
+        encoder.dispatchThreadgroups(threadgroups, threadsPerThreadgroup: threadsPerThreadgroup)
+        encoder.endEncoding()
+
+        if ownsCommandBuffer {
+            commandBuffer.commit()
+            commandBuffer.waitUntilCompleted()
+        }
     }
 
     // MARK: - Helpers
@@ -550,6 +623,17 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
         }
         let url = try module.artifacts.requireMetalLibrary(for: module.id)
         SDLLogger.info("SDLKit.Graphics.Metal", "Loading metallib for \(module.id.rawValue) from \(url.path)")
+        let library = try device.makeLibrary(URL: url)
+        metalLibraries[module.id] = library
+        return library
+    }
+
+    private func loadMetalLibrary(for module: ComputeShaderModule) throws -> MTLLibrary {
+        if let cached = metalLibraries[module.id] {
+            return cached
+        }
+        let url = try module.artifacts.requireMetalLibrary(for: module.id)
+        SDLLogger.info("SDLKit.Graphics.Metal", "Loading compute metallib for \(module.id.rawValue) from \(url.path)")
         let library = try device.makeLibrary(URL: url)
         metalLibraries[module.id] = library
         return library
