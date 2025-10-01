@@ -48,8 +48,9 @@ let package = Package(
             deps.append(.package(url: "https://github.com/jpsim/Yams.git", from: "5.1.0"))
         }
         // FountainStore for persistence (golden references, configs, etc.)
-        // Use local path in this repo to avoid network dependency and enable customization.
         deps.append(.package(path: "External/Fountain-Store"))
+        // SecretStore for secure secret persistence
+        deps.append(.package(path: "External/swift-secretstore"))
         return deps
     }(),
     targets: {
@@ -130,6 +131,8 @@ let package = Package(
                     if useYams { deps.append(.product(name: "Yams", package: "Yams")) }
                     // Persist golden image references and other settings
                     deps.append(.product(name: "FountainStore", package: "Fountain-Store"))
+                    // Secrets
+                    deps.append(.product(name: "SecretStore", package: "swift-secretstore"))
                     return deps
                 }(),
                 path: "Sources/SDLKit",
