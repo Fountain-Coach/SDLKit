@@ -37,7 +37,7 @@ This matrix tracks the concrete work required to graduate SDLKit's Metal (macOS)
 
 | Status | Area | Task | Notes |
 | --- | --- | --- | --- |
-| ☐ | Documentation | Publish backend readiness checklist | • Document Metal/Vulkan feature parity expectations and manual testing steps.<br>• Outline known limitations blocking beta. |
+| ☑ | Documentation | Publish backend readiness checklist | • Document Metal/Vulkan feature parity expectations and manual testing steps.<br>• Outline known limitations blocking beta.<br>• See [Metal & Vulkan Alpha Readiness Checklist](BackendReadinessChecklist.md) for the published guidance. |
 | ☐ | Testing | Expand golden-image matrix | • Ensure macOS + Linux jobs render both unlit & lit textured scenes.<br>• Record baseline images for new tests. |
 
 ---
