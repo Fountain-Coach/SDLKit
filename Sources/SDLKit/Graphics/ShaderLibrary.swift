@@ -34,6 +34,42 @@ public struct ShaderModuleArtifacts: Sendable {
     }
 }
 
+public struct ComputeShaderModuleArtifacts: Sendable {
+    public let dxil: URL?
+    public let spirv: URL?
+    public let metalLibrary: URL?
+
+    func requireDXIL(for id: ShaderID) throws -> URL {
+        guard let url = dxil else {
+            throw AgentError.internalError("DXIL compute shader for \(id.rawValue) not found. Run the shader build plugin.")
+        }
+        return url
+    }
+
+    func requireSPIRV(for id: ShaderID) throws -> URL {
+        guard let url = spirv else {
+            throw AgentError.internalError("SPIR-V compute shader for \(id.rawValue) not found. Run the shader build plugin.")
+        }
+        return url
+    }
+
+    func requireMetalLibrary(for id: ShaderID) throws -> URL {
+        guard let url = metalLibrary else {
+            throw AgentError.internalError("Metal library for compute shader \(id.rawValue) not found. Run the shader build plugin.")
+        }
+        return url
+    }
+}
+
+public struct ComputeShaderModule: Sendable {
+    public let id: ShaderID
+    public let entryPoint: String
+    public let threadgroupSize: (Int, Int, Int)
+    public let pushConstantSize: Int
+    public let bindings: [BindingSlot]
+    public let artifacts: ComputeShaderModuleArtifacts
+}
+
 public struct ShaderModule: Sendable {
     public let id: ShaderID
     public let vertexEntryPoint: String
@@ -54,9 +90,11 @@ public final class ShaderLibrary {
     public static let shared = ShaderLibrary()
 
     private let modules: [ShaderID: ShaderModule]
+    private let computeModules: [ShaderID: ComputeShaderModule]
     private init() {
         let root = ShaderLibrary.resolveGeneratedRoot()
         self.modules = ShaderLibrary.loadModules(root: root)
+        self.computeModules = ShaderLibrary.loadComputeModules(root: root)
     }
 
     public func module(for id: ShaderID) throws -> ShaderModule {
@@ -66,8 +104,20 @@ public final class ShaderLibrary {
         return module
     }
 
+    public func computeModule(for id: ShaderID) throws -> ComputeShaderModule {
+        guard let module = computeModules[id] else {
+            throw AgentError.invalidArgument("Unknown compute shader id: \(id.rawValue)")
+        }
+        return module
+    }
+
     public func metalLibraryURL(for id: ShaderID) throws -> URL {
         let module = try module(for: id)
+        return try module.artifacts.requireMetalLibrary(for: id)
+    }
+
+    public func metalLibraryURLForComputeShader(_ id: ShaderID) throws -> URL {
+        let module = try computeModule(for: id)
         return try module.artifacts.requireMetalLibrary(for: id)
     }
 
@@ -97,6 +147,14 @@ public final class ShaderLibrary {
         let unlit = makeUnlitTriangleModule(root: root)
         let lit = makeBasicLitModule(root: root)
         return [unlit.id: unlit, lit.id: lit]
+    }
+
+    private static func loadComputeModules(root: URL) -> [ShaderID: ComputeShaderModule] {
+        var result: [ShaderID: ComputeShaderModule] = [:]
+        if let vectorAdd = makeVectorAddComputeModule(root: root) {
+            result[vectorAdd.id] = vectorAdd
+        }
+        return result
     }
 
     private static func makeUnlitTriangleModule(root: URL) -> ShaderModule {
@@ -162,6 +220,38 @@ public final class ShaderLibrary {
             fragmentEntryPoint: "basic_lit_ps",
             vertexLayout: layout,
             bindings: [ .vertex: [ BindingSlot(index: 0, kind: .uniformBuffer) ] ],
+            artifacts: artifacts
+        )
+    }
+
+    private static func makeVectorAddComputeModule(root: URL) -> ComputeShaderModule? {
+        let id = ShaderID("vector_add")
+        let dxilRoot = root.appendingPathComponent("dxil", isDirectory: true)
+        let spirvRoot = root.appendingPathComponent("spirv", isDirectory: true)
+        let metalRoot = root.appendingPathComponent("metal", isDirectory: true)
+
+        let artifacts = ComputeShaderModuleArtifacts(
+            dxil: ShaderLibrary.existingFile(dxilRoot.appendingPathComponent("vector_add_cs.dxil")),
+            spirv: ShaderLibrary.existingFile(spirvRoot.appendingPathComponent("vector_add.comp.spv")),
+            metalLibrary: ShaderLibrary.existingFile(metalRoot.appendingPathComponent("vector_add.metallib"))
+        )
+
+        if artifacts.dxil == nil && artifacts.spirv == nil && artifacts.metalLibrary == nil {
+            return nil
+        }
+
+        let bindings: [BindingSlot] = [
+            BindingSlot(index: 0, kind: .storageBuffer),
+            BindingSlot(index: 1, kind: .storageBuffer),
+            BindingSlot(index: 2, kind: .storageBuffer)
+        ]
+
+        return ComputeShaderModule(
+            id: id,
+            entryPoint: "vector_add_cs",
+            threadgroupSize: (64, 1, 1),
+            pushConstantSize: 0,
+            bindings: bindings,
             artifacts: artifacts
         )
     }
