@@ -32,6 +32,7 @@ func shouldUseSystemPackage(_ pkg: String) -> Bool {
 let hasSDL3 = shouldUseSystemPackage("sdl3")
 let hasSDL3Image = shouldUseSystemPackage("sdl3-image")
 let hasSDL3TTF = shouldUseSystemPackage("sdl3-ttf")
+let hasVulkan = pkgConfigExists("vulkan")
 
 let package = Package(
     name: "SDLKit",
@@ -125,9 +126,11 @@ let package = Package(
                 dependencies: {
                     var deps: [Target.Dependency] = [
                         "CSDL3",
-                        .target(name: "CSDL3IMAGE", condition: .when(platforms: [.macOS, .linux])),
-                        .target(name: "CVulkan", condition: .when(platforms: [.linux]))
+                        .target(name: "CSDL3IMAGE", condition: .when(platforms: [.macOS, .linux]))
                     ]
+                    if hasVulkan {
+                        deps.append(.target(name: "CVulkan", condition: .when(platforms: [.linux])))
+                    }
                     if useYams { deps.append(.product(name: "Yams", package: "Yams")) }
                     // Persist golden image references and other settings
                     deps.append(.product(name: "FountainStore", package: "Fountain-Store"))
@@ -165,23 +168,27 @@ let package = Package(
             )
         )
 
-        targets.append(
-            .systemLibrary(
-                name: "CVulkan",
-                pkgConfig: "vulkan",
-                providers: [
-                    .apt(["libvulkan-dev"]) // Linux
-                ]
+        if hasVulkan {
+            targets.append(
+                .systemLibrary(
+                    name: "CVulkan",
+                    pkgConfig: "vulkan",
+                    providers: [
+                        .apt(["libvulkan-dev"]) // Linux
+                    ]
+                )
             )
-        )
+        }
 
-        targets.append(
-            .target(
-                name: "VulkanMinimal",
-                path: "Sources/VulkanMinimal",
-                publicHeadersPath: "include"
+        if hasVulkan {
+            targets.append(
+                .target(
+                    name: "VulkanMinimal",
+                    path: "Sources/VulkanMinimal",
+                    publicHeadersPath: "include"
+                )
             )
-        )
+        }
 
         targets.append(
             .target(
@@ -202,11 +209,16 @@ let package = Package(
         targets.append(
             .executableTarget(
                 name: "SDLKitDemo",
-                dependencies: [
-                    "SDLKit",
-                    .target(name: "SDLKitTTF", condition: .when(platforms: [.macOS, .linux])),
-                    .target(name: "VulkanMinimal", condition: .when(platforms: [.linux]))
-                ],
+                dependencies: {
+                    var deps: [Target.Dependency] = [
+                        "SDLKit",
+                        .target(name: "SDLKitTTF", condition: .when(platforms: [.macOS, .linux]))
+                    ]
+                    if hasVulkan {
+                        deps.append(.target(name: "VulkanMinimal", condition: .when(platforms: [.linux])))
+                    }
+                    return deps
+                }(),
                 path: "Sources/SDLKitDemo"
             )
         )

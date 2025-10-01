@@ -226,7 +226,7 @@ public final class D3D12RenderBackend: StubRenderBackend {
 }
 #endif
 
-#if !os(Linux)
+#if !(os(Linux) && canImport(VulkanMinimal) && canImport(CVulkan))
 @MainActor
 public final class VulkanRenderBackend: StubRenderBackend {
     required public init(window: SDLWindow) throws {

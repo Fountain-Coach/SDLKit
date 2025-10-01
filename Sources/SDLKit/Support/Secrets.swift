@@ -4,7 +4,6 @@ import SecretStore
 #endif
 
 // Centralized secret management backed by SecretStore
-@MainActor
 public enum Secrets {
     public enum Backend {
         case keychain(service: String)

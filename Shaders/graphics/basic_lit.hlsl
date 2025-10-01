@@ -12,16 +12,18 @@ struct VSOutput {
 };
 
 // Vulkan SPIR-V path: mark as push constants; ignored on DXIL path
-[[vk::push_constant]] cbuffer SceneCB : register(b0)
+struct SceneConstants
 {
     float4x4 uMVP;
     float4   lightDir; // xyz = direction
     float4   baseColor;
 };
 
+[[vk::push_constant]] ConstantBuffer<SceneConstants> SceneCB : register(b0);
+
 VSOutput basic_lit_vs(VSInput input) {
     VSOutput o;
-    o.position = mul(float4(input.POSITION, 1.0), uMVP);
+    o.position = mul(float4(input.POSITION, 1.0), SceneCB.uMVP);
     o.color = input.COLOR;
     o.normal = input.NORMAL;
     return o;
@@ -29,8 +31,8 @@ VSOutput basic_lit_vs(VSInput input) {
 
 float4 basic_lit_ps(VSOutput input) : SV_Target {
     float3 N = normalize(input.normal);
-    float3 L = normalize(lightDir.xyz);
+    float3 L = normalize(SceneCB.lightDir.xyz);
     float ndotl = max(dot(N, L), 0.0);
-    float3 lit = input.color * (0.15 + 0.85 * ndotl) * baseColor.rgb;
+    float3 lit = input.color * (0.15 + 0.85 * ndotl) * SceneCB.baseColor.rgb;
     return float4(lit, 1.0);
 }

@@ -1,6 +1,6 @@
 import Foundation
 
-public struct ShaderModuleArtifacts {
+public struct ShaderModuleArtifacts: Sendable {
     public let dxilVertex: URL?
     public let dxilFragment: URL?
     public let spirvVertex: URL?
@@ -34,7 +34,7 @@ public struct ShaderModuleArtifacts {
     }
 }
 
-public struct ShaderModule {
+public struct ShaderModule: Sendable {
     public let id: ShaderID
     public let vertexEntryPoint: String
     public let fragmentEntryPoint: String?
@@ -167,6 +167,14 @@ public final class ShaderLibrary {
     }
 
     private static func existingFile(_ url: URL) -> URL? {
+        do {
+            if let realized = try ShaderArtifactMaterializer.materializeArtifactIfNeeded(at: url) {
+                return realized
+            }
+        } catch {
+            // Fall back to simple existence checks below if decoding fails.
+        }
+
         let fm = FileManager.default
         if fm.fileExists(atPath: url.path) {
             return url

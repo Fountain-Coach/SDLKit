@@ -2,7 +2,7 @@
 // and an SDL-created VkSurfaceKHR. Other operations are currently delegated to the
 // stub core until full Vulkan rendering is implemented.
 
-#if os(Linux)
+#if os(Linux) && canImport(VulkanMinimal)
 import Foundation
 import Glibc
 import VulkanMinimal
@@ -78,6 +78,14 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
     private var captureMemory: VkDeviceMemory? = nil
     private var captureBufferSize: VkDeviceSize = 0
     private var lastCaptureHash: String?
+
+    private struct BufferResource {
+        var buffer: VkBuffer?
+        var memory: VkDeviceMemory?
+        var length: Int
+        var usage: BufferUsage
+    }
+    private var buffers: [BufferHandle: BufferResource] = [:]
     #endif
 
     public required init(window: SDLWindow) throws {
@@ -1552,10 +1560,3 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
     #endif
 }
 #endif
-    private struct BufferResource {
-        var buffer: VkBuffer?
-        var memory: VkDeviceMemory?
-        var length: Int
-        var usage: BufferUsage
-    }
-    private var buffers: [BufferHandle: BufferResource] = [:]
