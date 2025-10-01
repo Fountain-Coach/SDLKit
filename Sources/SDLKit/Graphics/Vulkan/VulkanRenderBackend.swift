@@ -67,6 +67,15 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
     private var pipelines: [PipelineHandle: PipelineResource] = [:]
     private var builtinPipeline: PipelineHandle? = nil
 
+    private struct MeshResource {
+        let vertexBuffer: BufferHandle
+        let vertexCount: Int
+        let indexBuffer: BufferHandle?
+        let indexCount: Int
+        let indexFormat: IndexFormat
+    }
+    private var meshes: [MeshHandle: MeshResource] = [:]
+
     // Builtin vertex buffer (pos.xyz + color.xyz)
     private var builtinVertexBuffer: VkBuffer? = nil
     private var builtinVertexMemory: VkDeviceMemory? = nil
@@ -423,6 +432,53 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
     public func createTexture(descriptor: TextureDescriptor, initialData: TextureInitialData?) throws -> TextureHandle {
         core.createTexture(descriptor: descriptor, initialData: initialData)
     }
+
+    public func registerMesh(vertexBuffer: BufferHandle,
+                             vertexCount: Int,
+                             indexBuffer: BufferHandle?,
+                             indexCount: Int,
+                             indexFormat: IndexFormat) throws -> MeshHandle {
+        #if canImport(CVulkan)
+        if let existing = meshes.first(where: { (_, resource) in
+            resource.vertexBuffer == vertexBuffer &&
+            resource.vertexCount == vertexCount &&
+            resource.indexBuffer == indexBuffer &&
+            resource.indexCount == indexCount &&
+            resource.indexFormat == indexFormat
+        })?.key {
+            return existing
+        }
+
+        guard buffers[vertexBuffer] != nil else {
+            throw AgentError.internalError("Unknown vertex buffer during mesh registration")
+        }
+        if let indexBuffer {
+            guard buffers[indexBuffer] != nil else {
+                throw AgentError.internalError("Unknown index buffer during mesh registration")
+            }
+        }
+
+        let handle = core.registerMesh(vertexBuffer: vertexBuffer,
+                                        vertexCount: vertexCount,
+                                        indexBuffer: indexBuffer,
+                                        indexCount: indexCount,
+                                        indexFormat: indexFormat)
+        meshes[handle] = MeshResource(
+            vertexBuffer: vertexBuffer,
+            vertexCount: vertexCount,
+            indexBuffer: indexBuffer,
+            indexCount: indexCount,
+            indexFormat: indexFormat
+        )
+        return handle
+        #else
+        return core.registerMesh(vertexBuffer: vertexBuffer,
+                                  vertexCount: vertexCount,
+                                  indexBuffer: indexBuffer,
+                                  indexCount: indexCount,
+                                  indexFormat: indexFormat)
+        #endif
+    }
     public func destroy(_ handle: ResourceHandle) {
         #if canImport(CVulkan)
         switch handle {
@@ -431,6 +487,8 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
                 if let b = res.buffer { vkDestroyBuffer(dev, b, nil) }
                 if let m = res.memory { vkFreeMemory(dev, m, nil) }
             }
+        case .mesh(let h):
+            meshes.removeValue(forKey: h)
         default:
             break
         }
@@ -684,7 +742,6 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
 
     public func draw(mesh: MeshHandle, pipeline: PipelineHandle, bindings: BindingSet, pushConstants: UnsafeRawPointer?, transform: float4x4) throws {
         #if canImport(CVulkan)
-        _ = mesh; _ = bindings; _ = pushConstants; _ = transform
         guard frameActive, let cmd = commandBuffers[currentFrame] else {
             throw AgentError.internalError("draw called outside of beginFrame/endFrame")
         }
@@ -707,23 +764,32 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
                 _ = vkCmdPushConstants(cmd, layout, UInt32(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT), 0, UInt32(bytes.count), bytes.baseAddress)
             }
         }
-        let vbufToUse: VkBuffer?
-        let vertexCount: UInt32
-        if let boundHandle = bindings.value(for: 0, as: BufferHandle.self), let res = buffers[boundHandle], let buf = res.buffer, resource.vertexStride > 0 {
-            vbufToUse = buf
-            vertexCount = UInt32(max(1, res.length / Int(resource.vertexStride)))
-        } else {
-            vbufToUse = builtinVertexBuffer
-            vertexCount = UInt32(builtinVertexCount)
+        guard let meshResource = meshes[mesh] else {
+            throw AgentError.internalError("Unknown mesh handle for draw")
         }
-        if let vbuf = vbufToUse {
-            var buffersArr = [vbuf]
-            var offsets: [VkDeviceSize] = [0]
-            buffersArr.withUnsafeMutableBufferPointer { bptr in
-                offsets.withUnsafeMutableBufferPointer { optr in
-                    vkCmdBindVertexBuffers(cmd, 0, 1, bptr.baseAddress, optr.baseAddress)
-                }
+        guard let vertexRes = buffers[meshResource.vertexBuffer], let vertexBuffer = vertexRes.buffer else {
+            throw AgentError.internalError("Vertex buffer unavailable for mesh draw")
+        }
+        let vertexCount = meshResource.vertexCount > 0
+            ? UInt32(meshResource.vertexCount)
+            : UInt32(max(1, vertexRes.length / max(1, Int(resource.vertexStride))))
+
+        var vertexBuffers = [vertexBuffer]
+        var offsets: [VkDeviceSize] = [0]
+        vertexBuffers.withUnsafeMutableBufferPointer { bptr in
+            offsets.withUnsafeMutableBufferPointer { optr in
+                vkCmdBindVertexBuffers(cmd, 0, 1, bptr.baseAddress, optr.baseAddress)
             }
+        }
+
+        if let indexHandle = meshResource.indexBuffer,
+           meshResource.indexCount > 0,
+           let indexRes = buffers[indexHandle],
+           let indexBuffer = indexRes.buffer {
+            let indexType = convertIndexFormat(meshResource.indexFormat)
+            vkCmdBindIndexBuffer(cmd, indexBuffer, 0, indexType)
+            vkCmdDrawIndexed(cmd, UInt32(meshResource.indexCount), 1, 0, 0, 0)
+        } else {
             vkCmdDraw(cmd, vertexCount, 1, 0, 0)
         }
         #else
@@ -1536,6 +1602,15 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
         typedDestroy(instance, messenger, nil)
     }
     #endif
+
+    private func convertIndexFormat(_ format: IndexFormat) -> VkIndexType {
+        switch format {
+        case .uint16:
+            return VK_INDEX_TYPE_UINT16
+        case .uint32:
+            return VK_INDEX_TYPE_UINT32
+        }
+    }
 
     private func convertVertexFormat(_ format: VertexFormat) -> VkFormat {
         switch format {

@@ -162,10 +162,13 @@ struct DemoApp {
             try backend.createBuffer(bytes: buffer.baseAddress, length: buffer.count, usage: .vertex)
         }
 
-        let mesh = MeshHandle()
-        if let stub = backend as? StubRenderBackend {
-            stub.register(mesh: mesh, vertexBuffer: vertexBuffer, vertexCount: vertices.count)
-        }
+        let mesh = try backend.registerMesh(
+            vertexBuffer: vertexBuffer,
+            vertexCount: vertices.count,
+            indexBuffer: nil,
+            indexCount: 0,
+            indexFormat: .uint16
+        )
 
         let shaderModule = try ShaderLibrary.shared.module(for: ShaderID("unlit_triangle"))
         let vertexLayout = shaderModule.vertexLayout
@@ -181,7 +184,7 @@ struct DemoApp {
 
         for _ in 0..<3 {
             try backend.beginFrame()
-            let bindings = BindingSet(slots: [0: vertexBuffer])
+            let bindings = BindingSet()
             try backend.draw(
                 mesh: mesh,
                 pipeline: pipeline,

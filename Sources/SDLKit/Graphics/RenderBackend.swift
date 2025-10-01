@@ -230,6 +230,12 @@ public protocol RenderBackend {
     func createTexture(descriptor: TextureDescriptor, initialData: TextureInitialData?) throws -> TextureHandle
     func destroy(_ handle: ResourceHandle)
 
+    func registerMesh(vertexBuffer: BufferHandle,
+                      vertexCount: Int,
+                      indexBuffer: BufferHandle?,
+                      indexCount: Int,
+                      indexFormat: IndexFormat) throws -> MeshHandle
+
     func makePipeline(_ desc: GraphicsPipelineDescriptor) throws -> PipelineHandle
     func draw(mesh: MeshHandle,
               pipeline: PipelineHandle,

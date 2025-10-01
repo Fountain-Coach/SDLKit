@@ -21,6 +21,14 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
         let depthPixelFormat: MTLPixelFormat?
     }
 
+    private struct MeshResource {
+        let vertexBuffer: BufferHandle
+        let vertexCount: Int
+        let indexBuffer: BufferHandle?
+        let indexCount: Int
+        let indexFormat: IndexFormat
+    }
+
     private let window: SDLWindow
     private let surface: RenderSurface
     private let layer: CAMetalLayer
@@ -31,6 +39,7 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
     private var buffers: [BufferHandle: BufferResource] = [:]
     private var textures: [TextureHandle: MTLTexture] = [:]
     private var pipelines: [PipelineHandle: PipelineResource] = [:]
+    private var meshes: [MeshHandle: MeshResource] = [:]
 
     private var currentDrawable: CAMetalDrawable?
     private var currentCommandBuffer: MTLCommandBuffer?
@@ -254,9 +263,46 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
             textures.removeValue(forKey: h)
         case .pipeline(let h):
             pipelines.removeValue(forKey: h)
-        case .computePipeline, .mesh:
+        case .mesh(let h):
+            meshes.removeValue(forKey: h)
+        case .computePipeline:
             break
         }
+    }
+
+    public func registerMesh(vertexBuffer: BufferHandle,
+                             vertexCount: Int,
+                             indexBuffer: BufferHandle?,
+                             indexCount: Int,
+                             indexFormat: IndexFormat) throws -> MeshHandle {
+        guard buffers[vertexBuffer] != nil else {
+            throw AgentError.internalError("Unknown vertex buffer during mesh registration")
+        }
+        if let indexBuffer {
+            guard buffers[indexBuffer] != nil else {
+                throw AgentError.internalError("Unknown index buffer during mesh registration")
+            }
+        }
+
+        if let existing = meshes.first(where: { (_, resource) in
+            resource.vertexBuffer == vertexBuffer &&
+            resource.vertexCount == vertexCount &&
+            resource.indexBuffer == indexBuffer &&
+            resource.indexCount == indexCount &&
+            resource.indexFormat == indexFormat
+        })?.key {
+            return existing
+        }
+
+        let handle = MeshHandle()
+        meshes[handle] = MeshResource(
+            vertexBuffer: vertexBuffer,
+            vertexCount: vertexCount,
+            indexBuffer: indexBuffer,
+            indexCount: indexCount,
+            indexFormat: indexFormat
+        )
+        return handle
     }
 
     public func makePipeline(_ desc: GraphicsPipelineDescriptor) throws -> PipelineHandle {
@@ -331,9 +377,6 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
                      bindings: BindingSet,
                      pushConstants: UnsafeRawPointer?,
                      transform: float4x4) throws {
-        _ = mesh
-        _ = pushConstants
-
         guard let pipelineResource = pipelines[pipeline] else {
             throw AgentError.internalError("Unknown pipeline handle")
         }
@@ -341,9 +384,11 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
             throw AgentError.internalError("draw called outside of beginFrame/endFrame")
         }
 
-        let vertexHandle = bindings.value(for: 0, as: BufferHandle.self) ?? triangleBufferHandle
-        guard let vertexResource = buffers[vertexHandle] else {
-            throw AgentError.internalError("Vertex buffer handle not found")
+        guard let meshResource = meshes[mesh] else {
+            throw AgentError.internalError("Unknown mesh handle for draw")
+        }
+        guard let vertexResource = buffers[meshResource.vertexBuffer] else {
+            throw AgentError.internalError("Vertex buffer handle not found for mesh")
         }
 
         let encoder = try obtainRenderEncoder(for: pipelineResource, commandBuffer: commandBuffer)
@@ -365,13 +410,24 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
         }
         encoder.setVertexBuffer(vertexResource.buffer, offset: 0, index: 0)
 
-        let vertexCount: Int
-        if vertexHandle == triangleBufferHandle {
-            vertexCount = triangleVertexCount
+        let vertexCount = meshResource.vertexCount > 0
+            ? meshResource.vertexCount
+            : max(1, vertexResource.length / max(1, pipelineResource.vertexStride))
+
+        if let indexHandle = meshResource.indexBuffer,
+           meshResource.indexCount > 0,
+           let indexResource = buffers[indexHandle] {
+            let indexType = convertIndexFormat(meshResource.indexFormat)
+            encoder.drawIndexedPrimitives(
+                type: .triangle,
+                indexCount: meshResource.indexCount,
+                indexType: indexType,
+                indexBuffer: indexResource.buffer,
+                indexBufferOffset: 0
+            )
         } else {
-            vertexCount = max(1, vertexResource.length / max(1, pipelineResource.vertexStride))
+            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: vertexCount)
         }
-        encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: vertexCount)
     }
 
     public func makeComputePipeline(_ desc: ComputePipelineDescriptor) throws -> ComputePipelineHandle {
@@ -536,6 +592,15 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
             return .depth32Float
         default:
             throw AgentError.invalidArgument("Unsupported depth format: \(format)")
+        }
+    }
+
+    private func convertIndexFormat(_ format: IndexFormat) -> MTLIndexType {
+        switch format {
+        case .uint16:
+            return .uint16
+        case .uint32:
+            return .uint32
         }
     }
 

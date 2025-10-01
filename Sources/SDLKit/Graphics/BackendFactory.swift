@@ -37,6 +37,21 @@ final class StubRenderBackendCore {
     struct MeshResource {
         var vertexBuffer: BufferHandle
         var vertexCount: Int
+        var indexBuffer: BufferHandle?
+        var indexCount: Int
+        var indexFormat: IndexFormat
+
+        func matches(vertexBuffer: BufferHandle,
+                     vertexCount: Int,
+                     indexBuffer: BufferHandle?,
+                     indexCount: Int,
+                     indexFormat: IndexFormat) -> Bool {
+            self.vertexBuffer == vertexBuffer &&
+            self.vertexCount == vertexCount &&
+            self.indexBuffer == indexBuffer &&
+            self.indexCount == indexCount &&
+            self.indexFormat == indexFormat
+        }
     }
 
     private let kind: Kind
@@ -68,8 +83,27 @@ final class StubRenderBackendCore {
         }
     }
 
-    func register(mesh handle: MeshHandle, vertexBuffer: BufferHandle, vertexCount: Int) {
-        meshes[handle] = MeshResource(vertexBuffer: vertexBuffer, vertexCount: vertexCount)
+    func registerMesh(vertexBuffer: BufferHandle,
+                      vertexCount: Int,
+                      indexBuffer: BufferHandle?,
+                      indexCount: Int,
+                      indexFormat: IndexFormat) -> MeshHandle {
+        if let existing = meshes.first(where: { $0.value.matches(vertexBuffer: vertexBuffer,
+                                                                 vertexCount: vertexCount,
+                                                                 indexBuffer: indexBuffer,
+                                                                 indexCount: indexCount,
+                                                                 indexFormat: indexFormat) })?.key {
+            return existing
+        }
+        let handle = MeshHandle()
+        meshes[handle] = MeshResource(
+            vertexBuffer: vertexBuffer,
+            vertexCount: vertexCount,
+            indexBuffer: indexBuffer,
+            indexCount: indexCount,
+            indexFormat: indexFormat
+        )
+        return handle
     }
 
     func beginFrame() throws {
@@ -152,8 +186,13 @@ final class StubRenderBackendCore {
         guard pipelines[pipeline] != nil else {
             throw AgentError.internalError("Unknown pipeline for draw call")
         }
-        let meshResource = meshes[mesh]
-        SDLLogger.debug("SDLKit.Graphics", "draw mesh=\(mesh.rawValue) pipeline=\(pipeline.rawValue) vertexBuffer=\(meshResource?.vertexBuffer.rawValue ?? 0) vertexCount=\(meshResource?.vertexCount ?? 0)")
+        guard let meshResource = meshes[mesh] else {
+            throw AgentError.internalError("Unknown mesh handle for draw call")
+        }
+        SDLLogger.debug(
+            "SDLKit.Graphics",
+            "draw mesh=\(mesh.rawValue) pipeline=\(pipeline.rawValue) vertexBuffer=\(meshResource.vertexBuffer.rawValue) vertexCount=\(meshResource.vertexCount) indexBuffer=\(meshResource.indexBuffer?.rawValue ?? 0) indexCount=\(meshResource.indexCount)"
+        )
         _ = bindings
         _ = pushConstants
         _ = transform
@@ -203,8 +242,16 @@ public class StubRenderBackend: RenderBackend {
     public func makeComputePipeline(_ desc: ComputePipelineDescriptor) throws -> ComputePipelineHandle { core.makeComputePipeline(desc) }
     public func dispatchCompute(_ pipeline: ComputePipelineHandle, groupsX: Int, groupsY: Int, groupsZ: Int, bindings: BindingSet, pushConstants: UnsafeRawPointer?) throws { try core.dispatchCompute(pipeline, groupsX: groupsX, groupsY: groupsY, groupsZ: groupsZ, bindings: bindings, pushConstants: pushConstants) }
 
-    public func register(mesh handle: MeshHandle, vertexBuffer: BufferHandle, vertexCount: Int) {
-        core.register(mesh: handle, vertexBuffer: vertexBuffer, vertexCount: vertexCount)
+    public func registerMesh(vertexBuffer: BufferHandle,
+                             vertexCount: Int,
+                             indexBuffer: BufferHandle?,
+                             indexCount: Int,
+                             indexFormat: IndexFormat) throws -> MeshHandle {
+        return core.registerMesh(vertexBuffer: vertexBuffer,
+                                 vertexCount: vertexCount,
+                                 indexBuffer: indexBuffer,
+                                 indexCount: indexCount,
+                                 indexFormat: indexFormat)
     }
 }
 

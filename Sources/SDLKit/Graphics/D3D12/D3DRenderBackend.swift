@@ -27,6 +27,14 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
         let vertexStride: Int
     }
 
+    private struct MeshResource {
+        let vertexBuffer: BufferHandle
+        let vertexCount: Int
+        let indexBuffer: BufferHandle?
+        let indexCount: Int
+        let indexFormat: IndexFormat
+    }
+
     private struct FrameResources {
         var renderTarget: UnsafeMutablePointer<ID3D12Resource>?
         var commandAllocator: UnsafeMutablePointer<ID3D12CommandAllocator>?
@@ -66,6 +74,7 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
 
     private var buffers: [BufferHandle: BufferResource] = [:]
     private var pipelines: [PipelineHandle: PipelineResource] = [:]
+    private var meshes: [MeshHandle: MeshResource] = [:]
 
     private var builtinPipeline: PipelineHandle?
     private var builtinVertexBuffer: BufferHandle?
@@ -386,6 +395,41 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
         throw AgentError.notImplemented
     }
 
+    public func registerMesh(vertexBuffer: BufferHandle,
+                             vertexCount: Int,
+                             indexBuffer: BufferHandle?,
+                             indexCount: Int,
+                             indexFormat: IndexFormat) throws -> MeshHandle {
+        guard buffers[vertexBuffer] != nil else {
+            throw AgentError.internalError("Vertex buffer not found during mesh registration")
+        }
+        if let indexBuffer {
+            guard buffers[indexBuffer] != nil else {
+                throw AgentError.internalError("Index buffer not found during mesh registration")
+            }
+        }
+
+        if let existing = meshes.first(where: { (_, resource) in
+            resource.vertexBuffer == vertexBuffer &&
+            resource.vertexCount == vertexCount &&
+            resource.indexBuffer == indexBuffer &&
+            resource.indexCount == indexCount &&
+            resource.indexFormat == indexFormat
+        })?.key {
+            return existing
+        }
+
+        let handle = MeshHandle()
+        meshes[handle] = MeshResource(
+            vertexBuffer: vertexBuffer,
+            vertexCount: vertexCount,
+            indexBuffer: indexBuffer,
+            indexCount: indexCount,
+            indexFormat: indexFormat
+        )
+        return handle
+    }
+
     public func destroy(_ handle: ResourceHandle) {
         switch handle {
         case .buffer(let buffer):
@@ -403,8 +447,8 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
             }
         case .computePipeline:
             break
-        case .mesh:
-            break
+        case .mesh(let meshHandle):
+            meshes.removeValue(forKey: meshHandle)
         }
     }
 
@@ -615,9 +659,6 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
     }
 
     public func draw(mesh: MeshHandle, pipeline: PipelineHandle, bindings: BindingSet, pushConstants: UnsafeRawPointer?, transform: float4x4) throws {
-        _ = mesh
-        _ = pushConstants
-        _ = transform
         guard frameActive else {
             throw AgentError.internalError("draw called outside beginFrame/endFrame")
         }
@@ -628,15 +669,17 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
             throw AgentError.internalError("Unknown pipeline handle for draw")
         }
 
-        let boundBuffer = bindings.value(for: 0, as: BufferHandle.self) ?? builtinVertexBuffer
-        guard let bufferHandle = boundBuffer, let buffer = buffers[bufferHandle] else {
-            throw AgentError.internalError("Vertex buffer binding missing for draw call")
+        guard let meshResource = meshes[mesh] else {
+            throw AgentError.internalError("Unknown mesh handle for draw")
+        }
+        guard let buffer = buffers[meshResource.vertexBuffer] else {
+            throw AgentError.internalError("Vertex buffer missing for mesh draw call")
         }
         let stride = pipelineResource.vertexStride
         guard stride > 0 else {
             throw AgentError.internalError("Pipeline vertex stride is zero")
         }
-        let vertexCount = buffer.length / stride
+        let vertexCount = (meshResource.vertexCount > 0 ? meshResource.vertexCount : buffer.length / stride)
         guard vertexCount > 0 else { return }
 
         commandList.pointee.lpVtbl.pointee.SetPipelineState(commandList, pipelineResource.pipelineState)
@@ -672,7 +715,19 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
             StrideInBytes: UINT(stride)
         )
         commandList.pointee.lpVtbl.pointee.IASetVertexBuffers(commandList, 0, 1, &view)
-        commandList.pointee.lpVtbl.pointee.DrawInstanced(commandList, UINT(vertexCount), 1, 0, 0)
+        if let indexHandle = meshResource.indexBuffer,
+           meshResource.indexCount > 0,
+           let indexBuffer = buffers[indexHandle] {
+            var ibView = D3D12_INDEX_BUFFER_VIEW(
+                BufferLocation: indexBuffer.resource.pointee.lpVtbl.pointee.GetGPUVirtualAddress(indexBuffer.resource),
+                SizeInBytes: UINT(indexBuffer.length),
+                Format: convertIndexFormat(meshResource.indexFormat)
+            )
+            commandList.pointee.lpVtbl.pointee.IASetIndexBuffer(commandList, &ibView)
+            commandList.pointee.lpVtbl.pointee.DrawIndexedInstanced(commandList, UINT(meshResource.indexCount), 1, 0, 0, 0)
+        } else {
+            commandList.pointee.lpVtbl.pointee.DrawInstanced(commandList, UINT(vertexCount), 1, 0, 0)
+        }
     }
 
     public func makeComputePipeline(_ desc: ComputePipelineDescriptor) throws -> ComputePipelineHandle {
@@ -1196,6 +1251,15 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
             }
         }
         return String(format: "%016llx", hash)
+    }
+
+    private func convertIndexFormat(_ format: IndexFormat) -> DXGI_FORMAT {
+        switch format {
+        case .uint16:
+            return DXGI_FORMAT_R16_UINT
+        case .uint32:
+            return DXGI_FORMAT_R32_UINT
+        }
     }
 
     // MARK: - Cleanup
