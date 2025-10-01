@@ -23,22 +23,11 @@ SDLKit is currently in **alpha**: core window and renderer wrappers bind to SDL3
 
 ## Using Our SDL Fork
 
-This package is designed to work with the Fountain‑Coach SDL3 fork:
-
-- Repo: https://github.com/Fountain-Coach/SDL
-- Follow that repo’s instructions to build/install SDL3 for your platform.
-- SDLKit discovers SDL3 via `pkg-config` name `sdl3` and links `SDL3`.
-- If you install the fork to a nonstandard prefix, set:
-  - `SDL3_INCLUDE_DIR` to the SDL include directory (e.g., `/opt/sdl/include`)
-  - `SDL3_LIB_DIR` to the SDL lib directory (e.g., `/opt/sdl/lib`)
-  These are picked up by `Package.swift` to pass `-I`/`-L` to the build.
+SDLKit targets the Fountain‑Coach SDL3 fork and auto-discovers the library via `pkg-config`. Set optional `SDL3_INCLUDE_DIR`/`SDL3_LIB_DIR` overrides when installing to a custom prefix. [Read more →](docs/install.md)
 
 ## Install SDL3
 
-- macOS: `brew install sdl3` (or build/install the Fountain‑Coach fork if preferred).
-- Linux (Debian/Ubuntu): `sudo apt-get install -y libsdl3-dev` (or build from the fork).
-- Windows: install via vcpkg (`vcpkg install sdl3`) and ensure headers/libs are discoverable.
-  - If using a custom prefix, export `LD_LIBRARY_PATH=/path/to/prefix/lib:$LD_LIBRARY_PATH` when running binaries so the dynamic linker can find `libSDL3.so`.
+Follow the platform-specific setup instructions (Homebrew, apt, vcpkg, or manual builds) to provision SDL3 and expose the runtime libraries. [Read more →](docs/install.md)
 
 ## Build & Test
 
@@ -48,27 +37,13 @@ This package is designed to work with the Fountain‑Coach SDL3 fork:
 
 ### Shader toolchain workflow
 
-SDLKit ships committed shader binaries, but the toolchain is part of the repository so contributors can rebuild them or add new modules.
+The repository includes the DXC/SPIRV-Cross-driven shader build pipeline and SwiftPM plugin so you can regenerate graphics and compute artifacts locally. [Read more →](docs/shader-toolchain.md)
 
-1. **Install external tools**
-   - DXC is required for HLSL → DXIL/SPIR-V compilation. Set `SDLKIT_SHADER_DXC` or add `dxc` to `PATH`.
-   - Optional: SPIRV-Cross converts SPIR-V → MSL when native `.metal` sources are unavailable (`SDLKIT_SHADER_SPIRV_CROSS`).
-   - Optional: Apple `metal`/`metallib` (macOS) build `.metallib` outputs directly. Environment variables `SDLKIT_SHADER_METAL` and `SDLKIT_SHADER_METALLIB` override discovery.【F:Scripts/ShaderBuild/build-shaders.py†L20-L96】
-   - Python 3 drives the helper script invoked by SwiftPM.
-   - You can also place tool binaries under `External/Toolchains/bin` to avoid modifying your global PATH.【F:Scripts/ShaderBuild/build-shaders.py†L20-L40】
+## Documentation
 
-2. **Provide per-project overrides**
-   - Optional `.fountain/sdlkit/shader-tools.env` files inject environment overrides when the plugin runs, letting teams codify tool paths or compiler flags.【F:Plugins/ShaderBuildPlugin/Plugin.swift†L16-L33】
-
-3. **Invoke the build**
-   - Building `SDLKit` automatically triggers the `ShaderBuildPlugin`, which calls `Scripts/ShaderBuild/build-shaders.py <package-root> <workdir>` before compilation.【F:Plugins/ShaderBuildPlugin/Plugin.swift†L10-L31】
-   - Manual rebuild: `python3 Scripts/ShaderBuild/build-shaders.py "$(pwd)" .build/shader-cache`. The script emits DXIL/SPIR-V/Metallib artifacts, writes optional intermediate `.msl/.air` files, and records a `shader-build.log` summary in the working directory.【F:Scripts/ShaderBuild/build-shaders.py†L58-L189】
-
-4. **Artifact layout**
-   - Final binaries are copied into `Sources/SDLKit/Generated/{dxil,spirv,metal}` and loaded by `ShaderLibrary` at runtime. The library also exposes compute shaders (`vector_add`, `scenegraph_wave`) so both graphics and compute paths share the same metadata.【F:Sources/SDLKit/Graphics/ShaderLibrary.swift†L120-L256】
-
-5. **Verification**
-   - `swift test --filter ShaderArtifactsTests` confirms all expected shader files exist and match the manifest.【F:Tests/SDLKitTests/ShaderArtifactsTests.swift†L20-L40】
+- [Installation Guide](docs/install.md) — set up the Fountain‑Coach SDL3 fork, configure environment overrides, and verify your toolchain.
+- [Shader Toolchain Guide](docs/shader-toolchain.md) — install DXC/SPIRV-Cross, run the SwiftPM plugin, and validate shader artifacts.
+- [Scene Graph & Demo Guide](docs/scenegraph.md) — launch the 3D demo, manage golden images, and tune scene graph defaults.
 
 ### Headless CI mode
 
@@ -123,63 +98,19 @@ agent.closeWindow(windowId: windowId)
 
 ### Triangle & SceneGraph Demo (Metal/D3D12/Vulkan)
 
-- Run: `swift run SDLKitDemo`
-- By default the app opens a window, selects the platform backend (Metal on macOS, D3D12 on Windows, Vulkan on Linux), uploads a static triangle, and walks a `beginFrame → draw → endFrame` loop using the new `RenderBackend` protocol.
-- Override the backend via persisted setting or env:
-  - Persisted: `swift run SDLKitSettings set --key render.backend.override --value metal`
-  - Env: `SDLKIT_RENDER_BACKEND=metal|d3d12|vulkan swift run SDLKitDemo`
-- Force the legacy 2D smoke test instead of the triangle with `SDLKIT_DEMO_FORCE_2D=1 swift run SDLKitDemo`.
-- The previous rectangle/line/circle/text showcase still runs in legacy mode and continues to honor SDL_ttf availability.
+Launch the 3D demo to exercise the shared `RenderBackend` implementations, override backends, manage golden images, and tweak scene defaults using the CLI utilities. [Read more →](docs/scenegraph.md)
+
 ### Golden Image Parity (M3)
 
-- Enable tests: `SDLKIT_GOLDEN=1 swift test` (optional `SDLKIT_GOLDEN_WRITE=1` to store current hash)
-- Manage references with CLI:
-  - Write: `swift run SDLKitGolden --backend metal --size 256x256 --material basic_lit --write`
-  - Verify: `swift run SDLKitGolden --backend metal --size 256x256 --material basic_lit`
+Enable automated reference-image validation for the scene graph by turning on the `SDLKIT_GOLDEN` flag or invoking the `SDLKitGolden` CLI. [Read more →](docs/scenegraph.md)
 
 ### Settings & Secrets
 
-- Settings persist via FountainStore under `.fountain/sdlkit` (collection `settings`). Examples:
-  - `swift run SDLKitSettings set --key render.backend.override --value metal`
-  - `swift run SDLKitSettings set-bool --key vk.validation --value true`
-  - `swift run SDLKitSettings set --key scene.default.material --value basic_lit`
-  - `swift run SDLKitSettings set --key scene.default.baseColor --value "1.0,1.0,1.0,1.0"`
-  - `swift run SDLKitSettings set --key scene.default.lightDirection --value "0.3,-0.5,0.8"`
-- Migration from env to settings:
-  - `swift run SDLKitMigrate` migrates known `SDLKIT_*` env vars into FountainStore settings and prints a JSON summary.
-- Shader tool paths:
-  - Set with SDLKitSettings (e.g., `shader.dxc.path`) and run `swift run SDLKitSettings write-env` to generate `.fountain/sdlkit/shader-tools.env` consumed by the shader build plugin.
+Persist renderer and scene defaults, shader tool paths, and secret values via the `SDLKitSettings`/`SDLKitSecrets` CLIs. [Read more →](docs/scenegraph.md)
 
 ### Settings Reference
 
-- Keys and types (all stored as strings; booleans serialized as "1"/"0"):
-  - render.backend.override: String (metal|d3d12|vulkan)
-  - present.policy: String (auto|explicit)
-  - vk.validation: Bool
-  - dx12.debug_layer: Bool
-  - shader.root: String (path)
-  - shader.dxc.path: String (path)
-  - shader.spirv_cross.path: String (path)
-  - shader.metal.path: String (path)
-  - shader.metallib.path: String (path)
-  - scene.default.material: String (unlit|basic_lit)
-  - scene.default.baseColor: String ("r,g,b,a")
-  - scene.default.lightDirection: String ("x,y,z")
-  - golden.last.key: String
-  - golden.auto.write: Bool
-
-- Example JSON dump (via `swift run SDLKitSettings dump`):
-  {
-    "render.backend.override": "metal",
-    "present.policy": "auto",
-    "vk.validation": "1",
-    "scene.default.material": "basic_lit",
-    "scene.default.baseColor": "1.0,1.0,1.0,1.0",
-    "scene.default.lightDirection": "0.3,-0.5,0.8"
-  }
-- Secrets persist via SecretStore (Keychain on macOS, Secret Service on Linux, file keystore fallback).
-  - Example: `swift run SDLKitSecrets set --key light_dir --value "0.3,-0.5,0.8"`
-  - The demo reads `light_dir` to set the scene light when present.
+Review the available configuration keys and serialized formats, plus examples for dumping and migrating settings. [Read more →](docs/scenegraph.md)
 ## Agent Contract
 
 See `AGENTS.md:1` for the `sdlkit.gui.v1` tool definitions, error codes, event schema, threading policy, present policy, configuration keys, and contributor workflow.
