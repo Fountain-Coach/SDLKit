@@ -412,6 +412,11 @@ paths:
                   type: array
                   items: { $ref: '#/components/schemas/FenceSignal' }
                   nullable: true
+                barriers:
+                  type: array
+                  description: Optional resource state transitions required before executing the draw batch.
+                  items: { $ref: '#/components/schemas/ResourceBarrier' }
+                  nullable: true
               required: [frame_token, draws]
       responses:
         '202':
@@ -538,6 +543,11 @@ paths:
                   type: array
                   items: { $ref: '#/components/schemas/FenceSignal' }
                   nullable: true
+                barriers:
+                  type: array
+                  description: Optional resource state transitions applied before the dispatch begins.
+                  items: { $ref: '#/components/schemas/ResourceBarrier' }
+                  nullable: true
               required: [pipeline, groups, bindings]
       responses:
         '200':
@@ -611,11 +621,22 @@ paths:
                 properties:
                   guides:
                     type: array
+                    example:
+                      - title: SDLKit Render Versioning Strategy
+                        url: https://github.com/Fountain-Coach/SDLKit/blob/main/docs/sdlkit-render-v1-plan.md
+                        summary: Explains how the render namespace coexists with legacy GUI endpoints.
+                      - title: Scene Graph Overview
+                        url: https://github.com/Fountain-Coach/SDLKit/blob/main/docs/scenegraph.md
+                        summary: Describes node management, transforms, and draw submission expectations.
+                      - title: Shader Toolchain Guide
+                        url: https://github.com/Fountain-Coach/SDLKit/blob/main/docs/shader-toolchain.md
+                        summary: Details the single-source shader pipeline that produces platform artifacts.
                     items:
                       type: object
                       properties:
                         title: { type: string }
                         url: { type: string, format: uri }
+                        summary: { type: string }
                       required: [title, url]
                 required: [guides]
 
@@ -830,20 +851,26 @@ components:
       properties:
         slots:
           type: array
-          items:
-            type: object
-            properties:
-              index: { type: integer, minimum: 0 }
-              kind:
-                type: string
-                enum: [uniformBuffer, storageBuffer, sampledTexture, storageTexture, sampler]
-              stages:
-                type: array
-                items:
-                  type: string
-                  enum: [vertex, fragment, compute]
-            required: [index, kind, stages]
+          items: { $ref: '#/components/schemas/BindingSlot' }
       required: [slots]
+    BindingSlot:
+      type: object
+      properties:
+        index: { type: integer, minimum: 0 }
+        kind:
+          type: string
+          enum: [uniformBuffer, storageBuffer, sampledTexture, storageTexture, sampler]
+        stages:
+          type: array
+          items:
+            type: string
+            enum: [vertex, fragment, compute]
+        count:
+          type: integer
+          minimum: 1
+          default: 1
+          description: Number of descriptors available at this slot for array bindings.
+      required: [index, kind, stages]
     TextureDescriptor:
       type: object
       properties:
@@ -969,6 +996,37 @@ components:
         shader: { $ref: '#/components/schemas/ShaderID' }
         bindings: { $ref: '#/components/schemas/BindingLayout' }
       required: [shader, bindings]
+    ResourceBarrier:
+      type: object
+      properties:
+        resource:
+          description: Buffer or texture transitioning between pipeline stages.
+          oneOf:
+            - $ref: '#/components/schemas/BufferHandle'
+            - $ref: '#/components/schemas/TextureHandle'
+        from_state: { $ref: '#/components/schemas/ResourceState' }
+        to_state: { $ref: '#/components/schemas/ResourceState' }
+        queue: { $ref: '#/components/schemas/QueueKind', nullable: true }
+      required: [resource, from_state, to_state]
+    ResourceState:
+      type: string
+      description: High-level resource usage buckets shared across graphics and compute backends.
+      enum:
+        - undefined
+        - vertexBuffer
+        - indexBuffer
+        - uniformRead
+        - storageRead
+        - storageWrite
+        - renderTarget
+        - depthStencil
+        - present
+        - copySrc
+        - copyDst
+        - shaderSampled
+    QueueKind:
+      type: string
+      enum: [graphics, compute, copy]
     JobStatus:
       type: object
       properties:
