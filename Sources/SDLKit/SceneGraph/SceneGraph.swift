@@ -162,10 +162,19 @@ public enum SceneGraphRenderer {
     // Simple cache of pipelines per shader id
     private static var pipelineCache: [ShaderID: PipelineHandle] = [:]
 
-    public static func updateAndRender(scene: Scene, backend: RenderBackend, colorFormat: TextureFormat = .bgra8Unorm, depthFormat: TextureFormat? = .depth32Float) throws {
+    public static func updateAndRender(
+        scene: Scene,
+        backend: RenderBackend,
+        colorFormat: TextureFormat = .bgra8Unorm,
+        depthFormat: TextureFormat? = .depth32Float,
+        beforeRender: (() throws -> Void)? = nil
+    ) throws {
         scene.root.updateWorldTransform(parent: .identity)
         try backend.beginFrame()
         defer { try? backend.endFrame() }
+        if let beforeRender {
+            try beforeRender()
+        }
         let vp: float4x4
         if let cam = scene.camera {
             vp = cam.view * cam.projection

@@ -16,6 +16,7 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
         let resource: UnsafeMutablePointer<ID3D12Resource>
         let length: Int
         let usage: BufferUsage
+        var state: D3D12_RESOURCE_STATES
     }
 
     private struct PipelineResource {
@@ -396,7 +397,7 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
         }
 
         let handle = BufferHandle()
-        buffers[handle] = BufferResource(resource: resource, length: length, usage: usage)
+        buffers[handle] = BufferResource(resource: resource, length: length, usage: usage, state: D3D12_RESOURCE_STATE_GENERIC_READ)
         return handle
     }
 
@@ -404,6 +405,34 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
         _ = descriptor
         _ = initialData
         throw AgentError.notImplemented
+    }
+
+    private func transitionBuffer(_ handle: BufferHandle, to newState: D3D12_RESOURCE_STATES) {
+        guard let commandList else { return }
+        guard var resource = buffers[handle] else { return }
+        if resource.state == newState { return }
+        var barrier = D3D12_RESOURCE_BARRIER()
+        barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION
+        barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE
+        barrier.Anonymous.Transition = D3D12_RESOURCE_TRANSITION_BARRIER(
+            pResource: resource.resource,
+            Subresource: D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+            StateBefore: resource.state,
+            StateAfter: newState
+        )
+        commandList.pointee.lpVtbl.pointee.ResourceBarrier(commandList, 1, &barrier)
+        resource.state = newState
+        buffers[handle] = resource
+    }
+
+    private func insertUAVBarrier(_ handle: BufferHandle) {
+        guard let commandList else { return }
+        guard let resource = buffers[handle] else { return }
+        var barrier = D3D12_RESOURCE_BARRIER()
+        barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV
+        barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE
+        barrier.Anonymous.UAV = D3D12_RESOURCE_UAV_BARRIER(pResource: resource.resource)
+        commandList.pointee.lpVtbl.pointee.ResourceBarrier(commandList, 1, &barrier)
     }
 
     public func registerMesh(vertexBuffer: BufferHandle,
@@ -725,6 +754,7 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
         }
         commandList.pointee.lpVtbl.pointee.IASetPrimitiveTopology(commandList, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST)
 
+        transitionBuffer(meshResource.vertexBuffer, to: D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER)
         var view = D3D12_VERTEX_BUFFER_VIEW(
             BufferLocation: buffer.resource.pointee.lpVtbl.pointee.GetGPUVirtualAddress(buffer.resource),
             SizeInBytes: UINT(buffer.length),
@@ -734,6 +764,7 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
         if let indexHandle = meshResource.indexBuffer,
            meshResource.indexCount > 0,
            let indexBuffer = buffers[indexHandle] {
+            transitionBuffer(indexHandle, to: D3D12_RESOURCE_STATE_INDEX_BUFFER)
             var ibView = D3D12_INDEX_BUFFER_VIEW(
                 BufferLocation: indexBuffer.resource.pointee.lpVtbl.pointee.GetGPUVirtualAddress(indexBuffer.resource),
                 SizeInBytes: UINT(indexBuffer.length),
@@ -897,17 +928,21 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
                   let buffer = buffers[handle] else {
                 throw AgentError.invalidArgument("Missing uniform buffer binding at slot \(slot)")
             }
+            transitionBuffer(handle, to: D3D12_RESOURCE_STATE_GENERIC_READ)
             let gpuAddress = buffer.resource.pointee.lpVtbl.pointee.GetGPUVirtualAddress(buffer.resource)
             commandList.pointee.lpVtbl.pointee.SetComputeRootConstantBufferView(commandList, UINT(parameterIndex), gpuAddress)
         }
 
+        var storageBindings: [BufferHandle] = []
         for (slot, parameterIndex) in resource.storageParameterIndices {
             guard let handle: BufferHandle = bindings.value(for: slot, as: BufferHandle.self),
                   let buffer = buffers[handle] else {
                 throw AgentError.invalidArgument("Missing storage buffer binding at slot \(slot)")
             }
+            transitionBuffer(handle, to: D3D12_RESOURCE_STATE_UNORDERED_ACCESS)
             let gpuAddress = buffer.resource.pointee.lpVtbl.pointee.GetGPUVirtualAddress(buffer.resource)
             commandList.pointee.lpVtbl.pointee.SetComputeRootUnorderedAccessView(commandList, UINT(parameterIndex), gpuAddress)
+            storageBindings.append(handle)
         }
 
         if resource.module.pushConstantSize > 0, pushConstants != nil {
@@ -918,6 +953,10 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
         let dispatchY = max(1, groupsY)
         let dispatchZ = max(1, groupsZ)
         commandList.pointee.lpVtbl.pointee.Dispatch(commandList, UINT(dispatchX), UINT(dispatchY), UINT(dispatchZ))
+
+        for handle in storageBindings {
+            insertUAVBarrier(handle)
+        }
     }
 
     // MARK: - Initialization

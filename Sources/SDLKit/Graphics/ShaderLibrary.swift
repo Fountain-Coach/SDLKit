@@ -151,6 +151,9 @@ public final class ShaderLibrary {
 
     private static func loadComputeModules(root: URL) -> [ShaderID: ComputeShaderModule] {
         var result: [ShaderID: ComputeShaderModule] = [:]
+        if let sceneWave = makeScenegraphWaveComputeModule(root: root) {
+            result[sceneWave.id] = sceneWave
+        }
         if let vectorAdd = makeVectorAddComputeModule(root: root) {
             result[vectorAdd.id] = vectorAdd
         }
@@ -250,6 +253,38 @@ public final class ShaderLibrary {
             id: id,
             entryPoint: "vector_add_cs",
             threadgroupSize: (64, 1, 1),
+            pushConstantSize: 0,
+            bindings: bindings,
+            artifacts: artifacts
+        )
+    }
+
+    private static func makeScenegraphWaveComputeModule(root: URL) -> ComputeShaderModule? {
+        let id = ShaderID("scenegraph_wave")
+        let dxilRoot = root.appendingPathComponent("dxil", isDirectory: true)
+        let spirvRoot = root.appendingPathComponent("spirv", isDirectory: true)
+        let metalRoot = root.appendingPathComponent("metal", isDirectory: true)
+
+        let artifacts = ComputeShaderModuleArtifacts(
+            dxil: ShaderLibrary.existingFile(dxilRoot.appendingPathComponent("scenegraph_wave_cs.dxil")),
+            spirv: ShaderLibrary.existingFile(spirvRoot.appendingPathComponent("scenegraph_wave.comp.spv")),
+            metalLibrary: ShaderLibrary.existingFile(metalRoot.appendingPathComponent("scenegraph_wave.metallib"))
+        )
+
+        if artifacts.dxil == nil && artifacts.spirv == nil && artifacts.metalLibrary == nil {
+            return nil
+        }
+
+        let bindings: [BindingSlot] = [
+            BindingSlot(index: 0, kind: .storageBuffer),
+            BindingSlot(index: 1, kind: .storageBuffer),
+            BindingSlot(index: 2, kind: .storageBuffer)
+        ]
+
+        return ComputeShaderModule(
+            id: id,
+            entryPoint: "main",
+            threadgroupSize: (1, 1, 1),
             pushConstantSize: 0,
             bindings: bindings,
             artifacts: artifacts

@@ -239,6 +239,15 @@ struct DemoApp {
         root.addChild(unlitNode)
         root.addChild(litNode)
 
+        var computeResources: SceneGraphComputeInterop.Resources?
+        if let compute = try? SceneGraphComputeInterop.makeNode(backend: backend) {
+            let (computeNode, resources) = compute
+            root.addChild(computeNode)
+            computeResources = resources
+        } else {
+            SDLLogger.info("SDLKit.SceneGraphDemo", "scenegraph_wave compute shader unavailable; skipping interop node")
+        }
+
         // Add a simple perspective camera
         let aspect: Float = Float(window.config.width) / Float(max(1, window.config.height))
         let view = float4x4.lookAt(eye: (0, 0, 2), center: (0, 0, 0), up: (0, 1, 0))
@@ -255,7 +264,11 @@ struct DemoApp {
             litNode.localTransform = float4x4.rotationZ(-t) * float4x4.translation(x: 0.8, y: 0, z: 0)
             // Animate light direction subtly
             scene.lightDirection = (0.3 * cosf(t) + 0.3, -0.5, 0.8 * sinf(t) + 0.2)
-            try SceneGraphRenderer.updateAndRender(scene: scene, backend: backend)
+            try SceneGraphRenderer.updateAndRender(scene: scene, backend: backend, beforeRender: {
+                if let resources = computeResources {
+                    try SceneGraphComputeInterop.dispatchCompute(backend: backend, resources: resources)
+                }
+            })
             Thread.sleep(forTimeInterval: 1.0 / 60.0)
         }
     }

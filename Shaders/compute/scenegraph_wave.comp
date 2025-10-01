@@ -1,0 +1,52 @@
+#version 450
+layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+
+struct VertexState {
+    vec4 value; // xyz = base position, w = current phase
+};
+
+struct VertexConfig {
+    vec4 value; // rgb = base color, w = phase increment per dispatch
+};
+
+layout(std430, binding = 0) buffer StateBuffer {
+    VertexState states[];
+};
+
+layout(std430, binding = 1) buffer ConfigBuffer {
+    VertexConfig configs[];
+};
+
+layout(std430, binding = 2) buffer VertexBuffer {
+    float vertices[]; // interleaved position.xyz + color.rgb
+};
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+
+    VertexState st = states[idx];
+    VertexConfig cfg = configs[idx];
+
+    float phase = st.value.w + cfg.value.w;
+    st.value.w = phase;
+    states[idx] = st;
+
+    float c = cos(phase);
+    float s = sin(phase);
+    vec3 base = st.value.xyz;
+    vec3 rotated = vec3(
+        base.x * c - base.y * s,
+        base.x * s + base.y * c,
+        base.z
+    );
+
+    vec3 color = clamp(cfg.value.rgb * (0.6 + 0.4 * sin(phase)), 0.0, 1.0);
+
+    uint baseIndex = idx * 6u;
+    vertices[baseIndex + 0u] = rotated.x;
+    vertices[baseIndex + 1u] = rotated.y;
+    vertices[baseIndex + 2u] = rotated.z;
+    vertices[baseIndex + 3u] = color.r;
+    vertices[baseIndex + 4u] = color.g;
+    vertices[baseIndex + 5u] = color.b;
+}

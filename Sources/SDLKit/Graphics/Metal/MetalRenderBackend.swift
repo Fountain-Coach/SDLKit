@@ -516,6 +516,7 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
         let threadsPerThreadgroup = MTLSize(width: tgWidth, height: tgHeight, depth: tgDepth)
         let threadgroups = MTLSize(width: max(1, groupsX), height: max(1, groupsY), depth: max(1, groupsZ))
         encoder.dispatchThreadgroups(threadgroups, threadsPerThreadgroup: threadsPerThreadgroup)
+        encoder.memoryBarrier(scope: .buffers)
         encoder.endEncoding()
 
         if ownsCommandBuffer {
