@@ -465,9 +465,9 @@ public final class VulkanRenderBackend: RenderBackend {
         var plInfo = VkPipelineLayoutCreateInfo()
         plInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO
         var pcRange = VkPushConstantRange()
-        pcRange.stageFlags = UInt32(VK_SHADER_STAGE_VERTEX_BIT)
+        pcRange.stageFlags = UInt32(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
         pcRange.offset = 0
-        pcRange.size = 64 // 4x4 float matrix
+        pcRange.size = 80 // 4x4 float matrix + light dir (vec4)
         withUnsafePointer(to: &pcRange) { ptr in
             plInfo.pushConstantRangeCount = 1
             plInfo.pPushConstantRanges = ptr
@@ -596,9 +596,16 @@ public final class VulkanRenderBackend: RenderBackend {
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe)
         // Push transform as 4x4 floats (column-major)
         if let layout = resource.pipelineLayout {
-            var mat = transform.toFloatArray()
-            mat.withUnsafeBytes { bytes in
-                _ = vkCmdPushConstants(cmd, layout, UInt32(VK_SHADER_STAGE_VERTEX_BIT), 0, UInt32(bytes.count), bytes.baseAddress)
+            var data: [Float] = transform.toFloatArray()
+            if let pc = pushConstants {
+                let ptr = pc.bindMemory(to: Float.self, capacity: 20)
+                let buf = UnsafeBufferPointer(start: ptr, count: 20)
+                data = Array(buf)
+            } else {
+                data.append(contentsOf: [0.3, -0.5, 0.8, 0.0])
+            }
+            data.withUnsafeBytes { bytes in
+                _ = vkCmdPushConstants(cmd, layout, UInt32(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT), 0, UInt32(bytes.count), bytes.baseAddress)
             }
         }
         let vbufToUse: VkBuffer?

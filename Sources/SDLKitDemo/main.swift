@@ -204,35 +204,55 @@ struct DemoApp {
         let backend = try RenderBackendFactory.makeBackend(window: window)
         defer { try? backend.waitGPU() }
 
-        // Build a simple triangle vertex buffer (pos.xyz + color.xyz)
-        struct Vertex { var position: (Float, Float, Float); var color: (Float, Float, Float) }
-        let vertices: [Vertex] = [
+        // Unlit triangle vertex buffer (pos.xyz + color.xyz)
+        struct UnlitVertex { var position: (Float, Float, Float); var color: (Float, Float, Float) }
+        let unlitVerts: [UnlitVertex] = [
             .init(position: (-0.6, -0.5, 0), color: (1, 0, 0)),
             .init(position: ( 0.0,  0.6, 0), color: (0, 1, 0)),
             .init(position: ( 0.6, -0.5, 0), color: (0, 0, 1))
         ]
-        let vertexBuffer = try vertices.withUnsafeBytes { buf in
+        let unlitVB = try unlitVerts.withUnsafeBytes { buf in
             try backend.createBuffer(bytes: buf.baseAddress, length: buf.count, usage: .vertex)
         }
 
-        // Create scene graph
-        let mesh = Mesh(vertexBuffer: vertexBuffer, vertexCount: vertices.count)
-        let material = Material(shader: ShaderID("unlit_triangle"))
-        let node = SceneNode(name: "Triangle", transform: .identity, mesh: mesh, material: material)
-        // Add a second node offset to the right to show multiple nodes
-        let node2 = SceneNode(name: "Triangle2", transform: float4x4.translation(x: 0.8, y: 0, z: 0), mesh: mesh, material: material)
-        let root = SceneNode(name: "Root")
-        root.addChild(node)
-        root.addChild(node2)
+        // Basic lit triangle vertex buffer (pos.xyz + normal.xyz + color.xyz)
+        struct LitVertex { var position: (Float, Float, Float); var normal: (Float, Float, Float); var color: (Float, Float, Float) }
+        let litVerts: [LitVertex] = [
+            .init(position: (-0.6, -0.5, -0.2), normal: (0, 0, 1), color: (1, 0.6, 0.2)),
+            .init(position: ( 0.0,  0.6, -0.2), normal: (0, 0, 1), color: (0.2, 1, 0.6)),
+            .init(position: ( 0.6, -0.5, -0.2), normal: (0, 0, 1), color: (0.2, 0.6, 1))
+        ]
+        let litVB = try litVerts.withUnsafeBytes { buf in
+            try backend.createBuffer(bytes: buf.baseAddress, length: buf.count, usage: .vertex)
+        }
 
-        // Scene without camera (NDC space) to keep M1/M2 simple
-        let scene = Scene(root: root)
+        // Create scene graph with two nodes/materials
+        let unlitMesh = Mesh(vertexBuffer: unlitVB, vertexCount: unlitVerts.count)
+        let unlitMat = Material(shader: ShaderID("unlit_triangle"))
+        let unlitNode = SceneNode(name: "Unlit", transform: float4x4.translation(x: -0.8, y: 0, z: 0), mesh: unlitMesh, material: unlitMat)
+
+        let litMesh = Mesh(vertexBuffer: litVB, vertexCount: litVerts.count)
+        let litMat = Material(shader: ShaderID("basic_lit"))
+        let litNode = SceneNode(name: "Lit", transform: float4x4.translation(x: 0.8, y: 0, z: 0), mesh: litMesh, material: litMat)
+
+        let root = SceneNode(name: "Root")
+        root.addChild(unlitNode)
+        root.addChild(litNode)
+
+        // Add a simple perspective camera
+        let aspect: Float = Float(window.config.width) / Float(max(1, window.config.height))
+        let view = float4x4.lookAt(eye: (0, 0, 2), center: (0, 0, 0), up: (0, 1, 0))
+        let proj = float4x4.perspective(fovYRadians: .pi/3, aspect: aspect, zNear: 0.1, zFar: 100.0)
+        var scene = Scene(root: root, camera: Camera(view: view, projection: proj))
 
         // Animate rotation for a few frames
-        let frames = 90
+        let frames = 180
         for i in 0..<frames {
             let t = Float(i) * (Float.pi / 90.0)
-            node.localTransform = float4x4.rotationZ(t) * float4x4.translation(x: -0.2, y: 0, z: 0)
+            unlitNode.localTransform = float4x4.rotationZ(t) * float4x4.translation(x: -0.8, y: 0, z: 0)
+            litNode.localTransform = float4x4.rotationZ(-t) * float4x4.translation(x: 0.8, y: 0, z: 0)
+            // Animate light direction subtly
+            scene.lightDirection = (0.3 * cosf(t) + 0.3, -0.5, 0.8 * sinf(t) + 0.2)
             try SceneGraphRenderer.updateAndRender(scene: scene, backend: backend)
             Thread.sleep(forTimeInterval: 1.0 / 60.0)
         }

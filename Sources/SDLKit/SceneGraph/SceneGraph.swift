@@ -55,7 +55,10 @@ public struct Camera {
 public struct Scene {
     public var root: SceneNode
     public var camera: Camera?
-    public init(root: SceneNode, camera: Camera? = nil) { self.root = root; self.camera = camera }
+    public var lightDirection: (Float, Float, Float) // world-space direction
+    public init(root: SceneNode, camera: Camera? = nil, lightDirection: (Float, Float, Float) = (0.3, -0.5, 0.8)) {
+        self.root = root; self.camera = camera; self.lightDirection = lightDirection
+    }
 }
 
 @MainActor
@@ -73,18 +76,29 @@ public enum SceneGraphRenderer {
         } else {
             vp = .identity
         }
-        try renderNode(scene.root, backend: backend, colorFormat: colorFormat, depthFormat: depthFormat, vp: vp)
+        try renderNode(scene.root, backend: backend, colorFormat: colorFormat, depthFormat: depthFormat, vp: vp, lightDir: scene.lightDirection)
     }
 
-    private static func renderNode(_ node: SceneNode, backend: RenderBackend, colorFormat: TextureFormat, depthFormat: TextureFormat?, vp: float4x4) throws {
+    private static func renderNode(_ node: SceneNode, backend: RenderBackend, colorFormat: TextureFormat, depthFormat: TextureFormat?, vp: float4x4, lightDir: (Float, Float, Float)) throws {
         if let mesh = node.mesh, let material = node.material {
             let pipeline = try pipelineFor(material: material, backend: backend, colorFormat: colorFormat, depthFormat: depthFormat)
             var bindings = BindingSet()
             bindings.setValue(mesh.vertexBuffer, for: 0)
             let mvp = node.worldTransform * vp
-            try backend.draw(mesh: MeshHandle(), pipeline: pipeline, bindings: bindings, pushConstants: nil, transform: mvp)
+            // Build push constants block: 16 floats for matrix + 4 floats for lightDir (xyz, w=0)
+            var data = mvp.toFloatArray()
+            data.append(contentsOf: [lightDir.0, lightDir.1, lightDir.2, 0.0])
+            try data.withUnsafeBytes { bytes in
+                try backend.draw(
+                    mesh: MeshHandle(),
+                    pipeline: pipeline,
+                    bindings: bindings,
+                    pushConstants: bytes.baseAddress,
+                    transform: mvp
+                )
+            }
         }
-        for child in node.children { try renderNode(child, backend: backend, colorFormat: colorFormat, depthFormat: depthFormat, vp: vp) }
+        for child in node.children { try renderNode(child, backend: backend, colorFormat: colorFormat, depthFormat: depthFormat, vp: vp, lightDir: lightDir) }
     }
 
     private static func pipelineFor(material: Material, backend: RenderBackend, colorFormat: TextureFormat, depthFormat: TextureFormat?) throws -> PipelineHandle {

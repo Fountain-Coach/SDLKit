@@ -88,6 +88,7 @@ def main() -> int:
         combined_msl = output_dir / f"{module['name']}.combined.msl"
         air_file = output_dir / f"{module['name']}.air"
         metallib_file = metal_root / f"{module['name']}.metallib"
+        metal_source = package_root / "Shaders" / "graphics" / f"{module['name']}.metal"
 
         vertex_result = run_process(
             Path(dxc),
@@ -149,7 +150,16 @@ def main() -> int:
         if spirv_fragment.returncode != 0:
             messages.append(f"dxc SPIR-V fragment compilation failed for {module['name']}\n{spirv_fragment.stderr}")
 
-        if spirv_cross and Path(vertex_spv).exists() and Path(fragment_spv).exists():
+        # Prefer native .metal sources if available
+        if metal and metallib and metal_source.exists():
+            metal_result = run_process(Path(metal), str(metal_source), "-o", str(air_file))
+            if metal_result.returncode != 0:
+                messages.append(f"metal compilation failed for {module['name']}\n{metal_result.stderr}")
+            elif air_file.exists():
+                metallib_result = run_process(Path(metallib), str(air_file), "-o", str(metallib_file))
+                if metallib_result.returncode != 0:
+                    messages.append(f"metallib linkage failed for {module['name']}\n{metallib_result.stderr}")
+        elif spirv_cross and Path(vertex_spv).exists() and Path(fragment_spv).exists():
             vert_cross = run_process(
                 Path(spirv_cross),
                 str(vertex_spv),

@@ -15,6 +15,7 @@ struct VSOutput {
 [[vk::push_constant]] cbuffer SceneCB : register(b0)
 {
     float4x4 uMVP;
+    float4   lightDir; // xyz = direction
 };
 
 VSOutput basic_lit_vs(VSInput input) {
@@ -27,9 +28,8 @@ VSOutput basic_lit_vs(VSInput input) {
 
 float4 basic_lit_ps(VSOutput input) : SV_Target {
     float3 N = normalize(input.normal);
-    float3 L = normalize(float3(0.3, -0.5, 0.8)); // hard-coded light direction
+    float3 L = normalize(lightDir.xyz);
     float ndotl = max(dot(N, L), 0.0);
     float3 lit = input.color * (0.15 + 0.85 * ndotl);
     return float4(lit, 1.0);
 }
-

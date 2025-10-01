@@ -341,7 +341,7 @@ public final class D3D12RenderBackend: RenderBackend {
         // Root signature with one CBV at b0 for vertex shader (transform)
         var cbv = D3D12_ROOT_PARAMETER()
         cbv.ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV
-        cbv.ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX
+        cbv.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL
         cbv.Anonymous.Descriptor = D3D12_ROOT_DESCRIPTOR(ShaderRegister: 0, RegisterSpace: 0)
         var rootDesc = D3D12_ROOT_SIGNATURE_DESC()
         var params = [cbv]
@@ -550,7 +550,7 @@ public final class D3D12RenderBackend: RenderBackend {
 
         commandList.pointee.lpVtbl.pointee.SetPipelineState(commandList, pipelineResource.pipelineState)
         commandList.pointee.lpVtbl.pointee.SetGraphicsRootSignature(commandList, pipelineResource.rootSignature)
-        // Upload transform matrix to a small CBV and bind to root slot 0
+        // Upload uniforms (matrix + lightDir) to a small CBV and bind to root slot 0
         if transformBuffer == nil {
             try? createTransformBuffer()
         }
@@ -558,9 +558,16 @@ public final class D3D12RenderBackend: RenderBackend {
             var mapped: UnsafeMutableRawPointer?
             _ = tbuf.pointee.lpVtbl.pointee.Map(tbuf, 0, nil, &mapped)
             if let mapped {
-                // Copy 64 bytes (4x4 floats)
-                var m = transform.toFloatArray()
-                m.withUnsafeBytes { bytes in memcpy(mapped, bytes.baseAddress, min(64, bytes.count)) }
+                // Prepare 80 bytes: matrix (64) + lightDir (16)
+                var data: [Float] = transform.toFloatArray()
+                if let pc = pushConstants {
+                    let ptr = pc.bindMemory(to: Float.self, capacity: 20)
+                    let buf = UnsafeBufferPointer(start: ptr, count: 20)
+                    data = Array(buf)
+                } else {
+                    data.append(contentsOf: [0.3, -0.5, 0.8, 0.0])
+                }
+                data.withUnsafeBytes { bytes in memcpy(mapped, bytes.baseAddress, min(80, bytes.count)) }
             }
             tbuf.pointee.lpVtbl.pointee.Unmap(tbuf, 0, nil)
             let gpuAddress = tbuf.pointee.lpVtbl.pointee.GetGPUVirtualAddress(tbuf)

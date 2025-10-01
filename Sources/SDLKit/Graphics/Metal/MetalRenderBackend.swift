@@ -329,10 +329,20 @@ public final class MetalRenderBackend: RenderBackend {
 
         let encoder = try obtainRenderEncoder(for: pipelineResource, commandBuffer: commandBuffer)
         encoder.setRenderPipelineState(pipelineResource.state)
-        // Push transform as vertex bytes at buffer index 1 (matches MSL [[buffer(1)]])
-        var matrix = transform.toFloatArray()
-        matrix.withUnsafeBytes { bytes in
+        // Push uniforms (matrix + optional lightDir) at buffer index 1 for both VS/FS
+        var uniformData: [Float] = transform.toFloatArray()
+        if let pc = pushConstants {
+            // Expect 16 floats matrix + 4 floats light
+            let count = 20
+            let ptr = pc.bindMemory(to: Float.self, capacity: count)
+            uniformData = Array(UnsafeBufferPointer(start: ptr, count: min(count, 20)))
+        } else {
+            // Append default light direction
+            uniformData.append(contentsOf: [0.3, -0.5, 0.8, 0.0])
+        }
+        uniformData.withUnsafeBytes { bytes in
             encoder.setVertexBytes(bytes.baseAddress!, length: bytes.count, index: 1)
+            encoder.setFragmentBytes(bytes.baseAddress!, length: bytes.count, index: 1)
         }
         encoder.setVertexBuffer(vertexResource.buffer, offset: 0, index: 0)
 
