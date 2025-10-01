@@ -223,6 +223,14 @@ let package = Package(
         )
 
         targets.append(
+            .executableTarget(
+                name: "SDLKitSettings",
+                dependencies: ["SDLKit", .product(name: "FountainStore", package: "Fountain-Store")],
+                path: "Sources/SDLKitSettings"
+            )
+        )
+
+        targets.append(
             .plugin(
                 name: "ShaderBuildPlugin",
                 capability: .buildTool()

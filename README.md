@@ -125,14 +125,29 @@ let windowId = try agent.openWindow(title: "SDLKit", width: 800, height: 600)
 agent.closeWindow(windowId: windowId)
 ```
 
-### Triangle Demo (Metal/D3D12/Vulkan)
+### Triangle & SceneGraph Demo (Metal/D3D12/Vulkan)
 
 - Run: `swift run SDLKitDemo`
 - By default the app opens a window, selects the platform backend (Metal on macOS, D3D12 on Windows, Vulkan on Linux), uploads a static triangle, and walks a `beginFrame → draw → endFrame` loop using the new `RenderBackend` protocol.
-- Override the backend with `SDLKIT_RENDER_BACKEND=metal|d3d12|vulkan swift run SDLKitDemo` (useful for testing platform shims).
+- Override the backend via persisted setting or env:
+  - Persisted: `swift run SDLKitSettings set --key render.backend.override --value metal`
+  - Env: `SDLKIT_RENDER_BACKEND=metal|d3d12|vulkan swift run SDLKitDemo`
 - Force the legacy 2D smoke test instead of the triangle with `SDLKIT_DEMO_FORCE_2D=1 swift run SDLKitDemo`.
 - The previous rectangle/line/circle/text showcase still runs in legacy mode and continues to honor SDL_ttf availability.
+### Golden Image Parity (M3)
 
+- Enable tests: `SDLKIT_GOLDEN=1 swift test` (optional `SDLKIT_GOLDEN_WRITE=1` to store current hash)
+- Manage references with CLI:
+  - Write: `swift run SDLKitGolden --backend metal --size 256x256 --material basic_lit --write`
+  - Verify: `swift run SDLKitGolden --backend metal --size 256x256 --material basic_lit`
+
+### Settings & Secrets
+
+- Settings persist via FountainStore under `.fountain/sdlkit` (collection `settings`).
+  - Example: `swift run SDLKitSettings set-bool --key vk.validation --value true`
+- Secrets persist via SecretStore (Keychain on macOS, Secret Service on Linux, file keystore fallback).
+  - Example: `swift run SDLKitSecrets set --key light_dir --value "0.3,-0.5,0.8"`
+  - The demo reads `light_dir` to set the scene light when present.
 ## Agent Contract
 
 See `AGENTS.md:1` for the `sdlkit.gui.v1` tool definitions, error codes, event schema, threading policy, present policy, configuration keys, and contributor workflow.
