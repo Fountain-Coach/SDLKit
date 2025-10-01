@@ -44,18 +44,69 @@ public struct Material {
     }
 }
 
+fileprivate struct MeshRegistrationCache: Equatable {
+    var handle: MeshHandle
+    var vertexBuffer: BufferHandle
+    var vertexCount: Int
+    var indexBuffer: BufferHandle?
+    var indexCount: Int
+    var indexFormat: IndexFormat
+}
+
 public struct Mesh {
-    public var vertexBuffer: BufferHandle
-    public var vertexCount: Int
-    public var indexBuffer: BufferHandle?
-    public var indexCount: Int
-    public var indexFormat: IndexFormat
+    public var vertexBuffer: BufferHandle {
+        didSet { registrationCache = nil }
+    }
+    public var vertexCount: Int {
+        didSet { registrationCache = nil }
+    }
+    public var indexBuffer: BufferHandle? {
+        didSet { registrationCache = nil }
+    }
+    public var indexCount: Int {
+        didSet { registrationCache = nil }
+    }
+    public var indexFormat: IndexFormat {
+        didSet { registrationCache = nil }
+    }
+
+    fileprivate var registrationCache: MeshRegistrationCache?
+
     public init(vertexBuffer: BufferHandle, vertexCount: Int, indexBuffer: BufferHandle? = nil, indexCount: Int = 0, indexFormat: IndexFormat = .uint16) {
         self.vertexBuffer = vertexBuffer
         self.vertexCount = vertexCount
         self.indexBuffer = indexBuffer
         self.indexCount = indexCount
         self.indexFormat = indexFormat
+        self.registrationCache = nil
+    }
+
+    @MainActor
+    public mutating func ensureHandle(with backend: RenderBackend) throws -> MeshHandle {
+        if let cache = registrationCache,
+           cache.vertexBuffer == vertexBuffer,
+           cache.vertexCount == vertexCount,
+           cache.indexBuffer == indexBuffer,
+           cache.indexCount == indexCount,
+           cache.indexFormat == indexFormat {
+            return cache.handle
+        }
+        let handle = try backend.registerMesh(
+            vertexBuffer: vertexBuffer,
+            vertexCount: vertexCount,
+            indexBuffer: indexBuffer,
+            indexCount: indexCount,
+            indexFormat: indexFormat
+        )
+        registrationCache = MeshRegistrationCache(
+            handle: handle,
+            vertexBuffer: vertexBuffer,
+            vertexCount: vertexCount,
+            indexBuffer: indexBuffer,
+            indexCount: indexCount,
+            indexFormat: indexFormat
+        )
+        return handle
     }
 }
 
@@ -125,15 +176,11 @@ public enum SceneGraphRenderer {
     }
 
     private static func renderNode(_ node: SceneNode, backend: RenderBackend, colorFormat: TextureFormat, depthFormat: TextureFormat?, vp: float4x4, lightDir: (Float, Float, Float)) throws {
-        if let mesh = node.mesh, let material = node.material {
+        if var mesh = node.mesh, let material = node.material {
             let pipeline = try pipelineFor(material: material, backend: backend, colorFormat: colorFormat, depthFormat: depthFormat)
+            let meshHandle = try mesh.ensureHandle(with: backend)
+            node.mesh = mesh
             var bindings = BindingSet()
-            bindings.setValue(mesh.vertexBuffer, for: 0)
-            if let ib = mesh.indexBuffer, mesh.indexCount > 0 {
-                bindings.setValue(ib, for: 1) // index buffer
-                bindings.setValue(mesh.indexCount, for: 100) // index count
-                bindings.setValue(mesh.indexFormat, for: 101) // index format
-            }
             if let textureHandle = material.params.texture {
                 bindings.setValue(textureHandle, for: 10) // fragment texture slot 0
             }
@@ -148,7 +195,7 @@ public enum SceneGraphRenderer {
             data.append(contentsOf: [base.0, base.1, base.2, base.3])
             try data.withUnsafeBytes { bytes in
                 try backend.draw(
-                    mesh: MeshHandle(),
+                    mesh: meshHandle,
                     pipeline: pipeline,
                     bindings: bindings,
                     pushConstants: bytes.baseAddress,
