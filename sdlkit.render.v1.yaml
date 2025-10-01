@@ -1,0 +1,988 @@
+openapi: 3.1.0
+info:
+  title: SDLKit Render Agent API
+  version: 1.0.0
+  description: |
+    Forward-looking OpenAPI contract for the SDLKit Render/Scene/Compute agent.
+    Agent protocol namespace: sdlkit.render.v1
+servers:
+  - url: http://localhost:8080
+    description: Default local development server
+
+tags:
+  - name: System
+    description: Capability negotiation and native surface discovery.
+  - name: Render
+    description: Resource management, frame control, and graphics pipeline registration.
+  - name: Scene
+    description: Scene graph, materials, lights, and draw submission.
+  - name: Compute
+    description: GPU compute scheduling, dispatch, and readback.
+  - name: Docs
+    description: Documentation helpers and external references.
+
+paths:
+  /health:
+    get:
+      tags: [System]
+      summary: Health check
+      operationId: renderHealth
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
+  /version:
+    get:
+      tags: [System]
+      summary: Agent and spec version
+      description: Announces supported protocol namespaces and OpenAPI versions.
+      operationId: renderVersion
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  agent: { type: string, description: Agent implementation identifier }
+                  openapi: { type: string, description: Served OpenAPI document version }
+                  protocols:
+                    type: array
+                    description: Supported protocol namespaces (e.g. sdlkit.gui.v1, sdlkit.render.v1)
+                    items: { type: string }
+                required: [agent, openapi, protocols]
+  /agent/system/native-handles:
+    get:
+      tags: [System]
+      summary: Query native surface handles
+      description: Returns the platform-native handles (Metal layer, HWND, VkSurfaceKHR) for the requested window.
+      operationId: systemNativeHandles
+      parameters:
+        - in: query
+          name: window_id
+          required: true
+          schema: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NativeHandleSet'
+        '404': { $ref: '#/components/responses/Error' }
+  /agent/system/native-handles/negotiate:
+    post:
+      tags: [System]
+      summary: Negotiate render backend
+      description: Lets the caller specify preferred GPU backends and returns the selected backend with compatible handles.
+      operationId: negotiateNativeHandles
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                window_id: { type: integer, minimum: 1 }
+                preferred_backends:
+                  type: array
+                  items: { $ref: '#/components/schemas/RenderBackendKind' }
+                  description: Ordered list of acceptable GPU backends.
+              required: [window_id, preferred_backends]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  backend: { $ref: '#/components/schemas/RenderBackendKind' }
+                  handles: { $ref: '#/components/schemas/NativeHandleSet' }
+                required: [backend, handles]
+        '409': { $ref: '#/components/responses/Error' }
+
+  /agent/render/buffer/create:
+    post:
+      tags: [Render]
+      summary: Create GPU buffer
+      operationId: createBuffer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                label: { type: string, nullable: true }
+                usage: { $ref: '#/components/schemas/BufferUsage' }
+                length: { type: integer, minimum: 1 }
+                initial_data_base64:
+                  type: string
+                  format: byte
+                  description: Optional initial contents encoded as Base64.
+              required: [usage, length]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  buffer: { $ref: '#/components/schemas/BufferHandle' }
+                required: [buffer]
+        '400': { $ref: '#/components/responses/Error' }
+  /agent/render/texture/create:
+    post:
+      tags: [Render]
+      summary: Create GPU texture
+      operationId: createTexture
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                label: { type: string, nullable: true }
+                descriptor: { $ref: '#/components/schemas/TextureDescriptor' }
+                initial_data:
+                  type: array
+                  description: Optional per-mip uploads
+                  items: { $ref: '#/components/schemas/TextureInitialData' }
+              required: [descriptor]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  texture: { $ref: '#/components/schemas/TextureHandle' }
+                required: [texture]
+        '400': { $ref: '#/components/responses/Error' }
+  /agent/render/resource/destroy:
+    post:
+      tags: [Render]
+      summary: Destroy GPU resource
+      operationId: destroyResource
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                resource:
+                  oneOf:
+                    - $ref: '#/components/schemas/BufferHandle'
+                    - $ref: '#/components/schemas/TextureHandle'
+                    - $ref: '#/components/schemas/PipelineHandle'
+                    - $ref: '#/components/schemas/ComputePipelineHandle'
+                    - $ref: '#/components/schemas/MeshHandle'
+              required: [resource]
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '404': { $ref: '#/components/responses/Error' }
+  /agent/render/pipeline/register:
+    post:
+      tags: [Render]
+      summary: Register graphics pipeline
+      description: Consumes shader artifacts produced by the ShaderAgent and creates a graphics pipeline handle.
+      operationId: registerPipeline
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                shader: { $ref: '#/components/schemas/ShaderID' }
+                backend_artifacts:
+                  type: object
+                  description: Paths or opaque identifiers for platform-specific shader binaries.
+                  properties:
+                    metal: { type: string, nullable: true }
+                    d3d12: { type: string, nullable: true }
+                    vulkan: { type: string, nullable: true }
+                graphics_state: { $ref: '#/components/schemas/GraphicsPipelineDescriptor' }
+              required: [shader, backend_artifacts, graphics_state]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pipeline: { $ref: '#/components/schemas/PipelineHandle' }
+                required: [pipeline]
+        '400': { $ref: '#/components/responses/Error' }
+  /agent/render/frame/begin:
+    post:
+      tags: [Render]
+      summary: Begin frame
+      description: Aligns with RenderBackend.beginFrame and optionally waits on synchronization primitives.
+      operationId: beginFrame
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                window_id: { type: integer, minimum: 1 }
+                scene_id: { $ref: '#/components/schemas/SceneHandle', nullable: true }
+                wait_fences:
+                  type: array
+                  items: { $ref: '#/components/schemas/FenceToken' }
+                  nullable: true
+              required: [window_id]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  frame_token: { $ref: '#/components/schemas/FrameToken' }
+                required: [frame_token]
+  /agent/render/frame/end:
+    post:
+      tags: [Render]
+      summary: End frame
+      description: Completes the frame, optionally presenting the swapchain and signalling fences.
+      operationId: endFrame
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                frame_token: { $ref: '#/components/schemas/FrameToken' }
+                present: { type: boolean, default: true }
+                signal_fences:
+                  type: array
+                  items: { $ref: '#/components/schemas/FenceSignal' }
+                  nullable: true
+              required: [frame_token]
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /agent/render/frame/waitGpu:
+    post:
+      tags: [Render]
+      summary: Wait for GPU idle
+      description: Mirrors RenderBackend.waitGPU for diagnostic or shutdown flows.
+      operationId: waitGpu
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+
+  /agent/scene/create:
+    post:
+      tags: [Scene]
+      summary: Create scene graph
+      operationId: createScene
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                label: { type: string, nullable: true }
+              additionalProperties: false
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  scene: { $ref: '#/components/schemas/SceneHandle' }
+                required: [scene]
+  /agent/scene/node:
+    post:
+      tags: [Scene]
+      summary: Add scene node
+      operationId: addSceneNode
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                scene: { $ref: '#/components/schemas/SceneHandle' }
+                parent_node: { $ref: '#/components/schemas/SceneNodeHandle', nullable: true }
+                name: { type: string, nullable: true }
+              required: [scene]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  node: { $ref: '#/components/schemas/SceneNodeHandle' }
+                required: [node]
+  /agent/scene/node/transform:
+    post:
+      tags: [Scene]
+      summary: Set node transform
+      operationId: setNodeTransform
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                node: { $ref: '#/components/schemas/SceneNodeHandle' }
+                transform: { $ref: '#/components/schemas/Float4x4' }
+              required: [node, transform]
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /agent/scene/node/attachMesh:
+    post:
+      tags: [Scene]
+      summary: Attach mesh to node
+      operationId: attachMesh
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                node: { $ref: '#/components/schemas/SceneNodeHandle' }
+                mesh: { $ref: '#/components/schemas/MeshHandle' }
+                material: { $ref: '#/components/schemas/MaterialHandle', nullable: true }
+              required: [node, mesh]
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /agent/scene/setCamera:
+    post:
+      tags: [Scene]
+      summary: Set active camera
+      operationId: setSceneCamera
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                scene: { $ref: '#/components/schemas/SceneHandle' }
+                camera: { $ref: '#/components/schemas/CameraDescriptor' }
+              required: [scene, camera]
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /agent/scene/submitDraws:
+    post:
+      tags: [Scene]
+      summary: Submit culled draw calls
+      description: Accepts a batch of draw submissions ordered by the caller, along with synchronization fences.
+      operationId: submitDraws
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                frame_token: { $ref: '#/components/schemas/FrameToken' }
+                draws:
+                  type: array
+                  items: { $ref: '#/components/schemas/DrawSubmission' }
+                wait_fences:
+                  type: array
+                  items: { $ref: '#/components/schemas/FenceToken' }
+                  nullable: true
+                signal_fences:
+                  type: array
+                  items: { $ref: '#/components/schemas/FenceSignal' }
+                  nullable: true
+              required: [frame_token, draws]
+      responses:
+        '202':
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
+  /agent/scene/material/register:
+    post:
+      tags: [Scene]
+      summary: Register material instance
+      operationId: registerMaterial
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                shader: { $ref: '#/components/schemas/ShaderID' }
+                material: { $ref: '#/components/schemas/MaterialDescriptor' }
+              required: [shader, material]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  material: { $ref: '#/components/schemas/MaterialHandle' }
+                required: [material]
+  /agent/scene/light/register:
+    post:
+      tags: [Scene]
+      summary: Register light
+      operationId: registerLight
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                scene: { $ref: '#/components/schemas/SceneHandle' }
+                light: { $ref: '#/components/schemas/LightDescriptor' }
+              required: [scene, light]
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /agent/shader/material/validate:
+    post:
+      tags: [Scene]
+      summary: Validate material layout
+      description: Confirms that a material payload matches shader reflection metadata before submission.
+      operationId: validateMaterial
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                shader: { $ref: '#/components/schemas/ShaderID' }
+                material: { $ref: '#/components/schemas/MaterialDescriptor' }
+              required: [shader, material]
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '400': { $ref: '#/components/responses/Error' }
+
+  /agent/compute/pipeline:
+    post:
+      tags: [Compute]
+      summary: Register compute pipeline
+      operationId: registerComputePipeline
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                shader: { $ref: '#/components/schemas/ShaderID' }
+                backend_artifacts:
+                  type: object
+                  properties:
+                    metal: { type: string, nullable: true }
+                    d3d12: { type: string, nullable: true }
+                    vulkan: { type: string, nullable: true }
+                compute_state: { $ref: '#/components/schemas/ComputePipelineDescriptor' }
+              required: [shader, backend_artifacts, compute_state]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pipeline: { $ref: '#/components/schemas/ComputePipelineHandle' }
+                required: [pipeline]
+  /agent/compute/dispatch:
+    post:
+      tags: [Compute]
+      summary: Dispatch compute workload
+      operationId: dispatchCompute
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                pipeline: { $ref: '#/components/schemas/ComputePipelineHandle' }
+                groups: { $ref: '#/components/schemas/DispatchGroups' }
+                bindings: { $ref: '#/components/schemas/BindingSet' }
+                push_constants: { type: string, format: byte, nullable: true }
+                async: { type: boolean, default: true }
+                wait_fences:
+                  type: array
+                  items: { $ref: '#/components/schemas/FenceToken' }
+                  nullable: true
+                signal_fences:
+                  type: array
+                  items: { $ref: '#/components/schemas/FenceSignal' }
+                  nullable: true
+              required: [pipeline, groups, bindings]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  job: { $ref: '#/components/schemas/JobToken' }
+                required: [job]
+  /agent/compute/readback:
+    post:
+      tags: [Compute]
+      summary: Read back buffer contents
+      description: Initiates a readback from a GPU buffer with optional asynchronous completion.
+      operationId: computeReadback
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                buffer: { $ref: '#/components/schemas/BufferHandle' }
+                offset: { type: integer, minimum: 0, default: 0 }
+                length: { type: integer, minimum: 1 }
+                async: { type: boolean, default: true }
+              required: [buffer, length]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  job: { $ref: '#/components/schemas/JobToken' }
+                required: [job]
+  /agent/compute/jobs/{job_token}:
+    get:
+      tags: [Compute]
+      summary: Query job status
+      operationId: getJobStatus
+      parameters:
+        - in: path
+          name: job_token
+          required: true
+          schema: { $ref: '#/components/schemas/JobToken' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobStatus'
+        '404': { $ref: '#/components/responses/Error' }
+
+  /docs/render:
+    get:
+      tags: [Docs]
+      summary: Documentation index
+      operationId: renderDocs
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  guides:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        title: { type: string }
+                        url: { type: string, format: uri }
+                      required: [title, url]
+                required: [guides]
+
+components:
+  responses:
+    Ok:
+      description: OK
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/OkResponse'
+    Error:
+      description: Error response
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+  schemas:
+    OkResponse:
+      type: object
+      properties:
+        ok: { type: boolean }
+      required: [ok]
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code: { type: string }
+            details: { type: string, nullable: true }
+          required: [code]
+      required: [error]
+    RenderBackendKind:
+      type: string
+      enum: [metal, d3d12, vulkan]
+    BufferUsage:
+      type: string
+      enum: [vertex, index, uniform, storage, staging]
+    TextureFormat:
+      type: string
+      enum: [rgba8Unorm, bgra8Unorm, depth32Float]
+    TextureUsage:
+      type: array
+      items:
+        type: string
+        enum: [sampled, storage, colorAttachment, depthAttachment]
+      uniqueItems: true
+    ShaderID:
+      type: string
+      pattern: '^[a-zA-Z0-9_.\-]+$'
+      description: Unique identifier for a shader authored by the ShaderAgent.
+    BufferHandle:
+      type: object
+      properties:
+        id:
+          type: string
+          pattern: '^0x[0-9A-Fa-f]{1,16}$'
+          description: Hex-encoded 64-bit handle.
+      required: [id]
+    TextureHandle:
+      type: object
+      properties:
+        id:
+          type: string
+          pattern: '^0x[0-9A-Fa-f]{1,16}$'
+      required: [id]
+    PipelineHandle:
+      type: object
+      properties:
+        id:
+          type: string
+          pattern: '^0x[0-9A-Fa-f]{1,16}$'
+      required: [id]
+    ComputePipelineHandle:
+      type: object
+      properties:
+        id:
+          type: string
+          pattern: '^0x[0-9A-Fa-f]{1,16}$'
+      required: [id]
+    MeshHandle:
+      type: object
+      properties:
+        id:
+          type: string
+          pattern: '^0x[0-9A-Fa-f]{1,16}$'
+      required: [id]
+    MaterialHandle:
+      type: object
+      properties:
+        id:
+          type: string
+          pattern: '^0x[0-9A-Fa-f]{1,16}$'
+      required: [id]
+    SceneHandle:
+      type: object
+      properties:
+        id:
+          type: string
+          pattern: '^scene:[0-9A-Fa-f]{8}$'
+      required: [id]
+    SceneNodeHandle:
+      type: object
+      properties:
+        id:
+          type: string
+          pattern: '^node:[0-9A-Fa-f]{8}$'
+      required: [id]
+    FrameToken:
+      type: object
+      properties:
+        id:
+          type: string
+          pattern: '^frame:[0-9A-Fa-f]{8}$'
+      required: [id]
+    JobToken:
+      type: string
+      pattern: '^job:[0-9A-Fa-f]{8}$'
+    FenceToken:
+      type: string
+      pattern: '^fence:[0-9A-Fa-f]{8}$'
+    FenceSignal:
+      type: object
+      properties:
+        fence: { $ref: '#/components/schemas/FenceToken' }
+        value: { type: integer, minimum: 0 }
+      required: [fence, value]
+    DispatchGroups:
+      type: object
+      properties:
+        x: { type: integer, minimum: 1 }
+        y: { type: integer, minimum: 1 }
+        z: { type: integer, minimum: 1 }
+      required: [x, y, z]
+    VertexAttribute:
+      type: object
+      properties:
+        semantic:
+          type: string
+          enum: [POSITION, NORMAL, TANGENT, TEXCOORD0, TEXCOORD1, COLOR0]
+        format: { type: string }
+        offset: { type: integer, minimum: 0 }
+      required: [semantic, format, offset]
+    VertexLayout:
+      type: object
+      properties:
+        stride: { type: integer, minimum: 0 }
+        attributes:
+          type: array
+          items: { $ref: '#/components/schemas/VertexAttribute' }
+      required: [stride, attributes]
+    BindingResource:
+      type: object
+      properties:
+        slot: { type: integer, minimum: 0 }
+        kind:
+          type: string
+          enum: [uniformBuffer, storageBuffer, sampledTexture, storageTexture, sampler]
+        handle:
+          oneOf:
+            - $ref: '#/components/schemas/BufferHandle'
+            - $ref: '#/components/schemas/TextureHandle'
+        array_index: { type: integer, minimum: 0, default: 0 }
+      required: [slot, kind, handle]
+    BindingSet:
+      type: object
+      properties:
+        resources:
+          type: array
+          items: { $ref: '#/components/schemas/BindingResource' }
+        samplers:
+          type: array
+          description: Optional sampler descriptors referenced by binding slots.
+          items:
+            type: object
+            properties:
+              slot: { type: integer, minimum: 0 }
+              descriptor: { type: object }
+            required: [slot, descriptor]
+      required: [resources]
+    GraphicsPipelineDescriptor:
+      type: object
+      properties:
+        vertex_layout: { $ref: '#/components/schemas/VertexLayout' }
+        color_targets:
+          type: array
+          items:
+            type: object
+            properties:
+              format: { $ref: '#/components/schemas/TextureFormat' }
+              blend:
+                type: string
+                enum: [opaque, alphaBlend, add]
+            required: [format]
+        depth_stencil:
+          type: object
+          properties:
+            format: { $ref: '#/components/schemas/TextureFormat' }
+            depth_write: { type: boolean }
+            depth_compare:
+              type: string
+              enum: [never, less, equal, lessEqual, greater, notEqual, greaterEqual, always]
+          nullable: true
+        topology:
+          type: string
+          enum: [triangleList, triangleStrip, lineList]
+        binding_layout: { $ref: '#/components/schemas/BindingLayout' }
+      required: [vertex_layout, color_targets, topology, binding_layout]
+    BindingLayout:
+      type: object
+      properties:
+        slots:
+          type: array
+          items:
+            type: object
+            properties:
+              index: { type: integer, minimum: 0 }
+              kind:
+                type: string
+                enum: [uniformBuffer, storageBuffer, sampledTexture, storageTexture, sampler]
+              stages:
+                type: array
+                items:
+                  type: string
+                  enum: [vertex, fragment, compute]
+            required: [index, kind, stages]
+      required: [slots]
+    TextureDescriptor:
+      type: object
+      properties:
+        width: { type: integer, minimum: 1 }
+        height: { type: integer, minimum: 1 }
+        depth: { type: integer, minimum: 1, default: 1 }
+        mip_levels: { type: integer, minimum: 1, default: 1 }
+        format: { $ref: '#/components/schemas/TextureFormat' }
+        usage: { $ref: '#/components/schemas/TextureUsage' }
+      required: [width, height, format, usage]
+    TextureInitialData:
+      type: object
+      properties:
+        mip_level: { type: integer, minimum: 0 }
+        slice: { type: integer, minimum: 0, default: 0 }
+        bytes_base64: { type: string, format: byte }
+        row_pitch: { type: integer, minimum: 1 }
+      required: [mip_level, bytes_base64, row_pitch]
+    Float4x4:
+      type: array
+      items:
+        type: array
+        minItems: 4
+        maxItems: 4
+        items:
+          type: number
+      minItems: 4
+      maxItems: 4
+    DrawSubmission:
+      type: object
+      properties:
+        mesh: { $ref: '#/components/schemas/MeshHandle' }
+        pipeline: { $ref: '#/components/schemas/PipelineHandle' }
+        bindings: { $ref: '#/components/schemas/BindingSet' }
+        transform: { $ref: '#/components/schemas/Float4x4' }
+        instances: { type: integer, minimum: 1, default: 1 }
+        push_constants: { type: string, format: byte, nullable: true }
+      required: [mesh, pipeline, bindings, transform]
+    MaterialDescriptor:
+      type: object
+      properties:
+        id: { type: string }
+        parameters:
+          type: object
+          additionalProperties:
+            oneOf:
+              - type: number
+              - type: array
+                items: { type: number }
+        textures:
+          type: array
+          items:
+            type: object
+            properties:
+              slot: { type: integer, minimum: 0 }
+              texture: { $ref: '#/components/schemas/TextureHandle' }
+            required: [slot, texture]
+      required: [id]
+    LightDescriptor:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [directional, point]
+        color:
+          type: array
+          minItems: 3
+          maxItems: 3
+          items: { type: number }
+        intensity: { type: number, minimum: 0 }
+        direction:
+          type: array
+          minItems: 3
+          maxItems: 3
+          items: { type: number }
+          nullable: true
+        position:
+          type: array
+          minItems: 3
+          maxItems: 3
+          items: { type: number }
+          nullable: true
+      required: [type, color, intensity]
+    CameraDescriptor:
+      type: object
+      properties:
+        node: { $ref: '#/components/schemas/SceneNodeHandle', nullable: true }
+        projection:
+          type: object
+          properties:
+            type: { type: string, enum: [perspective, orthographic] }
+            fov_y: { type: number, nullable: true }
+            near: { type: number }
+            far: { type: number }
+            width: { type: number, nullable: true }
+            height: { type: number, nullable: true }
+          required: [type, near, far]
+      required: [projection]
+    ComputePipelineDescriptor:
+      type: object
+      properties:
+        entry_point: { type: string }
+        binding_layout: { $ref: '#/components/schemas/BindingLayout' }
+        threadgroup_size:
+          type: object
+          properties:
+            x: { type: integer, minimum: 1 }
+            y: { type: integer, minimum: 1 }
+            z: { type: integer, minimum: 1 }
+          required: [x, y, z]
+      required: [entry_point, binding_layout, threadgroup_size]
+    NativeHandleSet:
+      type: object
+      properties:
+        window_id: { type: integer, minimum: 1 }
+        metal_layer: { type: string, nullable: true, description: Hex-encoded pointer to CAMetalLayer }
+        hwnd: { type: string, nullable: true }
+        vk_surface: { type: string, nullable: true }
+      required: [window_id]
+    BindingLayoutValidation:
+      type: object
+      properties:
+        shader: { $ref: '#/components/schemas/ShaderID' }
+        bindings: { $ref: '#/components/schemas/BindingLayout' }
+      required: [shader, bindings]
+    JobStatus:
+      type: object
+      properties:
+        job: { $ref: '#/components/schemas/JobToken' }
+        state:
+          type: string
+          enum: [pending, running, complete, failed]
+        result:
+          type: object
+          nullable: true
+          properties:
+            bytes_base64: { type: string, format: byte, nullable: true }
+            fences:
+              type: array
+              items: { $ref: '#/components/schemas/FenceSignal' }
+        error: { type: string, nullable: true }
+      required: [job, state]

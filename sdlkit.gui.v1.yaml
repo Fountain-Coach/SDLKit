@@ -1,12 +1,16 @@
 openapi: 3.1.0
 info:
   title: SDLKit GUI Agent API
-  version: 1.1.0
+  version: 1.2.0
   description: |
     Source-of-truth OpenAPI for the SDLKit GUI Agent.
     Agent protocol version: sdlkit.gui.v1
+    The 3D render/compute stack lives in the companion specification `sdlkit.render.v1`.
 servers:
   - url: http://localhost:8080
+tags:
+  - name: Legacy2D
+    description: Immediate-mode 2D drawing operations retained for backward compatibility. Prefer `sdlkit.render.v1`.
 paths:
   /health:
     get:
@@ -271,6 +275,8 @@ paths:
                 $ref: '#/components/schemas/WindowInfo'
   /agent/gui/clear:
     post:
+      tags: [Legacy2D]
+      deprecated: true
       summary: Clear with color
       description: Clears the current render target to the given color.
       operationId: clear
@@ -284,6 +290,8 @@ paths:
         '200': { $ref: '#/components/responses/Ok' }
   /agent/gui/present:
     post:
+      tags: [Legacy2D]
+      deprecated: true
       summary: Present
       description: Presents any pending draw commands to the display according to the present policy.
       operationId: present
@@ -297,6 +305,8 @@ paths:
         '200': { $ref: '#/components/responses/Ok' }
   /agent/gui/render/getOutputSize:
     post:
+      tags: [Legacy2D]
+      deprecated: true
       summary: Query render output size
       description: Returns the size of the renderer’s current output in pixels.
       operationId: renderGetOutputSize
@@ -315,6 +325,8 @@ paths:
                 properties: { width: {type: integer}, height: {type: integer} }
   /agent/gui/render/getScale:
     post:
+      tags: [Legacy2D]
+      deprecated: true
       summary: Query render scale
       description: Returns the current render scale factors (sx, sy).
       operationId: renderGetScale
@@ -333,6 +345,8 @@ paths:
                 properties: { sx: {type: number}, sy: {type: number} }
   /agent/gui/render/setScale:
     post:
+      tags: [Legacy2D]
+      deprecated: true
       summary: Set render scale
       description: Sets the render scale factors (sx, sy) for subsequent draw operations.
       operationId: renderSetScale
@@ -351,6 +365,8 @@ paths:
         '200': { $ref: '#/components/responses/Ok' }
   /agent/gui/render/getDrawColor:
     post:
+      tags: [Legacy2D]
+      deprecated: true
       summary: Query draw color
       description: Returns the current draw color used by primitive operations.
       operationId: renderGetDrawColor
@@ -369,6 +385,8 @@ paths:
                 properties: { color: { type: integer, description: ARGB 0xAARRGGBB } }
   /agent/gui/render/setDrawColor:
     post:
+      tags: [Legacy2D]
+      deprecated: true
       summary: Set draw color
       description: Sets the renderer’s draw color for subsequent primitive operations.
       operationId: renderSetDrawColor
@@ -381,6 +399,8 @@ paths:
         '200': { $ref: '#/components/responses/Ok' }
   /agent/gui/render/getViewport:
     post:
+      tags: [Legacy2D]
+      deprecated: true
       summary: Query viewport
       description: Returns the renderer’s current viewport rectangle.
       operationId: renderGetViewport
@@ -399,6 +419,8 @@ paths:
                 properties: { x: {type: integer}, y: {type: integer}, width: {type: integer}, height: {type: integer} }
   /agent/gui/render/setViewport:
     post:
+      tags: [Legacy2D]
+      deprecated: true
       summary: Set viewport
       description: Sets the renderer’s viewport rectangle.
       operationId: renderSetViewport
@@ -419,6 +441,8 @@ paths:
         '200': { $ref: '#/components/responses/Ok' }
   /agent/gui/render/getClipRect:
     post:
+      tags: [Legacy2D]
+      deprecated: true
       summary: Query clip rect
       description: Returns the current clip rectangle; drawing outside it is clipped.
       operationId: renderGetClipRect
@@ -437,6 +461,8 @@ paths:
                 properties: { x: {type: integer}, y: {type: integer}, width: {type: integer}, height: {type: integer} }
   /agent/gui/render/setClipRect:
     post:
+      tags: [Legacy2D]
+      deprecated: true
       summary: Set clip rect
       description: Sets the renderer’s clip rectangle.
       operationId: renderSetClipRect
@@ -457,6 +483,8 @@ paths:
         '200': { $ref: '#/components/responses/Ok' }
   /agent/gui/render/disableClipRect:
     post:
+      tags: [Legacy2D]
+      deprecated: true
       summary: Disable clip rect
       description: Disables clipping; subsequent draws are not clipped.
       operationId: renderDisableClipRect
@@ -469,6 +497,8 @@ paths:
         '200': { $ref: '#/components/responses/Ok' }
   /agent/gui/drawRectangle:
     post:
+      tags: [Legacy2D]
+      deprecated: true
       summary: Draw filled rectangle
       description: Draws a filled rectangle with the given color at the specified position.
       operationId: drawRectangle
@@ -482,6 +512,8 @@ paths:
         '200': { $ref: '#/components/responses/Ok' }
   /agent/gui/drawLine:
     post:
+      tags: [Legacy2D]
+      deprecated: true
       summary: Draw line
       description: Draws a straight line between two points using the current draw color.
       operationId: drawLine
@@ -495,6 +527,8 @@ paths:
         '200': { $ref: '#/components/responses/Ok' }
   /agent/gui/drawCircleFilled:
     post:
+      tags: [Legacy2D]
+      deprecated: true
       summary: Draw filled circle
       description: Draws a filled circle using software rasterization.
       operationId: drawCircleFilled
@@ -508,6 +542,8 @@ paths:
         '200': { $ref: '#/components/responses/Ok' }
   /agent/gui/drawText:
     post:
+      tags: [Legacy2D]
+      deprecated: true
       summary: Draw text (SDL_ttf)
       description: Renders UTF‑8 text to the renderer using a TrueType font when SDL_ttf is available.
       operationId: drawText
@@ -673,6 +709,8 @@ paths:
                     properties: { x: {type: integer}, y: {type: integer}, width: {type: integer}, height: {type: integer} }
   /agent/gui/texture/load:
     post:
+      tags: [Legacy2D]
+      deprecated: true
       summary: Load texture
       description: Loads a texture from disk (BMP or common formats when SDL_image is present) and assigns a logical id.
       operationId: textureLoad
@@ -691,6 +729,8 @@ paths:
         '200': { $ref: '#/components/responses/Ok' }
   /agent/gui/texture/draw:
     post:
+      tags: [Legacy2D]
+      deprecated: true
       summary: Draw texture
       description: Draws a previously loaded texture at a position; optional scaling via width/height.
       operationId: textureDraw
@@ -712,6 +752,8 @@ paths:
         '200': { $ref: '#/components/responses/Ok' }
   /agent/gui/texture/free:
     post:
+      tags: [Legacy2D]
+      deprecated: true
       summary: Free texture
       description: Releases a previously loaded texture by id.
       operationId: textureFree
@@ -906,6 +948,8 @@ components:
       required: [type]
   /agent/gui/texture/drawTiled:
     post:
+      tags: [Legacy2D]
+      deprecated: true
       summary: Draw tiled texture
       description: Fills a region by repeating a texture in a tile grid.
       operationId: textureDrawTiled
@@ -929,6 +973,8 @@ components:
         '200': { $ref: '#/components/responses/Ok' }
   /agent/gui/texture/drawRotated:
     post:
+      tags: [Legacy2D]
+      deprecated: true
       summary: Draw rotated texture
       description: Draws a texture rotated by an angle (degrees) around an optional center.
       operationId: textureDrawRotated
@@ -953,6 +999,8 @@ components:
         '200': { $ref: '#/components/responses/Ok' }
   /agent/gui/drawPoints:
     post:
+      tags: [Legacy2D]
+      deprecated: true
       summary: Draw multiple points
       description: Draws an array of points using the current draw color or provided color.
       operationId: drawPoints
@@ -973,6 +1021,8 @@ components:
         '200': { $ref: '#/components/responses/Ok' }
   /agent/gui/drawLines:
     post:
+      tags: [Legacy2D]
+      deprecated: true
       summary: Draw multiple line segments
       description: Draws an array of independent line segments with the given color.
       operationId: drawLines
@@ -993,6 +1043,8 @@ components:
         '200': { $ref: '#/components/responses/Ok' }
   /agent/gui/drawRects:
     post:
+      tags: [Legacy2D]
+      deprecated: true
       summary: Draw multiple rectangles
       description: Draws an array of rectangles either filled or outlined.
       operationId: drawRects
