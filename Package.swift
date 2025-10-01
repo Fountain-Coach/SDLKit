@@ -207,6 +207,14 @@ let package = Package(
         )
 
         targets.append(
+            .testTarget(
+                name: "SDLKitGraphicsTests",
+                dependencies: ["SDLKit"],
+                path: "Tests/SDLKitGraphicsTests"
+            )
+        )
+
+        targets.append(
             .executableTarget(
                 name: "SDLKitDemo",
                 dependencies: {

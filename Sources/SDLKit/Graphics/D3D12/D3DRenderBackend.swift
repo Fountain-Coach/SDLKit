@@ -55,12 +55,6 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
         var state: D3D12_RESOURCE_STATES
     }
 
-    private enum UniformConstants {
-        static let floatCount = 24
-        static let defaultLightDirection: [Float] = [0.3, -0.5, 0.8, 0.0]
-        static let defaultBaseColor: [Float] = [1.0, 1.0, 1.0, 1.0]
-    }
-
     private struct FrameResources {
         var renderTarget: UnsafeMutablePointer<ID3D12Resource>?
         var commandAllocator: UnsafeMutablePointer<ID3D12CommandAllocator>?
@@ -1121,7 +1115,7 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
         return handle
     }
 
-    public func draw(mesh: MeshHandle, pipeline: PipelineHandle, bindings: BindingSet, pushConstants: UnsafeRawPointer?, transform: float4x4) throws {
+    public func draw(mesh: MeshHandle, pipeline: PipelineHandle, bindings: BindingSet, transform: float4x4) throws {
         guard frameActive else {
             throw AgentError.internalError("draw called outside beginFrame/endFrame")
         }
@@ -1131,6 +1125,8 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
         guard let pipelineResource = pipelines[pipeline] else {
             throw AgentError.internalError("Unknown pipeline handle for draw")
         }
+
+        _ = transform
 
         guard let meshResource = meshes[mesh] else {
             throw AgentError.internalError("Unknown mesh handle for draw")
@@ -1171,30 +1167,42 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
                 commandList.pointee.lpVtbl.pointee.SetGraphicsRootDescriptorTable(commandList, UINT(parameterIndex), texture.gpuHandle)
             }
         }
-        // Upload uniforms (matrix + lightDir) to a small CBV and bind to root slot 0
-        if transformBuffer == nil {
-            try? createTransformBuffer()
-        }
-        if let tbuf = transformBuffer {
+        let expectedPushConstantSize = pipelineResource.module.pushConstantSize
+        if expectedPushConstantSize > 0 {
+            guard let payload = bindings.materialConstants else {
+                let message = "Shader \(pipelineResource.descriptor.shader.rawValue) expects \(expectedPushConstantSize) bytes of material constants but none were provided."
+                SDLLogger.error("SDLKit.Graphics.D3D12", message)
+                throw AgentError.invalidArgument(message)
+            }
+            let byteCount = payload.byteCount
+            guard byteCount == expectedPushConstantSize else {
+                let message = "Shader \(pipelineResource.descriptor.shader.rawValue) expects \(expectedPushConstantSize) bytes of material constants but received \(byteCount)."
+                SDLLogger.error("SDLKit.Graphics.D3D12", message)
+                throw AgentError.invalidArgument(message)
+            }
+            if transformBuffer == nil {
+                try? createTransformBuffer()
+            }
+            guard let tbuf = transformBuffer else {
+                throw AgentError.internalError("Transform buffer unavailable for push constant upload")
+            }
             var mapped: UnsafeMutableRawPointer?
             _ = tbuf.pointee.lpVtbl.pointee.Map(tbuf, 0, nil, &mapped)
             if let mapped {
-                // Prepare 80 bytes: matrix (64) + lightDir (16)
-                var data: [Float] = transform.toFloatArray()
-                if let pc = pushConstants {
-                    let ptr = pc.bindMemory(to: Float.self, capacity: UniformConstants.floatCount)
-                    let buf = UnsafeBufferPointer(start: ptr, count: UniformConstants.floatCount)
-                    data = Array(buf)
-                } else {
-                    data.append(contentsOf: UniformConstants.defaultLightDirection)
-                    data.append(contentsOf: UniformConstants.defaultBaseColor)
+                payload.withUnsafeBytes { bytes in
+                    if let base = bytes.baseAddress {
+                        memcpy(mapped, base, min(bytes.count, expectedPushConstantSize))
+                    }
                 }
-                let byteCount = UniformConstants.floatCount * MemoryLayout<Float>.size
-                data.withUnsafeBytes { bytes in memcpy(mapped, bytes.baseAddress, min(byteCount, bytes.count)) }
             }
             tbuf.pointee.lpVtbl.pointee.Unmap(tbuf, 0, nil)
             let gpuAddress = tbuf.pointee.lpVtbl.pointee.GetGPUVirtualAddress(tbuf)
             commandList.pointee.lpVtbl.pointee.SetGraphicsRootConstantBufferView(commandList, 0, gpuAddress)
+        } else if let payload = bindings.materialConstants, payload.byteCount > 0 {
+            SDLLogger.warn(
+                "SDLKit.Graphics.D3D12",
+                "Material constants of size \(payload.byteCount) bytes provided for shader \(pipelineResource.descriptor.shader.rawValue) which does not declare push constants. Data will be ignored."
+            )
         }
         commandList.pointee.lpVtbl.pointee.IASetPrimitiveTopology(commandList, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST)
 
@@ -1353,7 +1361,7 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
         return handle
     }
 
-    public func dispatchCompute(_ pipeline: ComputePipelineHandle, groupsX: Int, groupsY: Int, groupsZ: Int, bindings: BindingSet, pushConstants: UnsafeRawPointer?) throws {
+    public func dispatchCompute(_ pipeline: ComputePipelineHandle, groupsX: Int, groupsY: Int, groupsZ: Int, bindings: BindingSet) throws {
         guard frameActive else {
             throw AgentError.internalError("dispatchCompute called outside of beginFrame/endFrame")
         }
@@ -1389,8 +1397,29 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
             storageBindings.append(handle)
         }
 
-        if resource.module.pushConstantSize > 0, pushConstants != nil {
-            SDLLogger.warn("SDLKit.Graphics.D3D12", "Compute push constants are not yet supported; ignoring data for shader \(resource.module.id.rawValue)")
+        let expectedSize = resource.module.pushConstantSize
+        if expectedSize > 0 {
+            guard let payload = bindings.materialConstants else {
+                let message = "Compute shader \(resource.module.id.rawValue) expects \(expectedSize) bytes of push constants but none were provided."
+                SDLLogger.error("SDLKit.Graphics.D3D12", message)
+                throw AgentError.invalidArgument(message)
+            }
+            let byteCount = payload.byteCount
+            guard byteCount == expectedSize else {
+                let message = "Compute shader \(resource.module.id.rawValue) expects \(expectedSize) bytes of push constants but received \(byteCount)."
+                SDLLogger.error("SDLKit.Graphics.D3D12", message)
+                throw AgentError.invalidArgument(message)
+            }
+            SDLLogger.error(
+                "SDLKit.Graphics.D3D12",
+                "Compute push constants of size \(byteCount) bytes requested for shader \(resource.module.id.rawValue), but D3D12 backend does not yet implement them."
+            )
+            throw AgentError.invalidArgument("Compute push constants are not supported on the D3D12 backend yet")
+        } else if let payload = bindings.materialConstants, payload.byteCount > 0 {
+            SDLLogger.warn(
+                "SDLKit.Graphics.D3D12",
+                "Material constants of size \(payload.byteCount) bytes provided for compute shader \(resource.module.id.rawValue) which does not declare push constants. Data will be ignored."
+            )
         }
 
         let dispatchX = max(1, groupsX)

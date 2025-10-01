@@ -53,15 +53,13 @@ public protocol RenderBackend {
     func draw(mesh: MeshHandle,
               pipeline: PipelineHandle,
               bindings: BindingSet,
-              pushConstants: UnsafeRawPointer?,
               transform: float4x4) throws
 
     // Pipelines (compute)
     func makeComputePipeline(_ desc: ComputePipelineDescriptor) throws -> ComputePipelineHandle
     func dispatchCompute(_ pipeline: ComputePipelineHandle,
                          groupsX: Int, groupsY: Int, groupsZ: Int,
-                         bindings: BindingSet,
-                         pushConstants: UnsafeRawPointer?) throws
+                         bindings: BindingSet) throws
 }
 ```
 

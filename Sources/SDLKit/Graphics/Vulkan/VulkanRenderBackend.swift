@@ -138,11 +138,6 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
     private var textures: [TextureHandle: TextureResource] = [:]
     private var fallbackWhiteTexture: TextureHandle? = nil
 
-    private enum UniformDefaults {
-        static let floatCount = 24
-        static let defaultLightDirection: [Float] = [0.3, -0.5, 0.8, 0.0]
-        static let defaultBaseColor: [Float] = [1.0, 1.0, 1.0, 1.0]
-    }
     #endif
 
     public required init(window: SDLWindow) throws {
@@ -1101,7 +1096,7 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
         #endif
     }
 
-    public func draw(mesh: MeshHandle, pipeline: PipelineHandle, bindings: BindingSet, pushConstants: UnsafeRawPointer?, transform: float4x4) throws {
+    public func draw(mesh: MeshHandle, pipeline: PipelineHandle, bindings: BindingSet, transform: float4x4) throws {
         #if canImport(CVulkan)
         guard frameActive, let cmd = commandBuffers[currentFrame] else {
             throw AgentError.internalError("draw called outside of beginFrame/endFrame")
@@ -1112,6 +1107,7 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
         guard let pipe = resource.pipeline else { throw AgentError.internalError("Pipeline incomplete") }
         guard let dev = device else { throw AgentError.internalError("Vulkan device not ready") }
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe)
+        _ = transform
         // Bind descriptor sets if required
         if !resource.descriptorBindings.isEmpty {
             guard currentFrame < resource.descriptorPools.count, let pool = resource.descriptorPools[currentFrame] else {
@@ -1223,19 +1219,30 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
             }
         }
 
-        // Push constants (transform + light + base color)
-        if let layout = resource.pipelineLayout, resource.module.pushConstantSize > 0 {
+        let expectedPushConstantSize = resource.module.pushConstantSize
+        if expectedPushConstantSize > 0 {
+            guard let payload = bindings.materialConstants else {
+                let message = "Shader \(resource.module.id.rawValue) expects \(expectedPushConstantSize) bytes of material constants but none were provided."
+                SDLLogger.error("SDLKit.Graphics.Vulkan", message)
+                throw AgentError.invalidArgument(message)
+            }
+            guard payload.byteCount == expectedPushConstantSize else {
+                let message = "Shader \(resource.module.id.rawValue) expects \(expectedPushConstantSize) bytes of material constants but received \(payload.byteCount)."
+                SDLLogger.error("SDLKit.Graphics.Vulkan", message)
+                throw AgentError.invalidArgument(message)
+            }
+        } else if let payload = bindings.materialConstants, payload.byteCount > 0 {
+            SDLLogger.warn(
+                "SDLKit.Graphics.Vulkan",
+                "Material constants of size \(payload.byteCount) bytes provided for shader \(resource.module.id.rawValue) which does not declare push constants. Data will be ignored."
+            )
+        }
+
+        if let layout = resource.pipelineLayout, expectedPushConstantSize > 0, let payload = bindings.materialConstants {
             let stageFlags = UInt32(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
-            if let pc = pushConstants {
-                _ = vkCmdPushConstants(cmd, layout, stageFlags, 0, UInt32(resource.module.pushConstantSize), pc)
-            } else {
-                var data = transform.toFloatArray()
-                data.append(contentsOf: UniformDefaults.defaultLightDirection)
-                data.append(contentsOf: UniformDefaults.defaultBaseColor)
-                data.withUnsafeBytes { bytes in
-                    let count = min(resource.module.pushConstantSize, bytes.count)
-                    _ = vkCmdPushConstants(cmd, layout, stageFlags, 0, UInt32(count), bytes.baseAddress)
-                }
+            payload.withUnsafeBytes { bytes in
+                guard let base = bytes.baseAddress else { return }
+                _ = vkCmdPushConstants(cmd, layout, stageFlags, 0, UInt32(bytes.count), base)
             }
         }
         guard let meshResource = meshes[mesh] else {
@@ -1267,7 +1274,7 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
             vkCmdDraw(cmd, vertexCount, 1, 0, 0)
         }
         #else
-        try core.draw(mesh: mesh, pipeline: pipeline, bindings: bindings, pushConstants: pushConstants, transform: transform)
+        try core.draw(mesh: mesh, pipeline: pipeline, bindings: bindings, transform: transform)
         #endif
     }
     public func makeComputePipeline(_ desc: ComputePipelineDescriptor) throws -> ComputePipelineHandle {
@@ -1424,7 +1431,7 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
         #endif
     }
 
-    public func dispatchCompute(_ pipeline: ComputePipelineHandle, groupsX: Int, groupsY: Int, groupsZ: Int, bindings: BindingSet, pushConstants: UnsafeRawPointer?) throws {
+    public func dispatchCompute(_ pipeline: ComputePipelineHandle, groupsX: Int, groupsY: Int, groupsZ: Int, bindings: BindingSet) throws {
         #if canImport(CVulkan)
         guard !frameActive else {
             throw AgentError.invalidArgument("dispatchCompute cannot be called while a render frame is active on Vulkan")
@@ -1538,6 +1545,26 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
             )
         }
 
+        let expectedComputePushConstantSize = resource.module.pushConstantSize
+        let computePayload = bindings.materialConstants
+        if expectedComputePushConstantSize > 0 {
+            guard let payload = computePayload else {
+                let message = "Compute shader \(resource.module.id.rawValue) expects \(expectedComputePushConstantSize) bytes of push constants but none were provided."
+                SDLLogger.error("SDLKit.Graphics.Vulkan", message)
+                throw AgentError.invalidArgument(message)
+            }
+            guard payload.byteCount == expectedComputePushConstantSize else {
+                let message = "Compute shader \(resource.module.id.rawValue) expects \(expectedComputePushConstantSize) bytes of push constants but received \(payload.byteCount)."
+                SDLLogger.error("SDLKit.Graphics.Vulkan", message)
+                throw AgentError.invalidArgument(message)
+            }
+        } else if let payload = computePayload, payload.byteCount > 0 {
+            SDLLogger.warn(
+                "SDLKit.Graphics.Vulkan",
+                "Material constants of size \(payload.byteCount) bytes provided for compute shader \(resource.module.id.rawValue) which does not declare push constants. Data will be ignored."
+            )
+        }
+
         if let pipelineHandle = resource.pipeline {
             vkCmdBindPipeline(commandBufferHandle, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineHandle)
         }
@@ -1547,8 +1574,11 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
                 vkCmdBindDescriptorSets(commandBufferHandle, VK_PIPELINE_BIND_POINT_COMPUTE, layout, 0, UInt32(buf.count), buf.baseAddress, 0, nil)
             }
         }
-        if let layout = resource.pipelineLayout, let pushConstants, resource.module.pushConstantSize > 0 {
-            _ = vkCmdPushConstants(commandBufferHandle, layout, UInt32(VK_SHADER_STAGE_COMPUTE_BIT), 0, UInt32(resource.module.pushConstantSize), pushConstants)
+        if let layout = resource.pipelineLayout, expectedComputePushConstantSize > 0, let payload = computePayload {
+            payload.withUnsafeBytes { bytes in
+                guard let base = bytes.baseAddress else { return }
+                _ = vkCmdPushConstants(commandBufferHandle, layout, UInt32(VK_SHADER_STAGE_COMPUTE_BIT), 0, UInt32(bytes.count), base)
+            }
         }
 
         vkCmdDispatch(commandBufferHandle, UInt32(max(1, groupsX)), UInt32(max(1, groupsY)), UInt32(max(1, groupsZ)))
@@ -1602,7 +1632,7 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
         }
 
         #else
-        try core.dispatchCompute(pipeline, groupsX: groupsX, groupsY: groupsY, groupsZ: groupsZ, bindings: bindings, pushConstants: pushConstants)
+        try core.dispatchCompute(pipeline, groupsX: groupsX, groupsY: groupsY, groupsZ: groupsZ, bindings: bindings)
         #endif
     }
 

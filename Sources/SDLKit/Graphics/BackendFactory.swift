@@ -190,7 +190,6 @@ final class StubRenderBackendCore {
     func draw(mesh: MeshHandle,
               pipeline: PipelineHandle,
               bindings: BindingSet,
-              pushConstants: UnsafeRawPointer?,
               transform: float4x4) throws {
         guard frameActive else {
             throw AgentError.internalError("draw called outside beginFrame/endFrame")
@@ -206,7 +205,6 @@ final class StubRenderBackendCore {
             "draw mesh=\(mesh.rawValue) pipeline=\(pipeline.rawValue) vertexBuffer=\(meshResource.vertexBuffer.rawValue) vertexCount=\(meshResource.vertexCount) indexBuffer=\(meshResource.indexBuffer?.rawValue ?? 0) indexCount=\(meshResource.indexCount)"
         )
         _ = bindings
-        _ = pushConstants
         _ = transform
     }
 
@@ -219,14 +217,12 @@ final class StubRenderBackendCore {
 
     func dispatchCompute(_ pipeline: ComputePipelineHandle,
                          groupsX: Int, groupsY: Int, groupsZ: Int,
-                         bindings: BindingSet,
-                         pushConstants: UnsafeRawPointer?) throws {
+                         bindings: BindingSet) throws {
         guard computePipelines[pipeline] != nil else {
             throw AgentError.internalError("Unknown compute pipeline")
         }
         SDLLogger.debug("SDLKit.Graphics", "dispatchCompute pipeline=\(pipeline.rawValue) groups=(\(groupsX),\(groupsY),\(groupsZ))")
         _ = bindings
-        _ = pushConstants
     }
 }
 
@@ -250,9 +246,9 @@ public class StubRenderBackend: RenderBackend {
     public func createTexture(descriptor: TextureDescriptor, initialData: TextureInitialData?) throws -> TextureHandle { core.createTexture(descriptor: descriptor, initialData: initialData) }
     public func destroy(_ handle: ResourceHandle) { core.destroy(handle) }
     public func makePipeline(_ desc: GraphicsPipelineDescriptor) throws -> PipelineHandle { core.makePipeline(desc) }
-    public func draw(mesh: MeshHandle, pipeline: PipelineHandle, bindings: BindingSet, pushConstants: UnsafeRawPointer?, transform: float4x4) throws { try core.draw(mesh: mesh, pipeline: pipeline, bindings: bindings, pushConstants: pushConstants, transform: transform) }
+    public func draw(mesh: MeshHandle, pipeline: PipelineHandle, bindings: BindingSet, transform: float4x4) throws { try core.draw(mesh: mesh, pipeline: pipeline, bindings: bindings, transform: transform) }
     public func makeComputePipeline(_ desc: ComputePipelineDescriptor) throws -> ComputePipelineHandle { core.makeComputePipeline(desc) }
-    public func dispatchCompute(_ pipeline: ComputePipelineHandle, groupsX: Int, groupsY: Int, groupsZ: Int, bindings: BindingSet, pushConstants: UnsafeRawPointer?) throws { try core.dispatchCompute(pipeline, groupsX: groupsX, groupsY: groupsY, groupsZ: groupsZ, bindings: bindings, pushConstants: pushConstants) }
+    public func dispatchCompute(_ pipeline: ComputePipelineHandle, groupsX: Int, groupsY: Int, groupsZ: Int, bindings: BindingSet) throws { try core.dispatchCompute(pipeline, groupsX: groupsX, groupsY: groupsY, groupsZ: groupsZ, bindings: bindings) }
 
     public func registerMesh(vertexBuffer: BufferHandle,
                              vertexCount: Int,

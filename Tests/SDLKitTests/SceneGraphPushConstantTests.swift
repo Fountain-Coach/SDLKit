@@ -101,7 +101,6 @@ private final class RecordingRenderBackend: RenderBackend {
     func draw(mesh: MeshHandle,
               pipeline: PipelineHandle,
               bindings: BindingSet,
-              pushConstants: UnsafeRawPointer?,
               transform: float4x4) throws {
         guard frameActive else { throw AgentError.internalError("draw outside beginFrame/endFrame") }
         guard meshes[mesh] != nil else { throw AgentError.internalError("Unknown mesh handle") }
@@ -109,9 +108,11 @@ private final class RecordingRenderBackend: RenderBackend {
         _ = transform
         drawCallCount += 1
         lastBindings = bindings
-        if let pushConstants {
-            let ptr = pushConstants.bindMemory(to: Float.self, capacity: 24)
-            lastPushConstants = Array(UnsafeBufferPointer(start: ptr, count: 24))
+        if let payload = bindings.materialConstants {
+            payload.withUnsafeBytes { bytes in
+                let floats = bytes.bindMemory(to: Float.self)
+                lastPushConstants = Array(floats)
+            }
         } else {
             lastPushConstants = nil
         }
@@ -126,9 +127,8 @@ private final class RecordingRenderBackend: RenderBackend {
                          groupsX: Int,
                          groupsY: Int,
                          groupsZ: Int,
-                         bindings: BindingSet,
-                         pushConstants: UnsafeRawPointer?) throws {
-        _ = (pipeline, groupsX, groupsY, groupsZ, bindings, pushConstants)
+                         bindings: BindingSet) throws {
+        _ = (pipeline, groupsX, groupsY, groupsZ, bindings)
         throw AgentError.notImplemented
     }
 }

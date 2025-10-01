@@ -114,12 +114,12 @@ public protocol RenderBackend {
 
     func makePipeline(_ desc: GraphicsPipelineDescriptor) throws -> PipelineHandle
     func draw(mesh: MeshHandle, pipeline: PipelineHandle,
-              bindings: BindingSet, pushConstants: UnsafeRawPointer?,
+              bindings: BindingSet,
               transform: float4x4) throws
 
     func makeComputePipeline(_ desc: ComputePipelineDescriptor) throws -> ComputePipelineHandle
     func dispatchCompute(_ p: ComputePipelineHandle, groupsX: Int, groupsY: Int, groupsZ: Int,
-                         bindings: BindingSet, pushConstants: UnsafeRawPointer?) throws
+                         bindings: BindingSet) throws
 }
 ```
 
@@ -137,7 +137,7 @@ public protocol ShaderLibrary {
 public protocol ComputeScheduler {
     func makeComputePipeline(_ d: ComputePipelineDescriptor) throws -> ComputePipelineHandle
     func dispatch(_ groups: (Int, Int, Int), pipeline: ComputePipelineHandle,
-                  bindings: BindingSet, pushConstants: UnsafeRawPointer?) throws
+                  bindings: BindingSet) throws
     func readback(buffer: BufferHandle, into dst: UnsafeMutableRawPointer, length: Int) throws
 }
 ```

@@ -144,8 +144,32 @@ public struct BindingSlot: Sendable {
 }
 
 public struct BindingSet {
+    public struct MaterialConstants: Sendable {
+        public private(set) var data: Data
+
+        public init(data: Data) { self.data = data }
+
+        public init(bytes: UnsafeRawPointer, length: Int) {
+            if length > 0 {
+                self.data = Data(bytes: bytes, count: length)
+            } else {
+                self.data = Data()
+            }
+        }
+
+        public var byteCount: Int { data.count }
+
+        public func withUnsafeBytes<R>(_ body: (UnsafeRawBufferPointer) throws -> R) rethrows -> R {
+            try data.withUnsafeBytes(body)
+        }
+    }
+
     public var slots: [Int: Any]
-    public init(slots: [Int: Any] = [:]) { self.slots = slots }
+    public var materialConstants: MaterialConstants?
+    public init(slots: [Int: Any] = [:], materialConstants: MaterialConstants? = nil) {
+        self.slots = slots
+        self.materialConstants = materialConstants
+    }
     public mutating func setValue(_ value: Any, for index: Int) { slots[index] = value }
     public func value<T>(for index: Int, as type: T.Type) -> T? { slots[index] as? T }
 }
@@ -240,12 +264,10 @@ public protocol RenderBackend {
     func draw(mesh: MeshHandle,
               pipeline: PipelineHandle,
               bindings: BindingSet,
-              pushConstants: UnsafeRawPointer?,
               transform: float4x4) throws
 
     func makeComputePipeline(_ desc: ComputePipelineDescriptor) throws -> ComputePipelineHandle
     func dispatchCompute(_ pipeline: ComputePipelineHandle,
                          groupsX: Int, groupsY: Int, groupsZ: Int,
-                         bindings: BindingSet,
-                         pushConstants: UnsafeRawPointer?) throws
+                         bindings: BindingSet) throws
 }

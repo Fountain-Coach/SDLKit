@@ -37,11 +37,6 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
         let indexFormat: IndexFormat
     }
 
-    private enum UniformConstants {
-        static let defaultLightDirection: [Float] = [0.3, -0.5, 0.8, 0.0]
-        static let defaultBaseColor: [Float] = [1.0, 1.0, 1.0, 1.0]
-    }
-
     private let window: SDLWindow
     private let surface: RenderSurface
     private let layer: CAMetalLayer
@@ -392,7 +387,6 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
     public func draw(mesh: MeshHandle,
                      pipeline: PipelineHandle,
                      bindings: BindingSet,
-                     pushConstants: UnsafeRawPointer?,
                      transform: float4x4) throws {
         guard let pipelineResource = pipelines[pipeline] else {
             throw AgentError.internalError("Unknown pipeline handle")
@@ -412,17 +406,27 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
         encoder.setRenderPipelineState(pipelineResource.state)
         let expectedUniformLength = pipelineResource.pushConstantSize
         if expectedUniformLength > 0 {
-            if let pushConstants {
-                encoder.setVertexBytes(pushConstants, length: expectedUniformLength, index: 1)
-                encoder.setFragmentBytes(pushConstants, length: expectedUniformLength, index: 1)
-            } else {
-                let defaults = makeDefaultUniformData(transform: transform, expectedSize: expectedUniformLength)
-                defaults.withUnsafeBytes { bytes in
-                    guard let base = bytes.baseAddress else { return }
-                    encoder.setVertexBytes(base, length: bytes.count, index: 1)
-                    encoder.setFragmentBytes(base, length: bytes.count, index: 1)
-                }
+            guard let payload = bindings.materialConstants else {
+                let message = "Shader \(pipelineResource.descriptor.shader.rawValue) expects \(expectedUniformLength) bytes of material constants but none were provided."
+                SDLLogger.error("SDLKit.Graphics.Metal", message)
+                throw AgentError.invalidArgument(message)
             }
+            let byteCount = payload.byteCount
+            guard byteCount == expectedUniformLength else {
+                let message = "Shader \(pipelineResource.descriptor.shader.rawValue) expects \(expectedUniformLength) bytes of material constants but received \(byteCount)."
+                SDLLogger.error("SDLKit.Graphics.Metal", message)
+                throw AgentError.invalidArgument(message)
+            }
+            payload.withUnsafeBytes { bytes in
+                guard let base = bytes.baseAddress else { return }
+                encoder.setVertexBytes(base, length: bytes.count, index: 1)
+                encoder.setFragmentBytes(base, length: bytes.count, index: 1)
+            }
+        } else if let payload = bindings.materialConstants, payload.byteCount > 0 {
+            SDLLogger.warn(
+                "SDLKit.Graphics.Metal",
+                "Material constants (\(payload.byteCount) bytes) provided for shader \(pipelineResource.descriptor.shader.rawValue) which does not declare push constants. Data will be ignored."
+            )
         }
         encoder.setVertexBuffer(vertexResource.buffer, offset: 0, index: 0)
 
@@ -471,8 +475,7 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
                                  groupsX: Int,
                                  groupsY: Int,
                                  groupsZ: Int,
-                                 bindings: BindingSet,
-                                 pushConstants: UnsafeRawPointer?) throws {
+                                 bindings: BindingSet) throws {
         guard let resource = computePipelines[pipeline] else {
             throw AgentError.internalError("Unknown compute pipeline handle")
         }
@@ -520,6 +523,32 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
                 // Samplers are not yet modeled as resources in SDLKit; ignore silently for now.
                 break
             }
+        }
+
+        let expectedPushConstantSize = resource.module.pushConstantSize
+        if expectedPushConstantSize > 0 {
+            guard let payload = bindings.materialConstants else {
+                let message = "Compute shader \(resource.module.id.rawValue) expects \(expectedPushConstantSize) bytes of push constants but none were provided."
+                SDLLogger.error("SDLKit.Graphics.Metal", message)
+                encoder.endEncoding()
+                throw AgentError.invalidArgument(message)
+            }
+            let byteCount = payload.byteCount
+            guard byteCount == expectedPushConstantSize else {
+                let message = "Compute shader \(resource.module.id.rawValue) expects \(expectedPushConstantSize) bytes of push constants but received \(byteCount)."
+                SDLLogger.error("SDLKit.Graphics.Metal", message)
+                encoder.endEncoding()
+                throw AgentError.invalidArgument(message)
+            }
+            payload.withUnsafeBytes { bytes in
+                guard let base = bytes.baseAddress else { return }
+                encoder.setBytes(base, length: bytes.count, index: 0)
+            }
+        } else if let payload = bindings.materialConstants, payload.byteCount > 0 {
+            SDLLogger.warn(
+                "SDLKit.Graphics.Metal",
+                "Compute shader \(resource.module.id.rawValue) ignores provided material constants of size \(payload.byteCount) bytes."
+            )
         }
 
         let threadgroupSize = resource.module.threadgroupSize
@@ -659,46 +688,6 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
         colorAttachment.storeAction = .store
         colorAttachment.clearColor = MTLClearColor(red: 0.05, green: 0.05, blue: 0.08, alpha: 1.0)
         return descriptor
-    }
-
-    private func makeDefaultUniformData(transform: float4x4, expectedSize: Int) -> Data {
-        guard expectedSize > 0 else { return Data() }
-        var data = Data(count: expectedSize)
-        data.withUnsafeMutableBytes { bytes in
-            guard let dest = bytes.baseAddress else { return }
-            var offset = 0
-            var matrix = transform
-            withUnsafeBytes(of: &matrix) { matrixBytes in
-                if let src = matrixBytes.baseAddress {
-                    let count = min(matrixBytes.count, max(0, expectedSize - offset))
-                    if count > 0 {
-                        memcpy(dest.advanced(by: offset), src, count)
-                        offset += count
-                    }
-                }
-            }
-            copyFloats(UniformConstants.defaultLightDirection, into: dest, offset: &offset, maxSize: expectedSize)
-            copyFloats(UniformConstants.defaultBaseColor, into: dest, offset: &offset, maxSize: expectedSize)
-            if offset < expectedSize {
-                memset(dest.advanced(by: offset), 0, expectedSize - offset)
-            }
-        }
-        return data
-    }
-
-    private func copyFloats(_ floats: [Float],
-                            into destination: UnsafeMutableRawPointer,
-                            offset: inout Int,
-                            maxSize: Int) {
-        guard offset < maxSize, !floats.isEmpty else { return }
-        floats.withUnsafeBufferPointer { buffer in
-            guard let src = buffer.baseAddress else { return }
-            let byteCount = min(buffer.count * MemoryLayout<Float>.size, max(0, maxSize - offset))
-            if byteCount > 0 {
-                memcpy(destination.advanced(by: offset), src, byteCount)
-                offset += byteCount
-            }
-        }
     }
 
     private func ensureDepthTexture(width: Int, height: Int) {

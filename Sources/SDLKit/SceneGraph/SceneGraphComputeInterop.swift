@@ -84,8 +84,7 @@ public enum SceneGraphComputeInterop {
             groupsX: resources.vertexCount,
             groupsY: 1,
             groupsZ: 1,
-            bindings: bindings,
-            pushConstants: nil
+            bindings: bindings
         )
         try applyCPUFallbackIfNeeded(backend: backend, resources: resources)
     }
