@@ -106,8 +106,21 @@ final class GoldenImageTests: XCTestCase {
             try window.open(); defer { window.close() }; try window.show()
             let backend = try RenderBackendFactory.makeBackend(window: window, override: "d3d12")
             guard let cap = backend as? GoldenImageCapturable else { throw XCTSkip("No capture") }
+            let pixels: [UInt8] = [
+                255,   0,   0, 255,
+                  0, 255,   0, 255,
+                  0,   0, 255, 255,
+                255, 255, 255, 255
+            ]
+            let textureDescriptor = TextureDescriptor(width: 2, height: 2, mipLevels: 1, format: .rgba8Unorm, usage: .shaderRead)
+            let textureData = TextureInitialData(mipLevelData: [Data(pixels)])
+            let textureHandle = try backend.createTexture(descriptor: textureDescriptor, initialData: textureData)
             let mesh = try MeshFactory.makeLitCube(backend: backend, size: 1.1)
-            let material = Material(shader: ShaderID("basic_lit"), params: .init(lightDirection: (0.3,-0.5,0.8), baseColor: (1,1,1,1)))
+            let tintedBaseColor: (Float, Float, Float, Float) = (0.6, 0.45, 0.9, 1.0)
+            let material = Material(
+                shader: ShaderID("basic_lit"),
+                params: .init(lightDirection: (0.3,-0.5,0.8), baseColor: tintedBaseColor, texture: textureHandle)
+            )
             let node = SceneNode(name: "Cube", transform: .identity, mesh: mesh, material: material)
             let root = SceneNode(name: "Root"); root.addChild(node)
             let scene = Scene(root: root, camera: .identity(aspect: 1.0), lightDirection: (0.3,-0.5,0.8))

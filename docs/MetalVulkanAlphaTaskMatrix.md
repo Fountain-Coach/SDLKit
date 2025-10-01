@@ -1,6 +1,6 @@
-# Metal & Vulkan Alpha Stabilization Task Matrix
+# Metal, Vulkan & D3D12 Alpha Stabilization Task Matrix
 
-This matrix tracks the concrete work required to graduate SDLKit's Metal (macOS) and Vulkan (Linux) backends from their current alpha preview state to a **stable alpha** milestone. Tasks are actionable engineering items that can be scheduled immediately.
+This matrix tracks the concrete work required to graduate SDLKit's Metal (macOS), Vulkan (Linux), and Direct3D 12 (Windows) backends from their current alpha preview state to a **stable alpha** milestone. Tasks are actionable engineering items that can be scheduled immediately.
 
 ## Legend
 
@@ -33,18 +33,28 @@ This matrix tracks the concrete work required to graduate SDLKit's Metal (macOS)
 
 ---
 
+## D3D12 (Windows)
+
+| Status | Area | Task | Notes |
+| --- | --- | --- | --- |
+| ☑ | Resource Binding | Wire `BindingSet` resources through draw path | • Root signatures expose descriptor tables for fragment textures with per-slot static samplers.<br>• Shader-visible SRV heaps allocate descriptors lazily and reuse handles across draws.<br>• Missing bindings fall back to a cached 1×1 white texture. |
+| ☑ | Texture Upload | Implement texture creation & staging uploads | • `createTexture` now supports shader-read formats via upload buffers and resource state transitions.<br>• Fallback textures are created lazily and cleaned up during backend teardown.<br>• Descriptor heap allocation guards against exhaustion. |
+| ☑ | Testing | Extend D3D12 golden image coverage | • Golden image test uploads a 2×2 test texture and validates the captured hash under `SDLKIT_GOLDEN` runs.<br>• Ensures descriptor heaps and sampler defaults behave consistently on Windows hardware. |
+
+---
+
 ## Cross-Cutting
 
 | Status | Area | Task | Notes |
 | --- | --- | --- | --- |
-| ☑ | Documentation | Publish backend readiness checklist | • Document Metal/Vulkan feature parity expectations and manual testing steps.<br>• Outline known limitations blocking beta.<br>• See [Metal & Vulkan Alpha Readiness Checklist](BackendReadinessChecklist.md) for the published guidance. |
+| ☑ | Documentation | Publish backend readiness checklist | • Document Metal/Vulkan/D3D12 feature parity expectations and manual testing steps.<br>• Outline known limitations blocking beta.<br>• See [Metal, Vulkan & D3D12 Alpha Readiness Checklist](BackendReadinessChecklist.md) for the published guidance. |
 | ☐ | Testing | Expand golden-image matrix | • Ensure macOS + Linux jobs render both unlit & lit textured scenes.<br>• Record baseline images for new tests. |
 
 ---
 
 ## Next Steps
 
-1. Prioritize Metal-side BindingSet integration and push-constant alignment to match the Vulkan implementation.
+1. Prioritize Metal-side BindingSet integration and push-constant alignment to match the Vulkan and D3D12 implementations.
 2. Expand the golden-image matrix (macOS + Linux) to cover textured scenes and record updated baselines.
 3. Wire the validation capture hook into CI so Vulkan layer warnings fail fast during automation.
 

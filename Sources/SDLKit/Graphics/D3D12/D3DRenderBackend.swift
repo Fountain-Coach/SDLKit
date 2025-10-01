@@ -26,6 +26,7 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
         let rootSignature: UnsafeMutablePointer<ID3D12RootSignature>
         let pipelineState: UnsafeMutablePointer<ID3D12PipelineState>
         let vertexStride: Int
+        let fragmentTextureParameterIndices: [Int: Int]
     }
 
     private struct MeshResource {
@@ -44,6 +45,14 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
         let pipelineState: UnsafeMutablePointer<ID3D12PipelineState>
         let uniformParameterIndices: [Int: Int]
         let storageParameterIndices: [Int: Int]
+    }
+
+    private struct TextureResource {
+        let resource: UnsafeMutablePointer<ID3D12Resource>
+        let descriptorIndex: UINT
+        let cpuHandle: D3D12_CPU_DESCRIPTOR_HANDLE
+        let gpuHandle: D3D12_GPU_DESCRIPTOR_HANDLE
+        var state: D3D12_RESOURCE_STATES
     }
 
     private enum UniformConstants {
@@ -73,6 +82,7 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
     private var swapChain: UnsafeMutablePointer<IDXGISwapChain3>?
     private var rtvHeap: UnsafeMutablePointer<ID3D12DescriptorHeap>?
     private var dsvHeap: UnsafeMutablePointer<ID3D12DescriptorHeap>?
+    private var srvHeap: UnsafeMutablePointer<ID3D12DescriptorHeap>?
     private var depthStencil: UnsafeMutablePointer<ID3D12Resource>?
     private var commandList: UnsafeMutablePointer<ID3D12GraphicsCommandList>?
     private var fence: UnsafeMutablePointer<ID3D12Fence>?
@@ -93,6 +103,7 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
     private var pipelines: [PipelineHandle: PipelineResource] = [:]
     private var computePipelines: [ComputePipelineHandle: ComputePipelineResource] = [:]
     private var meshes: [MeshHandle: MeshResource] = [:]
+    private var textures: [TextureHandle: TextureResource] = [:]
 
     private var builtinPipeline: PipelineHandle?
     private var builtinVertexBuffer: BufferHandle?
@@ -100,6 +111,11 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
     private var frameActive = false
     private var debugLayerEnabled = false
     private let shaderLibrary = ShaderLibrary.shared
+
+    private var srvDescriptorSize: UINT = 0
+    private var nextSrvDescriptorIndex: UINT = 0
+    private var fallbackTextureHandle: TextureHandle?
+    private let maxSrvDescriptors: UINT = 256
 
     // Capture state
     private var captureRequested: Bool = false
@@ -408,9 +424,334 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
     }
 
     public func createTexture(descriptor: TextureDescriptor, initialData: TextureInitialData?) throws -> TextureHandle {
-        _ = descriptor
-        _ = initialData
-        throw AgentError.notImplemented
+        guard descriptor.width > 0, descriptor.height > 0 else {
+            throw AgentError.invalidArgument("Texture dimensions must be positive")
+        }
+        guard descriptor.mipLevels >= 1 else {
+            throw AgentError.invalidArgument("Texture mipLevels must be >= 1")
+        }
+        guard descriptor.usage == .shaderRead else {
+            throw AgentError.notImplemented("D3D12 backend currently supports shader-read textures only")
+        }
+        guard let device else {
+            throw AgentError.internalError("D3D12 device unavailable")
+        }
+        try ensureSrvHeap()
+
+        let format = try convertTextureFormat(descriptor.format)
+
+        var textureDesc = D3D12_RESOURCE_DESC()
+        textureDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D
+        textureDesc.Alignment = 0
+        textureDesc.Width = UINT64(descriptor.width)
+        textureDesc.Height = UINT(descriptor.height)
+        textureDesc.DepthOrArraySize = 1
+        textureDesc.MipLevels = UINT16(descriptor.mipLevels)
+        textureDesc.Format = format
+        textureDesc.SampleDesc = DXGI_SAMPLE_DESC(Count: 1, Quality: 0)
+        textureDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN
+        textureDesc.Flags = D3D12_RESOURCE_FLAG_NONE
+
+        var heapProps = D3D12_HEAP_PROPERTIES(
+            Type: D3D12_HEAP_TYPE_DEFAULT,
+            CPUPageProperty: D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
+            MemoryPoolPreference: D3D12_MEMORY_POOL_UNKNOWN,
+            CreationNodeMask: 0,
+            VisibleNodeMask: 0
+        )
+
+        var resource: UnsafeMutablePointer<ID3D12Resource>?
+        let initialState: D3D12_RESOURCE_STATES = initialData?.mipLevelData.isEmpty == false ? D3D12_RESOURCE_STATE_COPY_DEST : D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE
+        try withUnsafeMutablePointer(to: &resource) { pointer in
+            try pointer.withMemoryRebound(to: Optional<UnsafeMutableRawPointer>.self, capacity: 1) { raw in
+                try checkHRESULT(
+                    device.pointee.lpVtbl.pointee.CreateCommittedResource(
+                        device,
+                        &heapProps,
+                        D3D12_HEAP_FLAG_NONE,
+                        &textureDesc,
+                        initialState,
+                        nil,
+                        &IID_ID3D12Resource,
+                        raw
+                    ),
+                    "ID3D12Device.CreateCommittedResource(texture)"
+                )
+            }
+        }
+        guard let resource else {
+            throw AgentError.internalError("Failed to allocate D3D12 texture resource")
+        }
+
+        if initialState == D3D12_RESOURCE_STATE_COPY_DEST, let initialData, !initialData.mipLevelData.isEmpty {
+            try uploadInitialTextureData(resource: resource, descriptor: descriptor, initialData: initialData)
+        }
+
+        let descriptorIndex = try allocateSrvDescriptorIndex()
+        guard let srvHeap else {
+            throw AgentError.internalError("D3D12 SRV descriptor heap unavailable")
+        }
+        var cpuHandle = srvHeap.pointee.lpVtbl.pointee.GetCPUDescriptorHandleForHeapStart(srvHeap)
+        var gpuHandle = srvHeap.pointee.lpVtbl.pointee.GetGPUDescriptorHandleForHeapStart(srvHeap)
+        cpuHandle.ptr += UINT64(descriptorIndex) * UINT64(srvDescriptorSize)
+        gpuHandle.ptr += UINT64(descriptorIndex) * UINT64(srvDescriptorSize)
+
+        var srvDesc = D3D12_SHADER_RESOURCE_VIEW_DESC()
+        srvDesc.Format = format
+        srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D
+        srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING
+        srvDesc.Anonymous.Texture2D = D3D12_TEX2D_SRV(
+            MostDetailedMip: 0,
+            MipLevels: UINT(descriptor.mipLevels),
+            PlaneSlice: 0,
+            ResourceMinLODClamp: 0
+        )
+        device.pointee.lpVtbl.pointee.CreateShaderResourceView(device, resource, &srvDesc, cpuHandle)
+
+        let handle = TextureHandle()
+        let textureResource = TextureResource(
+            resource: resource,
+            descriptorIndex: descriptorIndex,
+            cpuHandle: cpuHandle,
+            gpuHandle: gpuHandle,
+            state: D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE
+        )
+        textures[handle] = textureResource
+        return handle
+    }
+
+    private func ensureSrvHeap() throws {
+        if srvHeap != nil { return }
+        guard let device else {
+            throw AgentError.internalError("D3D12 device unavailable for SRV heap creation")
+        }
+        var desc = D3D12_DESCRIPTOR_HEAP_DESC(
+            Type: D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
+            NumDescriptors: maxSrvDescriptors,
+            Flags: D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE,
+            NodeMask: 0
+        )
+        try withDescriptorHeap(desc: &desc) { heap in
+            srvHeap = heap
+        }
+        srvDescriptorSize = device.pointee.lpVtbl.pointee.GetDescriptorHandleIncrementSize(device, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)
+        nextSrvDescriptorIndex = 0
+    }
+
+    private func allocateSrvDescriptorIndex() throws -> UINT {
+        try ensureSrvHeap()
+        let index = nextSrvDescriptorIndex
+        if index >= maxSrvDescriptors {
+            throw AgentError.internalError("Exceeded D3D12 SRV descriptor heap capacity")
+        }
+        nextSrvDescriptorIndex += 1
+        return index
+    }
+
+    private func uploadInitialTextureData(resource: UnsafeMutablePointer<ID3D12Resource>,
+                                          descriptor: TextureDescriptor,
+                                          initialData: TextureInitialData) throws {
+        guard let device else {
+            throw AgentError.internalError("D3D12 device unavailable for texture upload")
+        }
+
+        var desc = resource.pointee.lpVtbl.pointee.GetDesc(resource)
+        let mipCount = Int(desc.MipLevels)
+        var layouts = Array(repeating: D3D12_PLACED_SUBRESOURCE_FOOTPRINT(), count: mipCount)
+        var numRows = Array(repeating: UINT(0), count: mipCount)
+        var rowSizes = Array(repeating: UINT64(0), count: mipCount)
+        var totalBytes: UINT64 = 0
+        device.pointee.lpVtbl.pointee.GetCopyableFootprints(device, &desc, 0, UINT(mipCount), &layouts, &numRows, &rowSizes, &totalBytes)
+
+        var uploadResource: UnsafeMutablePointer<ID3D12Resource>?
+        var uploadHeapProps = D3D12_HEAP_PROPERTIES(
+            Type: D3D12_HEAP_TYPE_UPLOAD,
+            CPUPageProperty: D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
+            MemoryPoolPreference: D3D12_MEMORY_POOL_UNKNOWN,
+            CreationNodeMask: 0,
+            VisibleNodeMask: 0
+        )
+        var bufferDesc = D3D12_RESOURCE_DESC.Buffer(totalBytes)
+        try withUnsafeMutablePointer(to: &uploadResource) { pointer in
+            try pointer.withMemoryRebound(to: Optional<UnsafeMutableRawPointer>.self, capacity: 1) { raw in
+                try checkHRESULT(
+                    device.pointee.lpVtbl.pointee.CreateCommittedResource(
+                        device,
+                        &uploadHeapProps,
+                        D3D12_HEAP_FLAG_NONE,
+                        &bufferDesc,
+                        D3D12_RESOURCE_STATE_GENERIC_READ,
+                        nil,
+                        &IID_ID3D12Resource,
+                        raw
+                    ),
+                    "ID3D12Device.CreateCommittedResource(upload)"
+                )
+            }
+        }
+        guard let uploadResource else {
+            throw AgentError.internalError("Failed to allocate upload buffer for texture data")
+        }
+        defer { var temp: UnsafeMutablePointer<ID3D12Resource>? = uploadResource; releaseCOM(&temp) }
+
+        var mapped: UnsafeMutableRawPointer?
+        try checkHRESULT(uploadResource.pointee.lpVtbl.pointee.Map(uploadResource, 0, nil, &mapped), "ID3D12Resource.Map(upload)")
+        defer { uploadResource.pointee.lpVtbl.pointee.Unmap(uploadResource, 0, nil) }
+
+        let bytesPerPixel = try bytesPerPixel(for: descriptor.format)
+        if let mapped {
+            for level in 0..<mipCount {
+                let mipWidth = max(1, descriptor.width >> level)
+                let mipHeight = max(1, descriptor.height >> level)
+                let expectedRowBytes = mipWidth * bytesPerPixel
+                let rowPitch = Int(layouts[level].Footprint.RowPitch)
+                let rows = max(1, Int(numRows[level]))
+                let destBase = mapped.advanced(by: Int(layouts[level].Offset))
+                let levelData = level < initialData.mipLevelData.count ? initialData.mipLevelData[level] : Data(count: expectedRowBytes * rows)
+                if levelData.count < expectedRowBytes * rows {
+                    throw AgentError.invalidArgument("Initial texture data for mip \(level) is too small")
+                }
+                levelData.withUnsafeBytes { buffer in
+                    guard let srcBase = buffer.baseAddress else { return }
+                    for row in 0..<rows {
+                        let dstRow = destBase.advanced(by: rowPitch * row)
+                        memset(dstRow, 0, rowPitch)
+                        memcpy(dstRow, srcBase.advanced(by: expectedRowBytes * row), expectedRowBytes)
+                    }
+                }
+            }
+        }
+
+        try performImmediateCommand { commandList in
+            for level in 0..<mipCount {
+                var dst = D3D12_TEXTURE_COPY_LOCATION(
+                    pResource: resource,
+                    Type: D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX,
+                    Anonymous: D3D12_TEXTURE_COPY_LOCATION._Anonymous(subresourceIndex: UINT(level))
+                )
+                var src = D3D12_TEXTURE_COPY_LOCATION(
+                    pResource: uploadResource,
+                    Type: D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT,
+                    Anonymous: D3D12_TEXTURE_COPY_LOCATION._Anonymous(placedFootprint: layouts[level])
+                )
+                var box: D3D12_BOX? = nil
+                commandList.pointee.lpVtbl.pointee.CopyTextureRegion(commandList, &dst, 0, 0, 0, &src, &box)
+            }
+
+            var barrier = D3D12_RESOURCE_BARRIER()
+            barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION
+            barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE
+            barrier.Transition = D3D12_RESOURCE_TRANSITION_BARRIER(
+                pResource: resource,
+                Subresource: D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+                StateBefore: D3D12_RESOURCE_STATE_COPY_DEST,
+                StateAfter: D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE
+            )
+            commandList.pointee.lpVtbl.pointee.ResourceBarrier(commandList, 1, &barrier)
+        }
+    }
+
+    private func bytesPerPixel(for format: TextureFormat) throws -> Int {
+        switch format {
+        case .rgba8Unorm, .bgra8Unorm:
+            return 4
+        case .depth32Float:
+            return 4
+        }
+    }
+
+    private func convertTextureFormat(_ format: TextureFormat) throws -> DXGI_FORMAT {
+        switch format {
+        case .rgba8Unorm:
+            return DXGI_FORMAT_R8G8B8A8_UNORM
+        case .bgra8Unorm:
+            return DXGI_FORMAT_B8G8R8A8_UNORM
+        case .depth32Float:
+            return DXGI_FORMAT_R32_FLOAT
+        }
+    }
+
+    private func performImmediateCommand(_ encode: (UnsafeMutablePointer<ID3D12GraphicsCommandList>) throws -> Void) throws {
+        guard let device, let commandQueue else {
+            throw AgentError.internalError("D3D12 device or command queue unavailable for immediate work")
+        }
+        var allocator: UnsafeMutablePointer<ID3D12CommandAllocator>?
+        try withUnsafeMutablePointer(to: &allocator) { pointer in
+            try pointer.withMemoryRebound(to: Optional<UnsafeMutableRawPointer>.self, capacity: 1) { raw in
+                try checkHRESULT(
+                    device.pointee.lpVtbl.pointee.CreateCommandAllocator(
+                        device,
+                        D3D12_COMMAND_LIST_TYPE_DIRECT,
+                        &IID_ID3D12CommandAllocator,
+                        raw
+                    ),
+                    "ID3D12Device.CreateCommandAllocator(immediate)"
+                )
+            }
+        }
+        guard let allocator else {
+            throw AgentError.internalError("Failed to create command allocator for immediate work")
+        }
+        defer { var temp: UnsafeMutablePointer<ID3D12CommandAllocator>? = allocator; releaseCOM(&temp) }
+
+        var list: UnsafeMutablePointer<ID3D12GraphicsCommandList>?
+        try withUnsafeMutablePointer(to: &list) { pointer in
+            try pointer.withMemoryRebound(to: Optional<UnsafeMutableRawPointer>.self, capacity: 1) { raw in
+                try checkHRESULT(
+                    device.pointee.lpVtbl.pointee.CreateCommandList(
+                        device,
+                        0,
+                        D3D12_COMMAND_LIST_TYPE_DIRECT,
+                        allocator,
+                        nil,
+                        &IID_ID3D12GraphicsCommandList,
+                        raw
+                    ),
+                    "ID3D12Device.CreateCommandList(immediate)"
+                )
+            }
+        }
+        guard let list else {
+            throw AgentError.internalError("Failed to create command list for immediate work")
+        }
+        do {
+            try encode(list)
+        } catch {
+            list.pointee.lpVtbl.pointee.Close(list)
+            var temp: UnsafeMutablePointer<ID3D12GraphicsCommandList>? = list
+            releaseCOM(&temp)
+            throw error
+        }
+        try checkHRESULT(list.pointee.lpVtbl.pointee.Close(list), "ID3D12GraphicsCommandList.Close(immediate)")
+
+        var cmdListPointer = UnsafeMutableRawPointer(list).assumingMemoryBound(to: ID3D12CommandList.self)
+        commandQueue.pointee.lpVtbl.pointee.ExecuteCommandLists(commandQueue, 1, &cmdListPointer)
+
+        guard let fence else {
+            var temp: UnsafeMutablePointer<ID3D12GraphicsCommandList>? = list
+            releaseCOM(&temp)
+            throw AgentError.internalError("D3D12 fence unavailable for immediate work")
+        }
+        let currentFrame = Int(frameIndex)
+        let fenceValue = fenceValues[currentFrame] + 1
+        fenceValues[currentFrame] = fenceValue
+        try checkHRESULT(commandQueue.pointee.lpVtbl.pointee.Signal(commandQueue, fence, fenceValue), "ID3D12CommandQueue.Signal(immediate)")
+        try waitForFence(value: fenceValue)
+
+        var tempList: UnsafeMutablePointer<ID3D12GraphicsCommandList>? = list
+        releaseCOM(&tempList)
+    }
+
+    private func ensureFallbackTextureHandle() throws -> TextureHandle {
+        if let handle = fallbackTextureHandle, textures[handle] != nil {
+            return handle
+        }
+        let pixel: [UInt8] = [255, 255, 255, 255]
+        let data = Data(pixel)
+        let descriptor = TextureDescriptor(width: 1, height: 1, mipLevels: 1, format: .rgba8Unorm, usage: .shaderRead)
+        let handle = try createTexture(descriptor: descriptor, initialData: TextureInitialData(mipLevelData: [data]))
+        fallbackTextureHandle = handle
+        return handle
     }
 
     private func transitionBuffer(_ handle: BufferHandle, to newState: D3D12_RESOURCE_STATES) {
@@ -482,8 +823,13 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
             if var resource = buffers.removeValue(forKey: buffer)?.resource {
                 releaseCOM(&resource)
             }
-        case .texture:
-            break
+        case .texture(let textureHandle):
+            if var texture = textures.removeValue(forKey: textureHandle)?.resource {
+                releaseCOM(&texture)
+            }
+            if fallbackTextureHandle == textureHandle {
+                fallbackTextureHandle = nil
+            }
         case .pipeline(let pipelineHandle):
             if let resource = pipelines.removeValue(forKey: pipelineHandle) {
                 var state: UnsafeMutablePointer<ID3D12PipelineState>? = resource.pipelineState
@@ -524,26 +870,91 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
             pixelShader = nil
         }
 
-        // Root signature with one CBV at b0 for vertex shader (transform)
+        // Root signature: CBV at b0 for transform plus descriptor tables for sampled textures.
+        var rootParameters: [D3D12_ROOT_PARAMETER] = []
+        var descriptorRanges: [[D3D12_DESCRIPTOR_RANGE]] = []
+        var descriptorParameterIndices: [Int] = []
+        var textureParameterIndices: [Int: Int] = [:]
+        var staticSamplers: [D3D12_STATIC_SAMPLER_DESC] = []
+
         var cbv = D3D12_ROOT_PARAMETER()
         cbv.ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV
         cbv.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL
         cbv.Anonymous.Descriptor = D3D12_ROOT_DESCRIPTOR(ShaderRegister: 0, RegisterSpace: 0)
-        var rootDesc = D3D12_ROOT_SIGNATURE_DESC()
-        var params = [cbv]
-        params.withUnsafeMutableBufferPointer { buf in
-            rootDesc.NumParameters = UINT(buf.count)
-            rootDesc.pParameters = buf.baseAddress
+        rootParameters.append(cbv)
+
+        let fragmentTextureBindings = (module.bindings[.fragment] ?? []).filter { $0.kind == .sampledTexture }
+        if !fragmentTextureBindings.isEmpty {
+            for binding in fragmentTextureBindings.sorted(by: { $0.index < $1.index }) {
+                var range = D3D12_DESCRIPTOR_RANGE(
+                    RangeType: D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
+                    NumDescriptors: 1,
+                    BaseShaderRegister: UINT(binding.index),
+                    RegisterSpace: 0,
+                    OffsetInDescriptorsFromTableStart: 0
+                )
+                var parameter = D3D12_ROOT_PARAMETER()
+                parameter.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE
+                parameter.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL
+                descriptorRanges.append([range])
+                rootParameters.append(parameter)
+                descriptorParameterIndices.append(rootParameters.count - 1)
+                textureParameterIndices[binding.index] = rootParameters.count - 1
+
+                var sampler = D3D12_STATIC_SAMPLER_DESC(
+                    Filter: D3D12_FILTER_MIN_MAG_MIP_LINEAR,
+                    AddressU: D3D12_TEXTURE_ADDRESS_MODE_WRAP,
+                    AddressV: D3D12_TEXTURE_ADDRESS_MODE_WRAP,
+                    AddressW: D3D12_TEXTURE_ADDRESS_MODE_WRAP,
+                    MipLODBias: 0,
+                    MaxAnisotropy: 0,
+                    ComparisonFunc: D3D12_COMPARISON_FUNC_NEVER,
+                    BorderColor: D3D12_STATIC_BORDER_COLOR_OPAQUE_WHITE,
+                    MinLOD: 0,
+                    MaxLOD: Float.greatestFiniteMagnitude,
+                    ShaderRegister: UINT(binding.index),
+                    RegisterSpace: 0,
+                    ShaderVisibility: D3D12_SHADER_VISIBILITY_PIXEL
+                )
+                staticSamplers.append(sampler)
+            }
         }
-        rootDesc.NumStaticSamplers = 0
-        rootDesc.pStaticSamplers = nil
+
+        var rootDesc = D3D12_ROOT_SIGNATURE_DESC()
         rootDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT
 
         var serializedRoot: UnsafeMutablePointer<ID3DBlob>?
         var errorBlob: UnsafeMutablePointer<ID3DBlob>?
-        let serializeResult = withUnsafePointer(to: &rootDesc) { descPointer -> HRESULT in
-            descPointer.withMemoryRebound(to: D3D12_ROOT_SIGNATURE_DESC.self, capacity: 1) { rebound in
-                D3D12SerializeRootSignature(rebound, D3D_ROOT_SIGNATURE_VERSION_1, &serializedRoot, &errorBlob)
+        var serializeResult: HRESULT = S_OK
+        rootParameters.withUnsafeMutableBufferPointer { paramBuffer in
+            rootDesc.NumParameters = UINT(paramBuffer.count)
+            rootDesc.pParameters = paramBuffer.baseAddress
+            for (tableIndex, parameterIndex) in descriptorParameterIndices.enumerated() {
+                descriptorRanges[tableIndex].withUnsafeMutableBufferPointer { rangeBuffer in
+                    paramBuffer[parameterIndex].Anonymous.DescriptorTable = D3D12_ROOT_DESCRIPTOR_TABLE(
+                        NumDescriptorRanges: UINT(rangeBuffer.count),
+                        pDescriptorRanges: rangeBuffer.baseAddress
+                    )
+                }
+            }
+            if staticSamplers.isEmpty {
+                rootDesc.NumStaticSamplers = 0
+                rootDesc.pStaticSamplers = nil
+                serializeResult = withUnsafePointer(to: &rootDesc) { descPointer -> HRESULT in
+                    descPointer.withMemoryRebound(to: D3D12_ROOT_SIGNATURE_DESC.self, capacity: 1) { rebound in
+                        D3D12SerializeRootSignature(rebound, D3D_ROOT_SIGNATURE_VERSION_1, &serializedRoot, &errorBlob)
+                    }
+                }
+            } else {
+                staticSamplers.withUnsafeMutableBufferPointer { samplerBuffer in
+                    rootDesc.NumStaticSamplers = UINT(samplerBuffer.count)
+                    rootDesc.pStaticSamplers = samplerBuffer.baseAddress
+                    serializeResult = withUnsafePointer(to: &rootDesc) { descPointer -> HRESULT in
+                        descPointer.withMemoryRebound(to: D3D12_ROOT_SIGNATURE_DESC.self, capacity: 1) { rebound in
+                            D3D12SerializeRootSignature(rebound, D3D_ROOT_SIGNATURE_VERSION_1, &serializedRoot, &errorBlob)
+                        }
+                    }
+                }
             }
         }
         if serializeResult < 0 {
@@ -701,7 +1112,8 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
             module: module,
             rootSignature: rootSignature,
             pipelineState: pipelineState,
-            vertexStride: module.vertexLayout.stride
+            vertexStride: module.vertexLayout.stride,
+            fragmentTextureParameterIndices: textureParameterIndices
         )
         if builtinPipeline == nil {
             builtinPipeline = handle
@@ -735,6 +1147,30 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
 
         commandList.pointee.lpVtbl.pointee.SetPipelineState(commandList, pipelineResource.pipelineState)
         commandList.pointee.lpVtbl.pointee.SetGraphicsRootSignature(commandList, pipelineResource.rootSignature)
+        if !pipelineResource.fragmentTextureParameterIndices.isEmpty {
+            if srvHeap == nil {
+                try ensureSrvHeap()
+            }
+            guard let srvHeap else {
+                throw AgentError.internalError("Descriptor heap unavailable for texture bindings")
+            }
+            var heaps: [UnsafeMutablePointer<ID3D12DescriptorHeap>?] = [srvHeap]
+            heaps.withUnsafeMutableBufferPointer { buffer in
+                commandList.pointee.lpVtbl.pointee.SetDescriptorHeaps(commandList, UINT(buffer.count), buffer.baseAddress)
+            }
+            for (slot, parameterIndex) in pipelineResource.fragmentTextureParameterIndices.sorted(by: { $0.key < $1.key }) {
+                let textureHandle: TextureHandle
+                if let provided: TextureHandle = bindings.value(for: slot, as: TextureHandle.self) {
+                    textureHandle = provided
+                } else {
+                    textureHandle = try ensureFallbackTextureHandle()
+                }
+                guard let texture = textures[textureHandle] else {
+                    throw AgentError.invalidArgument("Missing texture binding for slot \(slot)")
+                }
+                commandList.pointee.lpVtbl.pointee.SetGraphicsRootDescriptorTable(commandList, UINT(parameterIndex), texture.gpuHandle)
+            }
+        }
         // Upload uniforms (matrix + lightDir) to a small CBV and bind to root slot 0
         if transformBuffer == nil {
             try? createTransformBuffer()
@@ -1506,6 +1942,16 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
             releaseCOM(&resource)
         }
         buffers.removeAll()
+        for (_, texture) in textures {
+            var resource: UnsafeMutablePointer<ID3D12Resource>? = texture.resource
+            releaseCOM(&resource)
+        }
+        textures.removeAll()
+        fallbackTextureHandle = nil
+        if var rb = readbackBuffer {
+            releaseCOM(&rb)
+        }
+        readbackBuffer = nil
         for index in 0..<Constants.frameCount {
             releaseCOM(&frames[index].renderTarget)
             releaseCOM(&frames[index].commandAllocator)
@@ -1516,6 +1962,7 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
         releaseCOM(&swapChain)
         releaseCOM(&rtvHeap)
         releaseCOM(&dsvHeap)
+        releaseCOM(&srvHeap)
         releaseCOM(&fence)
         releaseCOM(&device)
         releaseCOM(&factory)
