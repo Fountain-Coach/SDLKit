@@ -63,7 +63,7 @@ The repository includes the DXC/SPIRV-Cross-driven shader build pipeline and Swi
 
 ## Configuration
 
-The agent reads several environment variables at runtime. Key options include:
+The agent reads several environment variables at runtime. Key options include (see [Glossary & Tags](docs/tags.md) for full definitions):
 
 - `SDLKIT_MAX_WINDOWS` — soft cap on concurrently open windows. Defaults to `8`. Set to any positive integer to raise or lower the cap. Non-positive or non-numeric values fall back to the default.
 
@@ -106,14 +106,14 @@ Enable automated reference-image validation for the scene graph by turning on th
 
 ### Settings & Secrets
 
-Persist renderer and scene defaults, shader tool paths, and secret values via the `SDLKitSettings`/`SDLKitSecrets` CLIs. [Read more →](docs/scenegraph.md)
+Persist renderer and scene defaults, shader tool paths, and secret values via the `SDLKitSettings`/`SDLKitSecrets` CLIs. [Read more →](docs/scenegraph.md) Refer to the [Glossary & Tags appendix](docs/tags.md) for descriptions of the related keys and secrets.
 
 ### Settings Reference
 
 Review the available configuration keys and serialized formats, plus examples for dumping and migrating settings. [Read more →](docs/scenegraph.md)
 ## Agent Contract
 
-See `AGENTS.md:1` for the `sdlkit.gui.v1` tool definitions, error codes, event schema, threading policy, present policy, configuration keys, and contributor workflow.
+See `AGENTS.md:1` for the `sdlkit.gui.v1` tool definitions, error codes, event schema, threading policy, present policy, configuration keys, and contributor workflow. Consult the [Glossary & Tags appendix](docs/tags.md) for short explanations of agent names and frequently referenced tags.
 
 ## Roadmap
 
@@ -263,3 +263,7 @@ To reproduce the M1–M6 acceptance milestones referenced in `AGENTS.md`, use th
 - **M4 – Compute vector add:** `ShaderLibrary` includes the `vector_add` compute module so agents can register compute pipelines or write parity tests via `ShaderLibrary.shared.computeModule(for:)`, using the same artifact cache as the graphics shaders.【F:Sources/SDLKit/Graphics/ShaderLibrary.swift†L206-L256】
 - **M5 – Graphics/compute interop:** `SceneGraphComputeInteropTests` animates a scene node whose vertices are rewritten each frame by the `scenegraph_wave` compute shader, proving shared resource flow.【F:Sources/SDLKit/SceneGraph/SceneGraphComputeInterop.swift†L1-L88】【F:Tests/SDLKitTests/SceneGraphComputeInteropTests.swift†L1-L41】
 - **M6 – Tooling & docs:** This README and the shader build plugin document the full toolchain; updating shaders or adding materials now exercises the same workflow CI runs.【F:Plugins/ShaderBuildPlugin/Plugin.swift†L10-L39】【F:Scripts/ShaderBuild/build-shaders.py†L20-L189】
+
+## Glossary & Tags
+
+The [Glossary & Tags appendix](docs/tags.md) groups every agent name, environment variable, settings key, and secret used throughout SDLKit. The most common tags you will encounter are `SDLKIT_MAX_WINDOWS`, `SDLKIT_RENDER_BACKEND`, `SDLKIT_PRESENT_POLICY`, and the cross-agent roles such as `GraphicsAgent` and `ShaderAgent`.
