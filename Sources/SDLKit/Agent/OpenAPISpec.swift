@@ -2,12 +2,12 @@ import Foundation
 
 public enum SDLKitOpenAPI {
     public static let agentVersion = "sdlkit.gui.v1"
-    public static let specVersion = "1.1.0"
+    public static let specVersion = "1.2.0"
     public static let yaml: String = """
 openapi: 3.1.0
 info:
   title: SDLKit GUI Agent API
-  version: 1.1.0
+  version: 1.2.0
   description: |
     OpenAPI for SDLKit GUI tools. Agent version: sdlkit.gui.v1
 servers:

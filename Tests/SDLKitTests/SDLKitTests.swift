@@ -61,7 +61,7 @@ final class SDLKitTests: XCTestCase {
         struct V: Codable { let agent: String; let openapi: String }
         let v = try JSONDecoder().decode(V.self, from: res)
         XCTAssertEqual(v.agent, "sdlkit.gui.v1")
-        XCTAssertEqual(v.openapi, "1.1.0")
+        XCTAssertEqual(v.openapi, "1.2.0")
     }
 
     func testCloseWindowInvokesRendererShutdown() async throws {
