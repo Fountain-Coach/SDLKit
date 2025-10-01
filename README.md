@@ -9,26 +9,19 @@ SDLKit is a Swift Package that wraps SDL3 and exposes a Swift‑friendly API and
 
 - Alpha: Core window + renderer wrappers are wired to SDL3 when available; headless builds remain supported via `-DHEADLESS_CI`.
 - JSON Agent implements the documented tools (window controls, primitives, batches, textures, optional text, events, clipboard, input, display, screenshot).
+- Cross-platform 3D modules are live: the `Graphics` package exposes Metal/D3D12/Vulkan render backends, the `SceneGraph` module owns transform propagation and submission, and compute pipelines ship alongside graphics shaders for reuse across agents.
 - See `AGENTS.md:1` for the official agent contract and repo guidelines.
 
 ## Project Structure
 
-- `Package.swift:1` — SwiftPM definition with system library `CSDL3` and library target `SDLKit`.
+- `Package.swift:1` — SwiftPM definition with system library `CSDL3`, the main `SDLKit` library, and the shader build plugin hook.
 - `Sources/CSDL3/module.modulemap:1`, `Sources/CSDL3/shim.h:1` — system bindings for SDL3 headers and link flags.
-- `Sources/SDLKit/SDLKit.swift:1` — config and global feature flags.
-- `Sources/SDLKit/Support/Errors.swift:1` — canonical error types for tools.
-- `Sources/SDLKit/Core/SDLWindow.swift:1`, `Sources/SDLKit/Core/SDLRenderer.swift:1` — placeholders for wrappers.
-- `Sources/SDLKit/Agent/SDLKitGUIAgent.swift:1` — agent with stubbed tool methods.
-- `Tests/SDLKitTests/SDLKitTests.swift:1` — minimal XCTest.
-
-### Planned Extensions
-
-In addition to the existing sources above, upcoming work for the 3D and compute extension will add new folders:
-- `Sources/SDLKit/Graphics/` — platform‑specific backends and a `RenderBackend` protocol.
-- `Sources/SDLKit/Scene/` — scene graph types (`Scene`, `SceneNode`, `Camera`, `Light`, `Mesh`, `Material`).
-- `Sources/SDLKit/Shaders/` — single‑source shader code and build scripts.
-- `Sources/SDLKit/Compute/` — GPU compute interfaces.
-These directories are not yet present in the repository but are described in the implementation strategy and `AGENTS.md`.
+- `Sources/SDLKit/Core/SDLWindow.swift:1`, `Sources/SDLKit/Core/SDLRenderer.swift:1` — Swift wrappers around SDL windowing and renderer state.
+- `Sources/SDLKit/Graphics/` — shared render abstractions plus Metal, Direct3D 12, Vulkan, and stub backends for tests. The `RenderBackend` protocol defines buffer, texture, graphics, and compute entry points while `RenderBackendFactory` selects the platform implementation at runtime.【F:Sources/SDLKit/Graphics/RenderBackend.swift†L1-L118】【F:Sources/SDLKit/Graphics/BackendFactory.swift†L1-L120】
+- `Sources/SDLKit/SceneGraph/` — scene graph nodes, cameras, mesh registration, material bindings, and the renderer that walks the graph per frame.【F:Sources/SDLKit/SceneGraph/SceneGraph.swift†L1-L132】【F:Sources/SDLKit/SceneGraph/SceneGraph.swift†L133-L224】
+- `Sources/SDLKit/Generated/` — committed shader artifacts (DXIL, SPIR-V, Metallib) that ship with the package and are loaded by `ShaderLibrary`.【F:Sources/SDLKit/Graphics/ShaderLibrary.swift†L120-L188】
+- `Shaders/graphics/`, `Shaders/compute/`, and `Scripts/ShaderBuild/` — single-source HLSL/compute kernels, reference Metal hand-written sources, and the Python build helper executed by the SwiftPM plugin.【F:Scripts/ShaderBuild/build-shaders.py†L8-L95】
+- `Tests/SDLKitTests/` — smoke tests for shader artifacts, graphics/scene rendering, compute interop, and optional golden image verification per backend.【F:Tests/SDLKitTests/GoldenImageTests.swift†L1-L80】【F:Tests/SDLKitTests/SceneGraphComputeInteropTests.swift†L1-L41】
 
 ## Using Our SDL Fork
 
@@ -55,24 +48,29 @@ This package is designed to work with the Fountain‑Coach SDL3 fork:
 - Build: `swift build`
 - Test: `swift test`
 
-### Shader toolchain prerequisites
+### Shader toolchain workflow
 
-Compiling the cross-platform shader library requires external tools:
+SDLKit ships committed shader binaries, but the toolchain is part of the repository so contributors can rebuild them or add new modules.
 
-- [DirectX Shader Compiler (DXC)](https://github.com/microsoft/DirectXShaderCompiler)
-- [SPIRV-Cross](https://github.com/KhronosGroup/SPIRV-Cross)
-- Apple’s Metal toolchain (`metal` and `metallib`) from Xcode command line tools (macOS only)
-- Python 3 (for the shader build helper script)
+1. **Install external tools**
+   - DXC is required for HLSL → DXIL/SPIR-V compilation. Set `SDLKIT_SHADER_DXC` or add `dxc` to `PATH`.
+   - Optional: SPIRV-Cross converts SPIR-V → MSL when native `.metal` sources are unavailable (`SDLKIT_SHADER_SPIRV_CROSS`).
+   - Optional: Apple `metal`/`metallib` (macOS) build `.metallib` outputs directly. Environment variables `SDLKIT_SHADER_METAL` and `SDLKIT_SHADER_METALLIB` override discovery.【F:Scripts/ShaderBuild/build-shaders.py†L20-L96】
+   - Python 3 drives the helper script invoked by SwiftPM.
+   - You can also place tool binaries under `External/Toolchains/bin` to avoid modifying your global PATH.【F:Scripts/ShaderBuild/build-shaders.py†L20-L40】
 
-Install them on your platform and ensure they are available on `PATH` before building shaders.
+2. **Provide per-project overrides**
+   - Optional `.fountain/sdlkit/shader-tools.env` files inject environment overrides when the plugin runs, letting teams codify tool paths or compiler flags.【F:Plugins/ShaderBuildPlugin/Plugin.swift†L16-L33】
 
-The SwiftPM `ShaderBuildPlugin` target runs automatically when the `SDLKit` module builds. To invoke it manually (for example to pre-populate shader caches) run:
+3. **Invoke the build**
+   - Building `SDLKit` automatically triggers the `ShaderBuildPlugin`, which calls `Scripts/ShaderBuild/build-shaders.py <package-root> <workdir>` before compilation.【F:Plugins/ShaderBuildPlugin/Plugin.swift†L10-L31】
+   - Manual rebuild: `python3 Scripts/ShaderBuild/build-shaders.py "$(pwd)" .build/shader-cache`. The script emits DXIL/SPIR-V/Metallib artifacts, writes optional intermediate `.msl/.air` files, and records a `shader-build.log` summary in the working directory.【F:Scripts/ShaderBuild/build-shaders.py†L58-L189】
 
-```bash
-python3 Scripts/ShaderBuild/build-shaders.py "$(pwd)" .build/shader-cache
-```
+4. **Artifact layout**
+   - Final binaries are copied into `Sources/SDLKit/Generated/{dxil,spirv,metal}` and loaded by `ShaderLibrary` at runtime. The library also exposes compute shaders (`vector_add`, `scenegraph_wave`) so both graphics and compute paths share the same metadata.【F:Sources/SDLKit/Graphics/ShaderLibrary.swift†L120-L256】
 
-Generated artifacts are copied into `Sources/SDLKit/Generated/{dxil,spirv,metal}` and shipped with the library bundle.
+5. **Verification**
+   - `swift test --filter ShaderArtifactsTests` confirms all expected shader files exist and match the manifest.【F:Tests/SDLKitTests/ShaderArtifactsTests.swift†L20-L40】
 
 ### Headless CI mode
 
@@ -289,27 +287,50 @@ Curl examples:
 
 Note: GUI requires SDL3 installed and `SDLKIT_GUI_ENABLED=1` in your environment.
 
-## 3D & Compute Extension (pre‑alpha)
+## Graphics, SceneGraph, and Compute Modules
 
-We are actively designing and implementing a major extension to SDLKit that brings **cross‑platform 3D rendering** and **GPU compute** support to the framework.  This extension will coexist with the existing 2D agent and will enable advanced graphics and compute workflows within the FountainAI ecosystem.
+SDLKit’s 3D stack is implemented and ready for extension work:
 
-### Highlights
-
-- **Scene Graph:** A hierarchy of `Scene`, `SceneNode`, `Camera`, `Light`, `Mesh` and `Material` types for organising 3D content.
-- **Multi‑API Rendering:** A `GraphicsAgent` will manage native GPU contexts and backends for **Metal**, **Direct3D** and **Vulkan**, providing a unified `RenderBackend` interface.
-- **Shader Pipeline:** Shaders authored in HLSL will be compiled at build time into platform‑specific formats (MSL/DXIL/SPIR‑V) via a `ShaderAgent`.
-- **GPU Compute:** A `ComputeAgent` will expose compute pipelines to accelerate audio DSP, physics simulations and machine‑learning workloads.
-- **Modular Design:** These capabilities are modularised into dedicated agents (see `AGENTS.md` for full specifications) and will integrate non‑destructively with the existing 2D API.
-
-See the **Implementation Strategy for Extending SDLKit with 3D Graphics, Multi‑API Shaders, and GPU Compute (PDF)** in this repo and **AGENTS.md** for the detailed design and current status.
+- **Render backends** create buffers, textures, graphics pipelines, and compute pipelines through a shared `RenderBackend` API. Platform factories select Metal, D3D12, Vulkan, or a stub backend based on build configuration so tests can run headless.【F:Sources/SDLKit/Graphics/RenderBackend.swift†L1-L118】【F:Sources/SDLKit/Graphics/BackendFactory.swift†L1-L120】
+- **ShaderLibrary** packages graphics shaders (`unlit_triangle`, `basic_lit`) and compute programs (`vector_add`, `scenegraph_wave`), returning reflection metadata and cached artifacts for each API.【F:Sources/SDLKit/Graphics/ShaderLibrary.swift†L164-L256】
+- **SceneGraph** orchestrates materials, mesh registration, world transforms, and per-frame submission. The renderer automatically caches pipelines per shader ID, binds per-material data, and renders hierarchies depth-first.【F:Sources/SDLKit/SceneGraph/SceneGraph.swift†L96-L224】
+- **Compute interop** exposes helper utilities that allocate shared buffers, dispatch compute workloads, and feed results back into the scene graph; CPU fallbacks keep tests running on the stub backend.【F:Sources/SDLKit/SceneGraph/SceneGraphComputeInterop.swift†L1-L88】【F:Sources/SDLKit/SceneGraph/SceneGraphComputeInterop.swift†L89-L154】
 
 ## Agent Specifications
 
-The 3D & compute extension introduces several specialized agents.  For a high‑level overview, start with `AGENTS.md`.  Each agent has its own detailed specification in a companion Markdown file at the root of this repository:
+The 3D & compute extension is coordinated through the agent design docs at the repository root. Each file expands on the APIs summarised above:
 
-- `GraphicsAgent.md` — implementation and API contract for the low‑level rendering backend (Metal, Direct3D, Vulkan).
-- `ShaderAgent.md` — compiler toolchain and pipeline creation for shaders (HLSL → SPIR‑V/DXIL/MSL).
+- `GraphicsAgent.md` — implementation and API contract for the low-level rendering backend (Metal, Direct3D, Vulkan).
+- `ShaderAgent.md` — compiler toolchain and pipeline creation for shaders (HLSL → SPIR-V/DXIL/MSL).
 - `ComputeAgent.md` — GPU compute abstractions for tasks such as audio DSP, physics and machine learning.
-- `SceneGraphAgent.md` — high‑level scene graph API (nodes, cameras, lights, meshes, materials) and draw submission protocol.
+- `SceneGraphAgent.md` — high-level scene graph API (nodes, cameras, lights, meshes, materials) and draw submission protocol.
 
-Consult these documents when contributing to or integrating with the 3D & compute extension.
+Consult these documents when contributing to or integrating with the 3D & compute extension.
+
+## Platform verification
+
+Use the SwiftPM demo and focused XCTest targets to validate each GPU backend after toolchain setup:
+
+- **Metal (macOS)**
+  1. `SDLKIT_GUI_ENABLED=1 swift run SDLKitDemo` boots the triangle + lit scene walkthrough using the Metal backend by default.【F:Sources/SDLKitDemo/main.swift†L24-L115】【F:Sources/SDLKitDemo/main.swift†L160-L221】
+  2. `SDLKIT_GOLDEN=1 swift test --filter GoldenImageTests/testSceneGraphGoldenHash_Metal` captures a lit cube frame and compares it to the recorded hash.【F:Tests/SDLKitTests/GoldenImageTests.swift†L1-L44】
+
+- **Direct3D 12 (Windows)**
+  1. Set `SDLKIT_BACKEND=d3d12` if needed and run `swift run SDLKitDemo` to exercise swap-chain setup and the SceneGraph demo on D3D12.【F:Sources/SDLKitDemo/main.swift†L160-L221】
+  2. `SDLKIT_GOLDEN=1 swift test --filter GoldenImageTests/testSceneGraphGoldenHash_D3D12` validates the lit-scene output and ensures GPU capture support is wired up.【F:Tests/SDLKitTests/GoldenImageTests.swift†L59-L80】
+
+- **Vulkan (Linux)**
+  1. `swift run SDLKitDemo` automatically chooses the Vulkan backend when running on Linux, exercising triangle + lit scene rendering.【F:Sources/SDLKitDemo/main.swift†L24-L115】【F:Sources/SDLKitDemo/main.swift†L160-L221】
+  2. `SDLKIT_GOLDEN=1 swift test --filter GoldenImageTests/testSceneGraphGoldenHash_Vulkan` renders the lit cube and compares its capture hash against the stored baseline.【F:Tests/SDLKitTests/GoldenImageTests.swift†L45-L58】
+
+All platforms can additionally run `swift test --filter SceneGraphComputeInteropTests` when the SDL3 stub is enabled to verify compute dispatch + render interop (`scenegraph_wave`).【F:Tests/SDLKitTests/SceneGraphComputeInteropTests.swift†L1-L41】
+
+## Acceptance demos & tests
+
+To reproduce the M1–M6 acceptance milestones referenced in `AGENTS.md`, use the following entry points:
+
+- **M1 – Cross-backend triangle:** `swift run SDLKitDemo` issues the unlit triangle pipeline across whichever backend the factory selects.【F:Sources/SDLKitDemo/main.swift†L160-L221】【F:Sources/SDLKit/Graphics/ShaderLibrary.swift†L164-L205】
+- **M2/M3 – Scene graph + lighting:** The demo transitions into the lit SceneGraph sample, while the golden image tests render the cube with `basic_lit` to validate lighting consistency.【F:Sources/SDLKitDemo/main.swift†L221-L276】【F:Tests/SDLKitTests/GoldenImageTests.swift†L1-L80】
+- **M4 – Compute vector add:** `ShaderLibrary` includes the `vector_add` compute module so agents can register compute pipelines or write parity tests via `ShaderLibrary.shared.computeModule(for:)`, using the same artifact cache as the graphics shaders.【F:Sources/SDLKit/Graphics/ShaderLibrary.swift†L206-L256】
+- **M5 – Graphics/compute interop:** `SceneGraphComputeInteropTests` animates a scene node whose vertices are rewritten each frame by the `scenegraph_wave` compute shader, proving shared resource flow.【F:Sources/SDLKit/SceneGraph/SceneGraphComputeInterop.swift†L1-L88】【F:Tests/SDLKitTests/SceneGraphComputeInteropTests.swift†L1-L41】
+- **M6 – Tooling & docs:** This README and the shader build plugin document the full toolchain; updating shaders or adding materials now exercises the same workflow CI runs.【F:Plugins/ShaderBuildPlugin/Plugin.swift†L10-L39】【F:Scripts/ShaderBuild/build-shaders.py†L20-L189】
