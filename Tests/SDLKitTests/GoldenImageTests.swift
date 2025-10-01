@@ -35,11 +35,14 @@ final class GoldenImageTests: XCTestCase {
             cap.requestCapture()
             try SceneGraphRenderer.updateAndRender(scene: scene, backend: backend)
             let hash = try cap.takeCaptureHash()
-
-            if let expected = ProcessInfo.processInfo.environment["SDLKIT_GOLDEN_REF"], !expected.isEmpty {
-                XCTAssertEqual(hash, expected, "Golden hash mismatch")
+            let key = GoldenRefs.key(backend: "metal", width: 256, height: 256)
+            if let expected = GoldenRefs.getExpected(for: key), !expected.isEmpty {
+                XCTAssertEqual(hash, expected, "Golden hash mismatch for \(key)")
             } else {
-                print("Golden hash: \(hash)")
+                print("Golden hash: \(hash) key=\(key)")
+                if ProcessInfo.processInfo.environment["SDLKIT_GOLDEN_WRITE"] == "1" {
+                    GoldenRefs.setExpected(hash, for: key)
+                }
             }
         }
         #else
@@ -64,7 +67,8 @@ final class GoldenImageTests: XCTestCase {
             cap.requestCapture()
             try SceneGraphRenderer.updateAndRender(scene: scene, backend: backend)
             let hash = try cap.takeCaptureHash()
-            if let expected = ProcessInfo.processInfo.environment["SDLKIT_GOLDEN_REF"], !expected.isEmpty { XCTAssertEqual(hash, expected) } else { print("VK Golden hash: \(hash)") }
+            let key = GoldenRefs.key(backend: "vulkan", width: 256, height: 256)
+            if let expected = GoldenRefs.getExpected(for: key), !expected.isEmpty { XCTAssertEqual(hash, expected, "Golden hash mismatch for \(key)") } else { print("VK Golden hash: \(hash) key=\(key)"); if ProcessInfo.processInfo.environment["SDLKIT_GOLDEN_WRITE"] == "1" { GoldenRefs.setExpected(hash, for: key) } }
         }
         #else
         throw XCTSkip("Vulkan golden test only on Linux")
@@ -88,7 +92,8 @@ final class GoldenImageTests: XCTestCase {
             cap.requestCapture()
             try SceneGraphRenderer.updateAndRender(scene: scene, backend: backend)
             let hash = try cap.takeCaptureHash()
-            if let expected = ProcessInfo.processInfo.environment["SDLKIT_GOLDEN_REF"], !expected.isEmpty { XCTAssertEqual(hash, expected) } else { print("DX12 Golden hash: \(hash)") }
+            let key = GoldenRefs.key(backend: "d3d12", width: 256, height: 256)
+            if let expected = GoldenRefs.getExpected(for: key), !expected.isEmpty { XCTAssertEqual(hash, expected, "Golden hash mismatch for \(key)") } else { print("DX12 Golden hash: \(hash) key=\(key)"); if ProcessInfo.processInfo.environment["SDLKIT_GOLDEN_WRITE"] == "1" { GoldenRefs.setExpected(hash, for: key) } }
         }
         #else
         throw XCTSkip("D3D12 golden test only on Windows")

@@ -47,6 +47,9 @@ let package = Package(
         if useYams {
             deps.append(.package(url: "https://github.com/jpsim/Yams.git", from: "5.1.0"))
         }
+        // FountainStore for persistence (golden references, configs, etc.)
+        // Use local path in this repo to avoid network dependency and enable customization.
+        deps.append(.package(path: "External/Fountain-Store"))
         return deps
     }(),
     targets: {
@@ -125,6 +128,8 @@ let package = Package(
                         .target(name: "CVulkan", condition: .when(platforms: [.linux]))
                     ]
                     if useYams { deps.append(.product(name: "Yams", package: "Yams")) }
+                    // Persist golden image references and other settings
+                    deps.append(.product(name: "FountainStore", package: "Fountain-Store"))
                     return deps
                 }(),
                 path: "Sources/SDLKit",
@@ -186,7 +191,7 @@ let package = Package(
         targets.append(
             .testTarget(
                 name: "SDLKitTests",
-                dependencies: ["SDLKit"],
+                dependencies: ["SDLKit", .product(name: "FountainStore", package: "Fountain-Store")],
                 path: "Tests/SDLKitTests"
             )
         )
@@ -200,6 +205,17 @@ let package = Package(
                     .target(name: "VulkanMinimal", condition: .when(platforms: [.linux]))
                 ],
                 path: "Sources/SDLKitDemo"
+            )
+        )
+
+        targets.append(
+            .executableTarget(
+                name: "SDLKitGolden",
+                dependencies: [
+                    "SDLKit",
+                    .product(name: "FountainStore", package: "Fountain-Store")
+                ],
+                path: "Sources/SDLKitGolden"
             )
         )
 
