@@ -54,7 +54,16 @@ This matrix tracks the concrete work required to graduate SDLKit's Metal (macOS)
 
 ## Next Steps
 
-- ☐ Finish the Metal validation work by integrating the expanded golden-image harness into CI and enforcing API validation toggles for debug runs.
-- ☐ Schedule a cross-backend verification pass that replays the lit textured scene on physical devices to confirm the new resource-binding paths.
-- ☐ Draft the beta-readiness delta list (per backend) so remaining blockers after Metal validation are documented ahead of the stabilization review.
+- ☐▶ **Integrate Metal golden-image harness into CI**
+  - Add a `macos-metal-golden` lane to the GitHub Actions matrix that runs the lit and unlit golden scenes with `SDLKIT_METAL_VALIDATION=1` and `SDLKIT_GOLDEN=1`.
+  - Gate the job on debug/profile configurations so API validation stays enforced while still allowing opt-out for release builds.
+  - Publish captured hashes as build artifacts and fail the job when validation output contains warnings.
+- ☐ **Cross-backend verification pass**
+  - Coordinate device availability (Apple M2, AMD RDNA2 Linux, NVIDIA RTX Windows) and execute the lit textured scene on each backend with the refreshed BindingSet paths.
+  - Capture logs, validation outputs, and golden frames for the shared report that will feed into the readiness checklist.
+  - File regressions against backend owners within one business day of test completion.
+- ☐ **Draft beta-readiness deltas per backend**
+  - Use the readiness checklist template to enumerate blockers beyond Metal validation (e.g., Vulkan resize soak testing, D3D12 descriptor pool telemetry).
+  - Highlight tasks requiring cross-team support (tooling, QA) and attach tentative owners/dates.
+  - Circulate the draft before the stabilization review so the backlog can be triaged.
 
