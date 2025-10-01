@@ -11,6 +11,28 @@ public struct MaterialParams: Equatable {
         self.baseColor = baseColor
         self.texture = texture
     }
+
+    public static func == (lhs: MaterialParams, rhs: MaterialParams) -> Bool {
+        Self.vec3Equal(lhs.lightDirection, rhs.lightDirection) &&
+        Self.vec4Equal(lhs.baseColor, rhs.baseColor) &&
+        lhs.texture == rhs.texture
+    }
+
+    private static func vec3Equal(_ lhs: (Float, Float, Float)?, _ rhs: (Float, Float, Float)?) -> Bool {
+        switch (lhs, rhs) {
+        case (.none, .none): return true
+        case let (.some(l), .some(r)): return l.0 == r.0 && l.1 == r.1 && l.2 == r.2
+        default: return false
+        }
+    }
+
+    private static func vec4Equal(_ lhs: (Float, Float, Float, Float)?, _ rhs: (Float, Float, Float, Float)?) -> Bool {
+        switch (lhs, rhs) {
+        case (.none, .none): return true
+        case let (.some(l), .some(r)): return l.0 == r.0 && l.1 == r.1 && l.2 == r.2 && l.3 == r.3
+        default: return false
+        }
+    }
 }
 
 public struct Material {
@@ -120,7 +142,6 @@ public enum SceneGraphRenderer {
             let matLight = material.params.lightDirection ?? lightDir
             // Determine base color: default white if none; alpha encodes hasTexture (1 => texture bound)
             let base = material.params.baseColor ?? (1,1,1,1)
-            let hasTexture: Float = material.params.baseColor?.3 ?? (material.params.baseColor == nil && material.params.lightDirection == nil ? 0.0 : 0.0)
             // Build push constants block: 16 floats (MVP) + 4 floats (lightDir) + 4 floats (baseColor)
             var data = mvp.toFloatArray()
             data.append(contentsOf: [matLight.0, matLight.1, matLight.2, 0.0])

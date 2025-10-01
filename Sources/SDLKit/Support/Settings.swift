@@ -81,10 +81,17 @@ private enum FSSettingsBridge {
             return out
         } ?? [:]
     }
-    private static func runBlocking<T>(_ body: @escaping () async throws -> T) -> T? {
+    private static func runBlocking<T: Sendable>(_ body: @escaping @Sendable () async throws -> T?) -> T? {
         let sem = DispatchSemaphore(value: 0)
         var result: T?
-        Task { do { result = try await body() } catch { result = nil }; sem.signal() }
+        Task {
+            defer { sem.signal() }
+            do {
+                result = try await body()
+            } catch {
+                result = nil
+            }
+        }
         sem.wait()
         return result
     }

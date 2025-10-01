@@ -10,21 +10,23 @@ struct VSOutput {
 };
 
 // Vulkan SPIR-V path: mark as push constants; ignored on DXIL path
-[[vk::push_constant]] cbuffer SceneCB : register(b0)
+struct SceneConstants
 {
     float4x4 uMVP;
     float4   lightDir; // unused here
     float4   baseColor;
 };
 
+[[vk::push_constant]] ConstantBuffer<SceneConstants> SceneCB : register(b0);
+
 VSOutput unlit_triangle_vs(VSInput input) {
     VSOutput o;
-    o.position = mul(float4(input.POSITION, 1.0), uMVP);
+    o.position = mul(float4(input.POSITION, 1.0), SceneCB.uMVP);
     o.color = input.COLOR;
     return o;
 }
 
 float4 unlit_triangle_ps(VSOutput input) : SV_Target {
-    float3 c = input.color * baseColor.rgb;
+    float3 c = input.color * SceneCB.baseColor.rgb;
     return float4(c, 1.0);
 }

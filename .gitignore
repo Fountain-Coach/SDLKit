@@ -52,3 +52,13 @@ Carthage/Build/
 .env
 .env.*
 
+# Local shader toolchains and intermediate outputs
+External/Toolchains/
+Scripts/ShaderBuild/Derived/
+
+# Generated shader binaries are materialized from textual base64 assets
+Sources/SDLKit/Generated/**/*.dxil
+Sources/SDLKit/Generated/**/*.spv
+Sources/SDLKit/Generated/**/*.metallib
+!Sources/SDLKit/Generated/**/*.b64
+

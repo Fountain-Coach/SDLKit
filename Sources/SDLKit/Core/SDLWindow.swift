@@ -86,7 +86,7 @@ public final class SDLWindow {
         }
 
         public func vulkanInstanceExtensions() throws -> [String] {
-            #if canImport(CSDL3) && !HEADLESS_CI
+            #if canImport(CSDL3) && !HEADLESS_CI && (canImport(CVulkan) || canImport(VulkanMinimal))
             var count: UInt32 = 0
             var namesPtr: UnsafePointer<UnsafePointer<CChar>?>? = nil
             let ok = withUnsafeMutablePointer(to: &count) { countPtr in

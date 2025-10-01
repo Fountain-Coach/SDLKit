@@ -21,6 +21,21 @@ MODULES = [
 ]
 
 
+def resolve_tool(env_key: str, executable: str, package_root: Path) -> str | None:
+    if env_key and env_key in os.environ and os.environ[env_key]:
+        return os.environ[env_key]
+
+    tool = shutil.which(executable)
+    if tool:
+        return tool
+
+    local = package_root / "External" / "Toolchains" / "bin" / executable
+    if local.exists():
+        return str(local)
+
+    return None
+
+
 def run_process(executable: Path, *arguments: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         [str(executable), *arguments],
@@ -59,15 +74,15 @@ def main() -> int:
         write_summary(messages, output_dir)
         return 0
 
-    dxc = os.environ.get("SDLKIT_SHADER_DXC") or shutil.which("dxc")
+    dxc = resolve_tool("SDLKIT_SHADER_DXC", "dxc", package_root)
     if not dxc:
         messages.append("dxc not found on PATH; skipping shader compilation")
         write_summary(messages, output_dir)
         return 0
 
-    spirv_cross = os.environ.get("SDLKIT_SHADER_SPIRV_CROSS") or shutil.which("spirv-cross")
-    metal = os.environ.get("SDLKIT_SHADER_METAL") or shutil.which("metal")
-    metallib = os.environ.get("SDLKIT_SHADER_METALLIB") or shutil.which("metallib")
+    spirv_cross = resolve_tool("SDLKIT_SHADER_SPIRV_CROSS", "spirv-cross", package_root)
+    metal = resolve_tool("SDLKIT_SHADER_METAL", "metal", package_root)
+    metallib = resolve_tool("SDLKIT_SHADER_METALLIB", "metallib", package_root)
 
     for module in MODULES:
         source_path = package_root / module["source"]

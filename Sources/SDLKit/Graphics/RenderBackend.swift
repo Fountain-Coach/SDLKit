@@ -19,36 +19,36 @@ public struct float4x4 {
     public static var identity: float4x4 { float4x4() }
 }
 
-public struct ShaderID: Hashable, Codable {
+public struct ShaderID: Hashable, Codable, Sendable {
     public let rawValue: String
     public init(_ rawValue: String) { self.rawValue = rawValue }
 }
 
-public struct BufferHandle: Hashable, Codable {
+public struct BufferHandle: Hashable, Codable, Sendable {
     public let rawValue: UInt64
     public init() { self.init(rawValue: UInt64.random(in: UInt64.min...UInt64.max)) }
     public init(rawValue: UInt64) { self.rawValue = rawValue }
 }
 
-public struct TextureHandle: Hashable, Codable {
+public struct TextureHandle: Hashable, Codable, Sendable {
     public let rawValue: UInt64
     public init() { self.init(rawValue: UInt64.random(in: UInt64.min...UInt64.max)) }
     public init(rawValue: UInt64) { self.rawValue = rawValue }
 }
 
-public struct PipelineHandle: Hashable, Codable {
+public struct PipelineHandle: Hashable, Codable, Sendable {
     public let rawValue: UInt64
     public init() { self.init(rawValue: UInt64.random(in: UInt64.min...UInt64.max)) }
     public init(rawValue: UInt64) { self.rawValue = rawValue }
 }
 
-public struct ComputePipelineHandle: Hashable, Codable {
+public struct ComputePipelineHandle: Hashable, Codable, Sendable {
     public let rawValue: UInt64
     public init() { self.init(rawValue: UInt64.random(in: UInt64.min...UInt64.max)) }
     public init(rawValue: UInt64) { self.rawValue = rawValue }
 }
 
-public struct MeshHandle: Hashable, Codable {
+public struct MeshHandle: Hashable, Codable, Sendable {
     public let rawValue: UInt64
     public init() { self.init(rawValue: UInt64.random(in: UInt64.min...UInt64.max)) }
     public init(rawValue: UInt64) { self.rawValue = rawValue }
@@ -62,13 +62,13 @@ public enum BufferUsage {
     case staging
 }
 
-public enum TextureFormat: String, Codable {
+public enum TextureFormat: String, Codable, Sendable {
     case rgba8Unorm
     case bgra8Unorm
     case depth32Float
 }
 
-public struct TextureDescriptor {
+public struct TextureDescriptor: Sendable {
     public var width: Int
     public var height: Int
     public var mipLevels: Int
@@ -83,13 +83,13 @@ public struct TextureDescriptor {
     }
 }
 
-public struct TextureInitialData {
+public struct TextureInitialData: Sendable {
     public var mipLevelData: [Data]
     public init(mipLevelData: [Data] = []) { self.mipLevelData = mipLevelData }
 }
 
-public struct VertexLayout: Equatable {
-    public struct Attribute: Equatable {
+public struct VertexLayout: Equatable, Sendable {
+    public struct Attribute: Equatable, Sendable {
         public var index: Int
         public var semantic: String
         public var format: VertexFormat
@@ -109,24 +109,24 @@ public struct VertexLayout: Equatable {
     }
 }
 
-public enum VertexFormat: Equatable {
+public enum VertexFormat: Equatable, Sendable {
     case float2
     case float3
     case float4
 }
 
-public enum IndexFormat: String, Codable {
+public enum IndexFormat: String, Codable, Sendable {
     case uint16
     case uint32
 }
 
-public enum ShaderStage {
+public enum ShaderStage: Sendable {
     case vertex
     case fragment
     case compute
 }
 
-public struct BindingSlot {
+public struct BindingSlot: Sendable {
     public let index: Int
     public let kind: Kind
     public init(index: Int, kind: Kind) {
@@ -134,7 +134,7 @@ public struct BindingSlot {
         self.kind = kind
     }
 
-    public enum Kind {
+    public enum Kind: Sendable {
         case uniformBuffer
         case storageBuffer
         case sampledTexture
@@ -150,7 +150,7 @@ public struct BindingSet {
     public func value<T>(for index: Int, as type: T.Type) -> T? { slots[index] as? T }
 }
 
-public enum TextureUsage {
+public enum TextureUsage: Sendable {
     case shaderRead
     case shaderWrite
     case renderTarget

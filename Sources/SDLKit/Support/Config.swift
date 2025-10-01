@@ -27,10 +27,13 @@ public enum SDLKitConfigStore {
         return parseVec4(s)
     }
 
+    @MainActor
     public static func defaultLightDirection() -> (Float, Float, Float)? {
         // Prefer secret override if present
-        if let data = try? Secrets.retrieve(key: "light_dir"), let s = data.flatMap({ String(data: $0, encoding: .utf8) }) {
-            if let v = parseVec3(s) { return v }
+        if let data = try? Secrets.retrieve(key: "light_dir"),
+           let s = String(data: data, encoding: .utf8),
+           let v = parseVec3(s) {
+            return v
         }
         if let s = SettingsStore.getString(Keys.sceneDefaultLightDir) { return parseVec3(s) }
         return nil
