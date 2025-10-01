@@ -297,6 +297,10 @@ public final class VulkanRenderBackend: StubRenderBackend {
     required public init(window: SDLWindow) throws {
         try super.init(kind: .vulkan, window: window)
     }
+
+    public func takeValidationMessages() -> [String] {
+        return []
+    }
 }
 #endif
 

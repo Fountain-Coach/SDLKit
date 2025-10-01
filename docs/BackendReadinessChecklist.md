@@ -16,7 +16,7 @@ This checklist documents the current expectations, validation steps, and known g
 | --- | --- | --- | --- |
 | Unlit triangle sample | ✅ | ✅ | Both backends render `unlit_triangle` shader without validation errors.
 | Lit mesh rendering | ✅ | ✅ | Requires `basic_lit` shader push constants (MVP, light direction, base color) to match cross-platform layout.
-| Texture sampling | ⚠️ Pending BindingSet integration | ⚠️ Pending descriptor set binding | Texture paths remain disabled until BindingSet work lands on both backends.
+| Texture sampling | ⚠️ Pending BindingSet integration | ✅ Descriptor-set binding with fallback sampler | Vulkan textured draws exercise the new BindingSet path; Metal integration remains in progress.
 | Resize handling | ✅ | ⚠️ Requires additional testing | Vulkan swapchain recreation validated on latest driver stack but needs soak testing.
 | GPU compute interop | ⚠️ Planned post-alpha | ⚠️ Planned post-alpha | Compute integration begins after graphics alpha stabilization.
 
@@ -46,7 +46,7 @@ Legend: ✅ — Verified in current builds, ⚠️ — Partial or pending follow
 
 ## Known Limitations Blocking Beta
 
-- **Texture resource binding**: Both backends lack complete `BindingSet` integration, preventing textured material validation.
+- **Texture resource binding**: Metal still lacks full `BindingSet` integration; Vulkan now validates textured materials via descriptor-backed resources.
 - **Automated validation coverage**: Continuous integration does not yet capture Metal or Vulkan validation logs, limiting early detection.
 - **Compute scheduling**: GPU compute interoperability is scheduled for the next milestone and is not considered part of the alpha readiness scope.
 

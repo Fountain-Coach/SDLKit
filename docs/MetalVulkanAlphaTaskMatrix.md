@@ -26,10 +26,10 @@ This matrix tracks the concrete work required to graduate SDLKit's Metal (macOS)
 
 | Status | Area | Task | Notes |
 | --- | --- | --- | --- |
-| ☐ | Push Constants | Match shader push-constant sizing | • Expose expected byte count from `ShaderModule`.<br>• Size `VkPushConstantRange` per pipeline.<br>• Upload all floats (MVP + lightDir + baseColor).<br>• Extend fallback path with default baseColor. |
-| ☐ | Textures & Samplers | Replace stub texture backend | • Introduce `TextureResource` tracking image, memory, view, sampler.<br>• Implement `createTexture` with staging uploads & layout transitions.<br>• Destroy resources correctly on teardown. |
-| ☐ | Descriptor Binding | Bind `BindingSet` resources during draws | • Derive descriptor set layouts from shader reflection.<br>• Allocate/update descriptor sets per frame.<br>• Bind buffers/textures/samplers before draws.<br>• Add textured render smoke test under validation layers. |
-| ☐ | Validation | Harden runtime checks | • Enable Vulkan validation layers in debug builds.<br>• Capture validation log gate in CI to prevent regressions. |
+| ☑ | Push Constants | Match shader push-constant sizing | • `ShaderModule` now carries a 96-byte constant size for graphics shaders.<br>• Vulkan pipelines size `VkPushConstantRange` from metadata and include base-color defaults when push data is absent. |
+| ☑ | Textures & Samplers | Replace stub texture backend | • Introduced `TextureResource` wrapping image/memory/view/sampler lifecycle.<br>• `createTexture` performs staging uploads, layout transitions, and default sampler creation.<br>• Resources tear down cleanly during destroy/deinit. |
+| ☑ | Descriptor Binding | Bind `BindingSet` resources during draws | • Descriptor set layouts derive from shader reflection and allocate per-frame pools.<br>• Draw path binds buffers and textures (with a fallback white texture) before issuing commands.<br>• Linux golden test now exercises a lit textured scene under validation layers. |
+| ☑ | Validation | Harden runtime checks | • Debug builds enable validation layers by default with optional overrides.<br>• Callback captures warnings/errors when `SDLKIT_VK_VALIDATION_CAPTURE` is set, exposing messages to tests. |
 
 ---
 
@@ -44,7 +44,7 @@ This matrix tracks the concrete work required to graduate SDLKit's Metal (macOS)
 
 ## Next Steps
 
-1. Prioritize the Metal shading and Vulkan push constant fixes—they unblock validation of baseColor-sensitive materials across both platforms.
-2. Schedule resource binding work (Metal BindingSet, Vulkan descriptors) to bring texture support online.
-3. Follow up with validation and documentation tasks once the rendering paths are feature complete.
+1. Prioritize Metal-side BindingSet integration and push-constant alignment to match the Vulkan implementation.
+2. Expand the golden-image matrix (macOS + Linux) to cover textured scenes and record updated baselines.
+3. Wire the validation capture hook into CI so Vulkan layer warnings fail fast during automation.
 
