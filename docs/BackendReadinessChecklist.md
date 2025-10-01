@@ -16,7 +16,7 @@ This checklist documents the current expectations, validation steps, and known g
 | --- | --- | --- | --- | --- |
 | Unlit triangle sample | ✅ | ✅ | ✅ | All backends render `unlit_triangle` shader without validation errors.
 | Lit mesh rendering | ✅ | ✅ | ✅ | Requires `basic_lit` shader push constants (MVP, light direction, base color) to match cross-platform layout.
-| Texture sampling | ⚠️ Pending BindingSet integration | ✅ Descriptor-set binding with fallback sampler | ✅ Descriptor heap binding with static samplers | Vulkan and D3D12 textured draws exercise the new BindingSet path; Metal integration remains in progress.
+| Texture sampling | ✅ BindingSet textures & samplers wired | ✅ Descriptor-set binding with fallback sampler | ✅ Descriptor heap binding with static samplers | Metal now mirrors the BindingSet-driven texture/sampler path exercised by Vulkan and D3D12 textured draws.
 | Resize handling | ✅ | ⚠️ Requires additional testing | ✅ | Vulkan swapchain recreation validated on latest driver stack but needs soak testing.
 | GPU compute interop | ⚠️ Planned post-alpha | ⚠️ Planned post-alpha | ⚠️ Planned post-alpha | Compute integration begins after graphics alpha stabilization.
 
@@ -30,24 +30,24 @@ Legend: ✅ — Verified in current builds, ⚠️ — Partial or pending follow
 
 1. Launch `SDLKitDemo` with the Metal backend in debug configuration.
 2. Verify window creation without API validation errors.
-3. Render the lit mesh scene and adjust base color through debug UI; confirm tint propagates via push constants.
+3. Render the lit textured scene and adjust base color through debug UI; confirm tint propagates via push constants and textures remain sampled.
 4. Resize window between standard aspect ratios (16:9, 4:3) and ensure swapchain/depth resources recreate without flicker.
-5. Capture golden images for unlit and lit textured scenes; compare with stored baselines.
+5. Capture golden images for unlit and lit textured scenes; compare with stored baselines and archive updated hashes if deviations are expected.
 
 ### Vulkan (Linux)
 
 1. Launch `SDLKitDemo` using the Vulkan backend under `VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation`.
 2. Confirm push constant uploads match shader byte size (MVP + light direction + base color) with no validation warnings.
-3. Execute textured scene rendering once descriptor binding work is merged; record discrepancies.
+3. Execute the lit textured scene and verify descriptor-backed texture/sampler bindings produce expected imagery.
 4. Force a window resize and validate swapchain recreation (new depth image, framebuffer rebuild).
-5. Export rendered frames for golden-image comparison and archive logs from validation layers.
+5. Export rendered frames for golden-image comparison and archive logs from validation layers. Ensure CI runs with `SDLKIT_VK_VALIDATION_CAPTURE=1` remain warning-free.
 
 ---
 
 ## Known Limitations Blocking Beta
 
-- **Texture resource binding**: Metal still lacks full `BindingSet` integration; Vulkan now validates textured materials via descriptor-backed resources.
-- **Automated validation coverage**: Continuous integration does not yet capture Metal or Vulkan validation logs, limiting early detection.
+- **Automated Metal validation coverage**: Golden-image harness still runs manually; integrate Metal API validation into CI to catch regressions sooner.
+- **Cross-backend device verification**: Schedule a coordinated pass on physical hardware to confirm the updated BindingSet-driven textured scenes across Metal, Vulkan, and D3D12.
 - **Compute scheduling**: GPU compute interoperability is scheduled for the next milestone and is not considered part of the alpha readiness scope.
 
 Keep this checklist updated as tasks in the [Metal & Vulkan Alpha Stabilization Task Matrix](MetalVulkanAlphaTaskMatrix.md) progress.
