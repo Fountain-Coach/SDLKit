@@ -231,6 +231,14 @@ let package = Package(
         )
 
         targets.append(
+            .executableTarget(
+                name: "SDLKitMigrate",
+                dependencies: ["SDLKit", .product(name: "FountainStore", package: "Fountain-Store"), .product(name: "SecretStore", package: "swift-secretstore")],
+                path: "Sources/SDLKitMigrate"
+            )
+        )
+
+        targets.append(
             .plugin(
                 name: "ShaderBuildPlugin",
                 capability: .buildTool()

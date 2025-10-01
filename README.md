@@ -149,6 +149,38 @@ agent.closeWindow(windowId: windowId)
   - `swift run SDLKitSettings set --key scene.default.material --value basic_lit`
   - `swift run SDLKitSettings set --key scene.default.baseColor --value "1.0,1.0,1.0,1.0"`
   - `swift run SDLKitSettings set --key scene.default.lightDirection --value "0.3,-0.5,0.8"`
+- Migration from env to settings:
+  - `swift run SDLKitMigrate` migrates known `SDLKIT_*` env vars into FountainStore settings and prints a JSON summary.
+- Shader tool paths:
+  - Set with SDLKitSettings (e.g., `shader.dxc.path`) and run `swift run SDLKitSettings write-env` to generate `.fountain/sdlkit/shader-tools.env` consumed by the shader build plugin.
+
+### Settings Reference
+
+- Keys and types (all stored as strings; booleans serialized as "1"/"0"):
+  - render.backend.override: String (metal|d3d12|vulkan)
+  - present.policy: String (auto|explicit)
+  - vk.validation: Bool
+  - dx12.debug_layer: Bool
+  - shader.root: String (path)
+  - shader.dxc.path: String (path)
+  - shader.spirv_cross.path: String (path)
+  - shader.metal.path: String (path)
+  - shader.metallib.path: String (path)
+  - scene.default.material: String (unlit|basic_lit)
+  - scene.default.baseColor: String ("r,g,b,a")
+  - scene.default.lightDirection: String ("x,y,z")
+  - golden.last.key: String
+  - golden.auto.write: Bool
+
+- Example JSON dump (via `swift run SDLKitSettings dump`):
+  {
+    "render.backend.override": "metal",
+    "present.policy": "auto",
+    "vk.validation": "1",
+    "scene.default.material": "basic_lit",
+    "scene.default.baseColor": "1.0,1.0,1.0,1.0",
+    "scene.default.lightDirection": "0.3,-0.5,0.8"
+  }
 - Secrets persist via SecretStore (Keychain on macOS, Secret Service on Linux, file keystore fallback).
   - Example: `swift run SDLKitSecrets set --key light_dir --value "0.3,-0.5,0.8"`
   - The demo reads `light_dir` to set the scene light when present.
