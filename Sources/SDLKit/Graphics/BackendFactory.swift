@@ -142,6 +142,18 @@ final class StubRenderBackendCore {
         return handle
     }
 
+    func bufferData(_ handle: BufferHandle) -> Data? {
+        buffers[handle]?.data
+    }
+
+    func withMutableBufferData(_ handle: BufferHandle, _ body: (inout Data) throws -> Void) throws {
+        guard var resource = buffers[handle] else {
+            throw AgentError.invalidArgument("Unknown buffer handle \(handle.rawValue)")
+        }
+        try body(&resource.data)
+        buffers[handle] = resource
+    }
+
     func createTexture(descriptor: TextureDescriptor, initialData: TextureInitialData?) -> TextureHandle {
         let handle = TextureHandle()
         textures[handle] = TextureResource(descriptor: descriptor, data: initialData)
@@ -252,6 +264,12 @@ public class StubRenderBackend: RenderBackend {
                                  indexBuffer: indexBuffer,
                                  indexCount: indexCount,
                                  indexFormat: indexFormat)
+    }
+
+    func bufferData(_ handle: BufferHandle) -> Data? { core.bufferData(handle) }
+
+    func withMutableBufferData(_ handle: BufferHandle, _ body: (inout Data) throws -> Void) throws {
+        try core.withMutableBufferData(handle, body)
     }
 }
 

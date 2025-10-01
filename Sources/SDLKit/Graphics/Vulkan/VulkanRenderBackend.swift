@@ -1107,6 +1107,25 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
 
         vkCmdDispatch(commandBufferHandle, UInt32(max(1, groupsX)), UInt32(max(1, groupsY)), UInt32(max(1, groupsZ)))
 
+        var postBarrier = VkMemoryBarrier()
+        postBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER
+        postBarrier.srcAccessMask = UInt32(VK_ACCESS_SHADER_WRITE_BIT)
+        postBarrier.dstAccessMask = UInt32(VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_SHADER_READ_BIT)
+        _ = withUnsafePointer(to: postBarrier) { barrierPtr in
+            vkCmdPipelineBarrier(
+                commandBufferHandle,
+                UInt32(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT),
+                UInt32(VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT),
+                0,
+                1,
+                barrierPtr,
+                0,
+                nil,
+                0,
+                nil
+            )
+        }
+
         _ = vkEndCommandBuffer(commandBufferHandle)
 
         var fenceInfo = VkFenceCreateInfo()

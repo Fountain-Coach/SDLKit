@@ -1,25 +1,24 @@
 import Foundation
+import Dispatch
 #if canImport(FountainStore)
 import FountainStore
 #endif
 
 // Centralized non-secret settings persistence backed by FountainStore.
 // Keys: simple names like "render.backend.override", "vk.validation", etc.
-public enum SettingsStore {
+@preconcurrency public enum SettingsStore {
     public static func getString(_ key: String) -> String? {
-        #if canImport(FountainStore)
-        return FSSettingsBridge.get(key)
-        #else
-        return nil
-        #endif
+#if canImport(FountainStore)
+        if let value = FSSettingsBridge.get(key) { return value }
+#endif
+        return FallbackSettingsBridge.get(key)
     }
 
     public static func setString(_ key: String, _ value: String) {
-        #if canImport(FountainStore)
+#if canImport(FountainStore)
         FSSettingsBridge.set(key, value)
-        #else
-        _ = (key, value)
-        #endif
+#endif
+        FallbackSettingsBridge.set(key, value)
     }
 
     public static func getBool(_ key: String) -> Bool? {
@@ -37,11 +36,14 @@ public enum SettingsStore {
 
     // Dump all settings into a map (key -> value) using FountainStore scan.
     public static func dumpAll() -> [String: String] {
-        #if canImport(FountainStore)
-        return FSSettingsBridge.list()
-        #else
-        return [:]
-        #endif
+#if canImport(FountainStore)
+        let persisted = FSSettingsBridge.list()
+        let fallback = FallbackSettingsBridge.list()
+        if persisted.isEmpty { return fallback }
+        return persisted.merging(fallback) { current, _ in current }
+#else
+        return FallbackSettingsBridge.list()
+#endif
     }
 }
 
@@ -97,3 +99,37 @@ private enum FSSettingsBridge {
     }
 }
 #endif
+
+private actor FallbackSettingsActor {
+    private var storage: [String: String] = [:]
+    func get(_ key: String) -> String? { storage[key] }
+    func set(_ key: String, value: String) { storage[key] = value }
+    func list() -> [String: String] { storage }
+}
+
+private enum FallbackSettingsBridge {
+    static let actor = FallbackSettingsActor()
+
+    static func get(_ key: String) -> String? {
+        runBlocking { await actor.get(key) }
+    }
+
+    static func set(_ key: String, _ value: String) {
+        runBlocking { await actor.set(key, value: value) }
+    }
+
+    static func list() -> [String: String] {
+        runBlocking { await actor.list() }
+    }
+
+    private static func runBlocking<T: Sendable>(_ body: @escaping @Sendable () async -> T) -> T {
+        let semaphore = DispatchSemaphore(value: 0)
+        var result: T!
+        Task.detached {
+            result = await body()
+            semaphore.signal()
+        }
+        semaphore.wait()
+        return result
+    }
+}
