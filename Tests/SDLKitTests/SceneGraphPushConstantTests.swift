@@ -138,6 +138,7 @@ final class SceneGraphPushConstantTests: XCTestCase {
         try await MainActor.run {
             let window = SDLWindow(config: .init(title: "PC", width: 128, height: 128))
             let backend = try RecordingRenderBackend(window: window)
+            SceneGraphRenderer.resetPipelineCache()
             let mesh = try MeshFactory.makeLitCube(backend: backend, size: 1.0)
             let baseColor: (Float, Float, Float, Float) = (0.25, 0.5, 0.75, 1.0)
             let light: (Float, Float, Float) = (0.1, -0.2, 0.3)
@@ -167,6 +168,38 @@ final class SceneGraphPushConstantTests: XCTestCase {
             XCTAssertEqual(recordedBase[1], baseColor.1, accuracy: 1e-6)
             XCTAssertEqual(recordedBase[2], baseColor.2, accuracy: 1e-6)
             XCTAssertEqual(recordedBase[3], baseColor.3, accuracy: 1e-6)
+        }
+    }
+
+    func testSceneGraphBindsMaterialTexture() async throws {
+        try await MainActor.run {
+            let window = SDLWindow(config: .init(title: "Tex", width: 128, height: 128))
+            let backend = try RecordingRenderBackend(window: window)
+            SceneGraphRenderer.resetPipelineCache()
+            let mesh = try MeshFactory.makeLitCube(backend: backend, size: 1.0)
+            let pixels: [UInt8] = [
+                255,   0,   0, 255,
+                  0, 255,   0, 255,
+                  0,   0, 255, 255,
+                255, 255, 255, 255
+            ]
+            let descriptor = TextureDescriptor(width: 2, height: 2, mipLevels: 1, format: .rgba8Unorm, usage: .shaderRead)
+            let initialData = TextureInitialData(mipLevelData: [Data(pixels)])
+            let textureHandle = try backend.createTexture(descriptor: descriptor, initialData: initialData)
+            let material = Material(shader: ShaderID("basic_lit"), params: .init(texture: textureHandle))
+            let node = SceneNode(name: "Textured", mesh: mesh, material: material)
+            let root = SceneNode(name: "Root")
+            root.addChild(node)
+            let scene = Scene(root: root, camera: nil, lightDirection: (0.0, 0.0, -1.0))
+
+            try SceneGraphRenderer.updateAndRender(scene: scene, backend: backend)
+
+            guard let bindings = backend.lastBindings else {
+                XCTFail("Expected bindings to be recorded")
+                return
+            }
+            let boundTexture: TextureHandle? = bindings.value(for: 10, as: TextureHandle.self)
+            XCTAssertEqual(boundTexture, textureHandle)
         }
     }
 }

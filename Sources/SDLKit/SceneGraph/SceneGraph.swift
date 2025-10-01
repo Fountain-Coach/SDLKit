@@ -162,6 +162,10 @@ public enum SceneGraphRenderer {
     // Simple cache of pipelines per shader id
     private static var pipelineCache: [ShaderID: PipelineHandle] = [:]
 
+    public static func resetPipelineCache() {
+        pipelineCache.removeAll()
+    }
+
     public static func updateAndRender(
         scene: Scene,
         backend: RenderBackend,

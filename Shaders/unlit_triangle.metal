@@ -13,6 +13,7 @@ struct VSOut {
 
 struct Uniforms {
     float4x4 uMVP;
+    float4   lightDir;
     float4   baseColor;
 };
 

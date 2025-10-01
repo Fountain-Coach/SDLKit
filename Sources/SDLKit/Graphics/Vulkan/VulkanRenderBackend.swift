@@ -487,9 +487,13 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
     }
 
     public func takeValidationMessages() -> [String] {
-        return VulkanRenderBackend.validationCaptureQueue.sync {
-            let messages = VulkanRenderBackend.capturedValidationMessages
-            VulkanRenderBackend.capturedValidationMessages.removeAll()
+        return VulkanRenderBackend.drainCapturedValidationMessages()
+    }
+
+    static func drainCapturedValidationMessages() -> [String] {
+        return validationCaptureQueue.sync {
+            let messages = capturedValidationMessages
+            capturedValidationMessages.removeAll()
             return messages
         }
     }

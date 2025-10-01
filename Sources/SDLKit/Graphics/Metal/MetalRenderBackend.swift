@@ -21,6 +21,7 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
         let depthPixelFormat: MTLPixelFormat?
         let vertexBindings: [BindingSlot]
         let fragmentBindings: [BindingSlot]
+        let pushConstantSize: Int
     }
 
     private struct ComputePipelineResource {
@@ -37,7 +38,6 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
     }
 
     private enum UniformConstants {
-        static let floatCount = 24
         static let defaultLightDirection: [Float] = [0.3, -0.5, 0.8, 0.0]
         static let defaultBaseColor: [Float] = [1.0, 1.0, 1.0, 1.0]
     }
@@ -381,7 +381,8 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
             colorPixelFormats: colorPixelFormats,
             depthPixelFormat: depthAttachmentPixelFormat,
             vertexBindings: module.bindings[.vertex] ?? [],
-            fragmentBindings: module.bindings[.fragment] ?? []
+            fragmentBindings: module.bindings[.fragment] ?? [],
+            pushConstantSize: module.pushConstantSize
         )
         pipelines[handle] = resource
         SDLLogger.debug("SDLKit.Graphics.Metal", "makePipeline id=\(handle.rawValue) label=\(pipelineDescriptor.label ?? "<nil>")")
@@ -409,21 +410,19 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
 
         let encoder = try obtainRenderEncoder(for: pipelineResource, commandBuffer: commandBuffer)
         encoder.setRenderPipelineState(pipelineResource.state)
-        // Push uniforms (matrix + optional lightDir/baseColor) at buffer index 1 for both VS/FS
-        let uniformFloats: [Float]
-        if let pc = pushConstants {
-            let ptr = pc.bindMemory(to: Float.self, capacity: UniformConstants.floatCount)
-            let buffer = UnsafeBufferPointer(start: ptr, count: UniformConstants.floatCount)
-            uniformFloats = Array(buffer)
-        } else {
-            var data = transform.toFloatArray()
-            data.append(contentsOf: UniformConstants.defaultLightDirection)
-            data.append(contentsOf: UniformConstants.defaultBaseColor)
-            uniformFloats = data
-        }
-        uniformFloats.withUnsafeBytes { bytes in
-            encoder.setVertexBytes(bytes.baseAddress!, length: bytes.count, index: 1)
-            encoder.setFragmentBytes(bytes.baseAddress!, length: bytes.count, index: 1)
+        let expectedUniformLength = pipelineResource.pushConstantSize
+        if expectedUniformLength > 0 {
+            if let pushConstants {
+                encoder.setVertexBytes(pushConstants, length: expectedUniformLength, index: 1)
+                encoder.setFragmentBytes(pushConstants, length: expectedUniformLength, index: 1)
+            } else {
+                let defaults = makeDefaultUniformData(transform: transform, expectedSize: expectedUniformLength)
+                defaults.withUnsafeBytes { bytes in
+                    guard let base = bytes.baseAddress else { return }
+                    encoder.setVertexBytes(base, length: bytes.count, index: 1)
+                    encoder.setFragmentBytes(base, length: bytes.count, index: 1)
+                }
+            }
         }
         encoder.setVertexBuffer(vertexResource.buffer, offset: 0, index: 0)
 
@@ -660,6 +659,46 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
         colorAttachment.storeAction = .store
         colorAttachment.clearColor = MTLClearColor(red: 0.05, green: 0.05, blue: 0.08, alpha: 1.0)
         return descriptor
+    }
+
+    private func makeDefaultUniformData(transform: float4x4, expectedSize: Int) -> Data {
+        guard expectedSize > 0 else { return Data() }
+        var data = Data(count: expectedSize)
+        data.withUnsafeMutableBytes { bytes in
+            guard let dest = bytes.baseAddress else { return }
+            var offset = 0
+            var matrix = transform
+            withUnsafeBytes(of: &matrix) { matrixBytes in
+                if let src = matrixBytes.baseAddress {
+                    let count = min(matrixBytes.count, max(0, expectedSize - offset))
+                    if count > 0 {
+                        memcpy(dest.advanced(by: offset), src, count)
+                        offset += count
+                    }
+                }
+            }
+            copyFloats(UniformConstants.defaultLightDirection, into: dest, offset: &offset, maxSize: expectedSize)
+            copyFloats(UniformConstants.defaultBaseColor, into: dest, offset: &offset, maxSize: expectedSize)
+            if offset < expectedSize {
+                memset(dest.advanced(by: offset), 0, expectedSize - offset)
+            }
+        }
+        return data
+    }
+
+    private func copyFloats(_ floats: [Float],
+                            into destination: UnsafeMutableRawPointer,
+                            offset: inout Int,
+                            maxSize: Int) {
+        guard offset < maxSize, !floats.isEmpty else { return }
+        floats.withUnsafeBufferPointer { buffer in
+            guard let src = buffer.baseAddress else { return }
+            let byteCount = min(buffer.count * MemoryLayout<Float>.size, max(0, maxSize - offset))
+            if byteCount > 0 {
+                memcpy(destination.advanced(by: offset), src, byteCount)
+                offset += byteCount
+            }
+        }
     }
 
     private func ensureDepthTexture(width: Int, height: Int) {

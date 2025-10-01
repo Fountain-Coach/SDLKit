@@ -49,6 +49,8 @@ jobs:
       - name: Build and test
         env:
           SDLKIT_GUI_ENABLED: 'false'
+          SDLKIT_VK_VALIDATION_CAPTURE: '1'
+          SDLKIT_VK_VALIDATION: '1'
         run: |
           # Build and test with HEADLESS_CI to avoid linking SDL3
           swift build -v -Xswiftc -DHEADLESS_CI
