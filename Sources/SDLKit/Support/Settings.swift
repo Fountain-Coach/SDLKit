@@ -34,6 +34,15 @@ public enum SettingsStore {
     public static func setBool(_ key: String, _ value: Bool) {
         setString(key, value ? "1" : "0")
     }
+
+    // Dump all settings into a map (key -> value) using FountainStore scan.
+    public static func dumpAll() -> [String: String] {
+        #if canImport(FountainStore)
+        return FSSettingsBridge.list()
+        #else
+        return [:]
+        #endif
+    }
 }
 
 #if canImport(FountainStore)
@@ -61,6 +70,17 @@ private enum FSSettingsBridge {
             return true
         }
     }
+    static func list() -> [String: String] {
+        runBlocking {
+            let store = try await FountainStore.open(.init(path: path()))
+            let coll = await store.collection("settings", of: SettingDoc.self)
+            // Scan all (up to a reasonable limit)
+            let docs = try await coll.scan(prefix: nil, limit: 1000, snapshot: nil)
+            var out: [String: String] = [:]
+            for d in docs { out[d.id] = d.value }
+            return out
+        } ?? [:]
+    }
     private static func runBlocking<T>(_ body: @escaping () async throws -> T) -> T? {
         let sem = DispatchSemaphore(value: 0)
         var result: T?
@@ -70,4 +90,3 @@ private enum FSSettingsBridge {
     }
 }
 #endif
-

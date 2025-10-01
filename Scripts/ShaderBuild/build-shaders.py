@@ -59,15 +59,15 @@ def main() -> int:
         write_summary(messages, output_dir)
         return 0
 
-    dxc = shutil.which("dxc")
+    dxc = os.environ.get("SDLKIT_SHADER_DXC") or shutil.which("dxc")
     if not dxc:
         messages.append("dxc not found on PATH; skipping shader compilation")
         write_summary(messages, output_dir)
         return 0
 
-    spirv_cross = shutil.which("spirv-cross")
-    metal = shutil.which("metal")
-    metallib = shutil.which("metallib")
+    spirv_cross = os.environ.get("SDLKIT_SHADER_SPIRV_CROSS") or shutil.which("spirv-cross")
+    metal = os.environ.get("SDLKIT_SHADER_METAL") or shutil.which("metal")
+    metallib = os.environ.get("SDLKIT_SHADER_METALLIB") or shutil.which("metallib")
 
     for module in MODULES:
         source_path = package_root / module["source"]

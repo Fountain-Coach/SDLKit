@@ -8,7 +8,7 @@ struct SDLKitGoldenCLI {
         let args = CommandLine.arguments.dropFirst()
         var backendOverride: String? = nil
         var width = 256, height = 256
-        var material = "basic_lit"
+        var material = SDLKitConfigStore.defaultMaterial()
         var write = false
 
         var it = args.makeIterator()
@@ -29,7 +29,7 @@ struct SDLKitGoldenCLI {
             try window.open(); defer { window.close() }
             try window.show()
 
-            let backend = try RenderBackendFactory.makeBackend(window: window, override: backendOverride)
+            let backend = try RenderBackendFactory.makeBackend(window: window, override: backendOverride ?? SettingsStore.getString("render.backend.override"))
             guard let cap = backend as? GoldenImageCapturable else {
                 print("Backend does not support capture; aborting.")
                 return
@@ -96,4 +96,3 @@ struct SDLKitGoldenCLI {
         return Scene(root: root, camera: cam, lightDirection: (0.3,-0.5,0.8))
     }
 }
-

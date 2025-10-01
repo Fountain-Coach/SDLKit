@@ -73,6 +73,9 @@ public final class ShaderLibrary {
 
     private static func resolveGeneratedRoot() -> URL {
         let fm = FileManager.default
+        if let override = SettingsStore.getString("shader.root"), !override.isEmpty {
+            return URL(fileURLWithPath: override, isDirectory: true)
+        }
         if let override = ProcessInfo.processInfo.environment["SDLKIT_SHADER_ROOT"], !override.isEmpty {
             return URL(fileURLWithPath: override, isDirectory: true)
         }

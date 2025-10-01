@@ -218,12 +218,18 @@ struct DemoApp {
         // Lit mesh: use primitive cube with normals
         let litMesh = try MeshFactory.makeLitCube(backend: backend, size: 1.0)
 
-        // Create scene graph with two nodes/materials
+        // Create scene graph with two nodes/materials; defaults can come from Settings
         let unlitMesh = Mesh(vertexBuffer: unlitVB, vertexCount: unlitVerts.count)
-        let unlitMat = Material(shader: ShaderID("unlit_triangle"))
+        let defaultMaterial = SDLKitConfigStore.defaultMaterial()
+        let defaultBaseColor = SDLKitConfigStore.defaultBaseColor()
+        let unlitParams = MaterialParams(baseColor: defaultBaseColor)
+        let unlitMat = Material(shader: ShaderID("unlit_triangle"), params: unlitParams)
         let unlitNode = SceneNode(name: "Unlit", transform: float4x4.translation(x: -0.8, y: 0, z: 0), mesh: unlitMesh, material: unlitMat)
 
-        let litMat = Material(shader: ShaderID("basic_lit"), params: .init(lightDirection: (0.3, -0.5, 0.8)))
+        let litLight = SDLKitConfigStore.defaultLightDirection() ?? (0.3, -0.5, 0.8)
+        let litParams = MaterialParams(lightDirection: litLight, baseColor: defaultBaseColor)
+        let litShader = defaultMaterial == "unlit" ? ShaderID("unlit_triangle") : ShaderID("basic_lit")
+        let litMat = Material(shader: litShader, params: litParams)
         let litNode = SceneNode(name: "Lit", transform: float4x4.translation(x: 0.8, y: 0, z: 0), mesh: litMesh, material: litMat)
 
         let root = SceneNode(name: "Root")
@@ -235,11 +241,8 @@ struct DemoApp {
         let view = float4x4.lookAt(eye: (0, 0, 2), center: (0, 0, 0), up: (0, 1, 0))
         let proj = float4x4.perspective(fovYRadians: .pi/3, aspect: aspect, zNear: 0.1, zFar: 100.0)
         var scene = Scene(root: root, camera: Camera(view: view, projection: proj))
-        // Optional: override light direction from SecretStore if present
-        if let data = try? Secrets.retrieve(key: "light_dir"), let s = data.flatMap({ String(data: $0, encoding: .utf8) }) {
-            let parts = s.split(separator: ",").compactMap { Float($0.trimmingCharacters(in: .whitespaces)) }
-            if parts.count >= 3 { scene.lightDirection = (parts[0], parts[1], parts[2]) }
-        }
+        // Optional: override light direction from SecretStore/Settings if present
+        if let vec = SDLKitConfigStore.defaultLightDirection() { scene.lightDirection = vec }
 
         // Animate rotation for a few frames
         let frames = 180

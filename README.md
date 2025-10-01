@@ -143,8 +143,12 @@ agent.closeWindow(windowId: windowId)
 
 ### Settings & Secrets
 
-- Settings persist via FountainStore under `.fountain/sdlkit` (collection `settings`).
-  - Example: `swift run SDLKitSettings set-bool --key vk.validation --value true`
+- Settings persist via FountainStore under `.fountain/sdlkit` (collection `settings`). Examples:
+  - `swift run SDLKitSettings set --key render.backend.override --value metal`
+  - `swift run SDLKitSettings set-bool --key vk.validation --value true`
+  - `swift run SDLKitSettings set --key scene.default.material --value basic_lit`
+  - `swift run SDLKitSettings set --key scene.default.baseColor --value "1.0,1.0,1.0,1.0"`
+  - `swift run SDLKitSettings set --key scene.default.lightDirection --value "0.3,-0.5,0.8"`
 - Secrets persist via SecretStore (Keychain on macOS, Secret Service on Linux, file keystore fallback).
   - Example: `swift run SDLKitSecrets set --key light_dir --value "0.3,-0.5,0.8"`
   - The demo reads `light_dir` to set the scene light when present.

@@ -693,9 +693,14 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
     // MARK: - Initialization
 
     private func initializeD3D() throws {
-        #if DEBUG
-        enableDebugLayer()
-        #endif
+        let enableDbg = SettingsStore.getBool("dx12.debug_layer") ?? false
+        if enableDbg {
+            enableDebugLayer()
+        } else {
+            #if DEBUG
+            enableDebugLayer()
+            #endif
+        }
         try createFactory()
         try createDevice()
         try createCommandQueue()

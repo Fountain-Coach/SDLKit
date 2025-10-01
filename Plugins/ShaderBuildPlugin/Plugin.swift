@@ -15,12 +15,25 @@ struct ShaderBuildPlugin: BuildToolPlugin {
         let outputDir = context.pluginWorkDirectoryURL.appendingPathComponent("ShaderBuild", isDirectory: true)
         let scriptPath = context.package.directoryURL.appendingPathComponent("Scripts/ShaderBuild/build-shaders.py")
 
+        var env = ProcessInfo.processInfo.environment
+        let shaderEnvURL = context.package.directoryURL.appendingPathComponent(".fountain/sdlkit/shader-tools.env")
+        if let data = try? Data(contentsOf: shaderEnvURL), let text = String(data: data, encoding: .utf8) {
+            for rawLine in text.split(separator: "\n") {
+                let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+                if line.isEmpty || line.hasPrefix("#") { continue }
+                if let eqIdx = line.firstIndex(of: "=") {
+                    let key = String(line[..<eqIdx])
+                    let val = String(line[line.index(after: eqIdx)...])
+                    env[key] = val
+                }
+            }
+        }
         return [
             .prebuildCommand(
                 displayName: "Compile SDLKit shaders",
                 executable: URL(fileURLWithPath: "/usr/bin/env"),
                 arguments: ["python3", scriptPath.path, context.package.directoryURL.path, outputDir.path],
-                environment: [:],
+                environment: env,
                 outputFilesDirectory: outputDir
             )
         ]
