@@ -28,18 +28,45 @@ public enum GoldenRefs {
 #if canImport(FountainStore)
 import FountainStore
 
-// Bridge using the local FountainStore package.
+// Document stored in FountainStore for golden references
+private struct GoldenDoc: Codable, Identifiable {
+    let id: String
+    let hash: String
+}
+
+// Bridge using FountainStore package (async store with collections)
 private enum FSBridge {
+    static func storePath() -> URL {
+        let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+        return cwd.appendingPathComponent(".fountain/sdlkit", isDirectory: true)
+    }
     static func getString(forKey key: String) -> String? {
-        if let ns = try? FountainStore.open(namespace: "SDLKit") {
-            return ns.keyValue().getString(forKey: key)
+        runBlocking {
+            let path = storePath()
+            let store = try await FountainStore.open(.init(path: path))
+            let coll = await store.collection("goldens", of: GoldenDoc.self)
+            if let doc = try await coll.get(id: key) { return doc.hash }
+            return nil
         }
-        return nil
     }
     static func setString(_ value: String, forKey key: String) {
-        if let ns = try? FountainStore.open(namespace: "SDLKit") {
-            ns.keyValue().setString(value, forKey: key)
+        _ = runBlocking {
+            let path = storePath()
+            let store = try await FountainStore.open(.init(path: path))
+            let coll = await store.collection("goldens", of: GoldenDoc.self)
+            try await coll.put(GoldenDoc(id: key, hash: value))
+            return true
         }
+    }
+    private static func runBlocking<T>(_ body: @escaping () async throws -> T) -> T? {
+        let sem = DispatchSemaphore(value: 0)
+        var result: T?
+        Task {
+            do { result = try await body() } catch { result = nil }
+            sem.signal()
+        }
+        sem.wait()
+        return result
     }
 }
 #endif
