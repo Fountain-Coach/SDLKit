@@ -43,6 +43,13 @@ enum ShaderArtifactMaterializer {
         }
         try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try decoded.write(to: url, options: .atomic)
+
+        if let base64Attributes = try? fm.attributesOfItem(atPath: base64URL.path),
+           let base64Date = base64Attributes[.modificationDate] as? Date {
+            try? fm.setAttributes([
+                .modificationDate: base64Date
+            ], ofItemAtPath: artifactPath)
+        }
         return url
     }
 
