@@ -76,17 +76,21 @@ struct SDLKitGoldenCLI {
 
     static func makeScene(backend: RenderBackend, material: String, width: Int, height: Int) throws -> Scene {
         let root = SceneNode(name: "Root")
+        let tintedBaseColor: (Float, Float, Float, Float) = (0.6, 0.45, 0.9, 1.0)
         if material == "unlit" {
             struct V { var p:(Float,Float,Float); var c:(Float,Float,Float) }
             let verts:[V] = [ .init(p:(-0.6,-0.5,0),c:(1,0,0)), .init(p:(0,0.6,0),c:(0,1,0)), .init(p:(0.6,-0.5,0),c:(0,0,1)) ]
             let vb = try verts.withUnsafeBytes { try backend.createBuffer(bytes: $0.baseAddress, length: $0.count, usage: .vertex) }
             let mesh = Mesh(vertexBuffer: vb, vertexCount: verts.count)
-            let mat = Material(shader: ShaderID("unlit_triangle"), params: .init(baseColor: (1,1,1,1)))
+            let mat = Material(shader: ShaderID("unlit_triangle"), params: .init(baseColor: tintedBaseColor))
             let node = SceneNode(name: "Unlit", transform: .identity, mesh: mesh, material: mat)
             root.addChild(node)
         } else {
             let mesh = try MeshFactory.makeLitCube(backend: backend, size: 1.0)
-            let mat = Material(shader: ShaderID("basic_lit"), params: .init(lightDirection: (0.3,-0.5,0.8), baseColor: (1,1,1,1)))
+            let mat = Material(
+                shader: ShaderID("basic_lit"),
+                params: .init(lightDirection: (0.3,-0.5,0.8), baseColor: tintedBaseColor)
+            )
             let node = SceneNode(name: "Lit", transform: .identity, mesh: mesh, material: mat)
             root.addChild(node)
         }

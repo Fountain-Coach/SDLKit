@@ -23,7 +23,11 @@ final class GoldenImageTests: XCTestCase {
 
             // Build a simple lit scene (cube) with fixed light & camera
             let mesh = try MeshFactory.makeLitCube(backend: backend, size: 1.2)
-            let material = Material(shader: ShaderID("basic_lit"), params: .init(lightDirection: (0.3, -0.5, 0.8), baseColor: (1,1,1,1)))
+            let tintedBaseColor: (Float, Float, Float, Float) = (0.6, 0.45, 0.9, 1.0)
+            let material = Material(
+                shader: ShaderID("basic_lit"),
+                params: .init(lightDirection: (0.3, -0.5, 0.8), baseColor: tintedBaseColor)
+            )
             let node = SceneNode(name: "Cube", transform: .identity, mesh: mesh, material: material)
             let root = SceneNode(name: "Root")
             root.addChild(node)
