@@ -1,8 +1,22 @@
 import Foundation
 
+public struct MaterialParams: Equatable {
+    public var lightDirection: (Float, Float, Float)?
+    public var baseColor: (Float, Float, Float, Float)?
+    public init(lightDirection: (Float, Float, Float)? = nil,
+                baseColor: (Float, Float, Float, Float)? = nil) {
+        self.lightDirection = lightDirection
+        self.baseColor = baseColor
+    }
+}
+
 public struct Material {
     public var shader: ShaderID
-    public init(shader: ShaderID) { self.shader = shader }
+    public var params: MaterialParams
+    public init(shader: ShaderID, params: MaterialParams = MaterialParams()) {
+        self.shader = shader
+        self.params = params
+    }
 }
 
 public struct Mesh {
@@ -85,9 +99,11 @@ public enum SceneGraphRenderer {
             var bindings = BindingSet()
             bindings.setValue(mesh.vertexBuffer, for: 0)
             let mvp = node.worldTransform * vp
+            // Determine light direction preference: material overrides scene
+            let matLight = material.params.lightDirection ?? lightDir
             // Build push constants block: 16 floats for matrix + 4 floats for lightDir (xyz, w=0)
             var data = mvp.toFloatArray()
-            data.append(contentsOf: [lightDir.0, lightDir.1, lightDir.2, 0.0])
+            data.append(contentsOf: [matLight.0, matLight.1, matLight.2, 0.0])
             try data.withUnsafeBytes { bytes in
                 try backend.draw(
                     mesh: MeshHandle(),

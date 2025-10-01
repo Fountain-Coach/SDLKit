@@ -215,24 +215,15 @@ struct DemoApp {
             try backend.createBuffer(bytes: buf.baseAddress, length: buf.count, usage: .vertex)
         }
 
-        // Basic lit triangle vertex buffer (pos.xyz + normal.xyz + color.xyz)
-        struct LitVertex { var position: (Float, Float, Float); var normal: (Float, Float, Float); var color: (Float, Float, Float) }
-        let litVerts: [LitVertex] = [
-            .init(position: (-0.6, -0.5, -0.2), normal: (0, 0, 1), color: (1, 0.6, 0.2)),
-            .init(position: ( 0.0,  0.6, -0.2), normal: (0, 0, 1), color: (0.2, 1, 0.6)),
-            .init(position: ( 0.6, -0.5, -0.2), normal: (0, 0, 1), color: (0.2, 0.6, 1))
-        ]
-        let litVB = try litVerts.withUnsafeBytes { buf in
-            try backend.createBuffer(bytes: buf.baseAddress, length: buf.count, usage: .vertex)
-        }
+        // Lit mesh: use primitive cube with normals
+        let litMesh = try MeshFactory.makeLitCube(backend: backend, size: 1.0)
 
         // Create scene graph with two nodes/materials
         let unlitMesh = Mesh(vertexBuffer: unlitVB, vertexCount: unlitVerts.count)
         let unlitMat = Material(shader: ShaderID("unlit_triangle"))
         let unlitNode = SceneNode(name: "Unlit", transform: float4x4.translation(x: -0.8, y: 0, z: 0), mesh: unlitMesh, material: unlitMat)
 
-        let litMesh = Mesh(vertexBuffer: litVB, vertexCount: litVerts.count)
-        let litMat = Material(shader: ShaderID("basic_lit"))
+        let litMat = Material(shader: ShaderID("basic_lit"), params: .init(lightDirection: (0.3, -0.5, 0.8)))
         let litNode = SceneNode(name: "Lit", transform: float4x4.translation(x: 0.8, y: 0, z: 0), mesh: litMesh, material: litMat)
 
         let root = SceneNode(name: "Root")
