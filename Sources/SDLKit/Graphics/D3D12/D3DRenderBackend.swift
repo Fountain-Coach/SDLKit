@@ -46,6 +46,12 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
         let storageParameterIndices: [Int: Int]
     }
 
+    private enum UniformConstants {
+        static let floatCount = 24
+        static let defaultLightDirection: [Float] = [0.3, -0.5, 0.8, 0.0]
+        static let defaultBaseColor: [Float] = [1.0, 1.0, 1.0, 1.0]
+    }
+
     private struct FrameResources {
         var renderTarget: UnsafeMutablePointer<ID3D12Resource>?
         var commandAllocator: UnsafeMutablePointer<ID3D12CommandAllocator>?
@@ -740,13 +746,15 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
                 // Prepare 80 bytes: matrix (64) + lightDir (16)
                 var data: [Float] = transform.toFloatArray()
                 if let pc = pushConstants {
-                    let ptr = pc.bindMemory(to: Float.self, capacity: 20)
-                    let buf = UnsafeBufferPointer(start: ptr, count: 20)
+                    let ptr = pc.bindMemory(to: Float.self, capacity: UniformConstants.floatCount)
+                    let buf = UnsafeBufferPointer(start: ptr, count: UniformConstants.floatCount)
                     data = Array(buf)
                 } else {
-                    data.append(contentsOf: [0.3, -0.5, 0.8, 0.0])
+                    data.append(contentsOf: UniformConstants.defaultLightDirection)
+                    data.append(contentsOf: UniformConstants.defaultBaseColor)
                 }
-                data.withUnsafeBytes { bytes in memcpy(mapped, bytes.baseAddress, min(80, bytes.count)) }
+                let byteCount = UniformConstants.floatCount * MemoryLayout<Float>.size
+                data.withUnsafeBytes { bytes in memcpy(mapped, bytes.baseAddress, min(byteCount, bytes.count)) }
             }
             tbuf.pointee.lpVtbl.pointee.Unmap(tbuf, 0, nil)
             let gpuAddress = tbuf.pointee.lpVtbl.pointee.GetGPUVirtualAddress(tbuf)

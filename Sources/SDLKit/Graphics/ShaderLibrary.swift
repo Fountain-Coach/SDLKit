@@ -76,6 +76,7 @@ public struct ShaderModule: Sendable {
     public let fragmentEntryPoint: String?
     public let vertexLayout: VertexLayout
     public let bindings: [ShaderStage: [BindingSlot]]
+    public let pushConstantSize: Int
     public let artifacts: ShaderModuleArtifacts
 
     func validateVertexLayout(_ layout: VertexLayout) throws {
@@ -181,6 +182,8 @@ public final class ShaderLibrary {
             ]
         )
 
+        let pushConstantSize = MemoryLayout<Float>.size * 24
+
         return ShaderModule(
             id: id,
             vertexEntryPoint: "unlit_triangle_vs",
@@ -190,7 +193,11 @@ public final class ShaderLibrary {
             // - D3D12: cbuffer at b0
             // - Metal: constant buffer at [[buffer(1)]] (backend sets it)
             // - Vulkan: push constants (backend sets it)
-            bindings: [ .vertex: [ BindingSlot(index: 0, kind: .uniformBuffer) ] ],
+            bindings: [
+                .vertex: [ BindingSlot(index: 0, kind: .uniformBuffer) ],
+                .fragment: [ BindingSlot(index: 10, kind: .sampledTexture) ]
+            ],
+            pushConstantSize: pushConstantSize,
             artifacts: artifacts
         )
     }
@@ -217,12 +224,18 @@ public final class ShaderLibrary {
             ]
         )
 
+        let pushConstantSize = MemoryLayout<Float>.size * 24
+
         return ShaderModule(
             id: id,
             vertexEntryPoint: "basic_lit_vs",
             fragmentEntryPoint: "basic_lit_ps",
             vertexLayout: layout,
-            bindings: [ .vertex: [ BindingSlot(index: 0, kind: .uniformBuffer) ] ],
+            bindings: [
+                .vertex: [ BindingSlot(index: 0, kind: .uniformBuffer) ],
+                .fragment: [ BindingSlot(index: 10, kind: .sampledTexture) ]
+            ],
+            pushConstantSize: pushConstantSize,
             artifacts: artifacts
         )
     }

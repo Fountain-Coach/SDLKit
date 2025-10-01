@@ -12,6 +12,14 @@ import CVulkan
 
 @MainActor
 public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
+    private static let descriptorSetBudgetPerFrame = 64
+    private static let validationCaptureQueue = DispatchQueue(label: "SDLKit.Vulkan.ValidationCapture")
+    private static let shouldCaptureValidation: Bool = {
+        let env = ProcessInfo.processInfo.environment["SDLKIT_VK_VALIDATION_CAPTURE"]?.lowercased()
+        return env == "1" || env == "true" || env == "yes"
+    }()
+    private static var capturedValidationMessages: [String] = []
+
     private let window: SDLWindow
     private let surface: RenderSurface
     private var core: StubRenderBackendCore
@@ -58,11 +66,22 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
     private var currentImageIndex: UInt32 = 0
 
     // Pipeline and geometry
+    private struct DescriptorBindingInfo {
+        let index: Int
+        let kind: BindingSlot.Kind
+        let descriptorType: VkDescriptorType
+        let stageFlags: UInt32
+    }
+
     private struct PipelineResource {
         var handle: PipelineHandle
         var pipelineLayout: VkPipelineLayout?
         var pipeline: VkPipeline?
         var vertexStride: UInt32
+        var module: ShaderModule
+        var descriptorSetLayout: VkDescriptorSetLayout?
+        var descriptorPools: [VkDescriptorPool?]
+        var descriptorBindings: [DescriptorBindingInfo]
     }
     private var pipelines: [PipelineHandle: PipelineResource] = [:]
     private var builtinPipeline: PipelineHandle? = nil
@@ -105,6 +124,25 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
         var usage: BufferUsage
     }
     private var buffers: [BufferHandle: BufferResource] = [:]
+
+    private struct TextureResource {
+        var descriptor: TextureDescriptor
+        var image: VkImage?
+        var memory: VkDeviceMemory?
+        var view: VkImageView?
+        var sampler: VkSampler?
+        var layout: VkImageLayout
+        var format: VkFormat
+        var aspectMask: UInt32
+    }
+    private var textures: [TextureHandle: TextureResource] = [:]
+    private var fallbackWhiteTexture: TextureHandle? = nil
+
+    private enum UniformDefaults {
+        static let floatCount = 24
+        static let defaultLightDirection: [Float] = [0.3, -0.5, 0.8, 0.0]
+        static let defaultBaseColor: [Float] = [1.0, 1.0, 1.0, 1.0]
+    }
     #endif
 
     public required init(window: SDLWindow) throws {
@@ -137,6 +175,8 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
             for (_, p) in pipelines {
                 if let pl = p.pipeline { vkDestroyPipeline(dev, pl, nil) }
                 if let layout = p.pipelineLayout { vkDestroyPipelineLayout(dev, layout, nil) }
+                if let setLayout = p.descriptorSetLayout { vkDestroyDescriptorSetLayout(dev, setLayout, nil) }
+                for pool in p.descriptorPools { if let pool { vkDestroyDescriptorPool(dev, pool, nil) } }
             }
             pipelines.removeAll(); builtinPipeline = nil
             for (_, p) in computePipelines {
@@ -146,6 +186,13 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
                 if let pool = p.descriptorPool { vkDestroyDescriptorPool(dev, pool, nil) }
             }
             computePipelines.removeAll()
+            for (_, texture) in textures {
+                if let sampler = texture.sampler { vkDestroySampler(dev, sampler, nil) }
+                if let view = texture.view { vkDestroyImageView(dev, view, nil) }
+                if let image = texture.image { vkDestroyImage(dev, image, nil) }
+                if let memory = texture.memory { vkFreeMemory(dev, memory, nil) }
+            }
+            textures.removeAll()
             // Destroy command pool
             if let pool = commandPool { vkDestroyCommandPool(dev, pool, nil) }
             commandPool = nil
@@ -180,6 +227,7 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
                 _ = vkWaitForFences(dev, 1, fptr, VK_TRUE, UInt64.max)
                 _ = vkResetFences(dev, 1, fptr)
             }
+            resetDescriptorPoolsForFrame(currentFrame)
         }
 
         // Acquire next image
@@ -438,6 +486,14 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
         return h
     }
 
+    public func takeValidationMessages() -> [String] {
+        return VulkanRenderBackend.validationCaptureQueue.sync {
+            let messages = VulkanRenderBackend.capturedValidationMessages
+            VulkanRenderBackend.capturedValidationMessages.removeAll()
+            return messages
+        }
+    }
+
     private static func hashHex(data: Data) -> String {
         var hash: UInt64 = 0xcbf29ce484222325
         let prime: UInt64 = 0x100000001b3
@@ -447,7 +503,148 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
         return String(format: "%016llx", hash)
     }
     public func createTexture(descriptor: TextureDescriptor, initialData: TextureInitialData?) throws -> TextureHandle {
-        core.createTexture(descriptor: descriptor, initialData: initialData)
+        #if canImport(CVulkan)
+        guard descriptor.width > 0, descriptor.height > 0 else {
+            throw AgentError.invalidArgument("Texture dimensions must be greater than zero")
+        }
+        guard let dev = device, let pd = physicalDevice else {
+            throw AgentError.internalError("Vulkan device not ready")
+        }
+        try ensureCommandPoolAndSync()
+
+        let vkFormat = try convertTextureFormat(descriptor.format)
+        let (usageFlags, finalLayout) = try imageUsage(for: descriptor.usage, hasInitialData: initialData?.mipLevelData.isEmpty == false)
+        let aspectMask = aspectMask(for: vkFormat)
+
+        var imageInfo = VkImageCreateInfo()
+        imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO
+        imageInfo.imageType = VK_IMAGE_TYPE_2D
+        imageInfo.extent = VkExtent3D(width: UInt32(descriptor.width), height: UInt32(descriptor.height), depth: 1)
+        imageInfo.mipLevels = UInt32(max(1, descriptor.mipLevels))
+        imageInfo.arrayLayers = 1
+        imageInfo.format = vkFormat
+        imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL
+        imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
+        imageInfo.usage = usageFlags
+        imageInfo.samples = VK_SAMPLE_COUNT_1_BIT
+        imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE
+
+        var image: VkImage? = nil
+        let imageResult = withUnsafePointer(to: imageInfo) { ptr in vkCreateImage(dev, ptr, nil, &image) }
+        guard imageResult == VK_SUCCESS, let createdImage = image else {
+            throw AgentError.internalError("vkCreateImage(texture) failed (res=\(imageResult))")
+        }
+
+        var requirements = VkMemoryRequirements()
+        vkGetImageMemoryRequirements(dev, createdImage, &requirements)
+
+        var memProps = VkPhysicalDeviceMemoryProperties()
+        vkGetPhysicalDeviceMemoryProperties(pd, &memProps)
+        let memoryType = findMemoryTypeIndex(requirements: requirements, properties: memProps, required: UInt32(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT))
+
+        var allocInfo = VkMemoryAllocateInfo()
+        allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO
+        allocInfo.allocationSize = requirements.size
+        allocInfo.memoryTypeIndex = memoryType
+
+        var memory: VkDeviceMemory? = nil
+        let allocResult = withUnsafePointer(to: allocInfo) { ptr in vkAllocateMemory(dev, ptr, nil, &memory) }
+        if allocResult != VK_SUCCESS || memory == nil {
+            vkDestroyImage(dev, createdImage, nil)
+            throw AgentError.internalError("vkAllocateMemory(texture) failed (res=\(allocResult))")
+        }
+
+        vkBindImageMemory(dev, createdImage, memory, 0)
+
+        let mipLevels = Int(max(1, descriptor.mipLevels))
+        if let data = initialData, !data.mipLevelData.isEmpty {
+            try transitionImageLayout(image: createdImage, aspectMask: aspectMask, mipLevels: mipLevels, oldLayout: VK_IMAGE_LAYOUT_UNDEFINED, newLayout: VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL)
+            for (level, mipData) in data.mipLevelData.enumerated() {
+                var stagingBuffer: VkBuffer? = nil
+                var stagingMemory: VkDeviceMemory? = nil
+                let levelSize = VkDeviceSize(mipData.count)
+                try createBuffer(size: levelSize, usage: UInt32(VK_BUFFER_USAGE_TRANSFER_SRC_BIT), properties: UInt32(VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT), bufferOut: &stagingBuffer, memoryOut: &stagingMemory)
+                if let stagingMemory {
+                    var mapped: UnsafeMutableRawPointer? = nil
+                    _ = vkMapMemory(dev, stagingMemory, 0, levelSize, 0, &mapped)
+                    if let mapped {
+                        mipData.withUnsafeBytes { bytes in memcpy(mapped, bytes.baseAddress, bytes.count) }
+                        vkUnmapMemory(dev, stagingMemory)
+                    }
+                }
+                let levelWidth = UInt32(max(1, descriptor.width >> level))
+                let levelHeight = UInt32(max(1, descriptor.height >> level))
+                if let stagingBuffer {
+                    try copyBufferToImage(buffer: stagingBuffer, image: createdImage, width: levelWidth, height: levelHeight, mipLevel: level, aspectMask: aspectMask)
+                    vkDestroyBuffer(dev, stagingBuffer, nil)
+                }
+                if let stagingMemory { vkFreeMemory(dev, stagingMemory, nil) }
+            }
+            let nextLayout: VkImageLayout = finalLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL ? VK_IMAGE_LAYOUT_GENERAL : finalLayout
+            try transitionImageLayout(image: createdImage, aspectMask: aspectMask, mipLevels: mipLevels, oldLayout: VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, newLayout: nextLayout)
+        } else {
+            try transitionImageLayout(image: createdImage, aspectMask: aspectMask, mipLevels: mipLevels, oldLayout: VK_IMAGE_LAYOUT_UNDEFINED, newLayout: finalLayout)
+        }
+
+        var viewInfo = VkImageViewCreateInfo()
+        viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO
+        viewInfo.image = createdImage
+        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D
+        viewInfo.format = vkFormat
+        viewInfo.subresourceRange = VkImageSubresourceRange(aspectMask: aspectMask, baseMipLevel: 0, levelCount: UInt32(mipLevels), baseArrayLayer: 0, layerCount: 1)
+
+        var imageView: VkImageView? = nil
+        let viewResult = withUnsafePointer(to: viewInfo) { ptr in vkCreateImageView(dev, ptr, nil, &imageView) }
+        if viewResult != VK_SUCCESS || imageView == nil {
+            vkDestroyImage(dev, createdImage, nil)
+            if let memory { vkFreeMemory(dev, memory, nil) }
+            throw AgentError.internalError("vkCreateImageView(texture) failed (res=\(viewResult))")
+        }
+
+        var sampler: VkSampler? = nil
+        if descriptor.usage == .shaderRead {
+            var samplerInfo = VkSamplerCreateInfo()
+            samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO
+            samplerInfo.magFilter = VK_FILTER_LINEAR
+            samplerInfo.minFilter = VK_FILTER_LINEAR
+            samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT
+            samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT
+            samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT
+            samplerInfo.anisotropyEnable = VK_FALSE
+            samplerInfo.maxAnisotropy = 1.0
+            samplerInfo.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK
+            samplerInfo.unnormalizedCoordinates = VK_FALSE
+            samplerInfo.compareEnable = VK_FALSE
+            samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR
+            samplerInfo.minLod = 0.0
+            samplerInfo.maxLod = Float(mipLevels)
+            let samplerResult = withUnsafePointer(to: samplerInfo) { ptr in vkCreateSampler(dev, ptr, nil, &sampler) }
+            if samplerResult != VK_SUCCESS {
+                if let sampler { vkDestroySampler(dev, sampler, nil) }
+                if let view = imageView { vkDestroyImageView(dev, view, nil) }
+                vkDestroyImage(dev, createdImage, nil)
+                if let memory { vkFreeMemory(dev, memory, nil) }
+                throw AgentError.internalError("vkCreateSampler failed (res=\(samplerResult))")
+            }
+        }
+
+        let handle = TextureHandle()
+        let resource = TextureResource(
+            descriptor: descriptor,
+            image: createdImage,
+            memory: memory,
+            view: imageView,
+            sampler: sampler,
+            layout: finalLayout,
+            format: vkFormat,
+            aspectMask: aspectMask
+        )
+        textures[handle] = resource
+        SDLLogger.debug("SDLKit.Graphics.Vulkan", "createTexture id=\(handle.rawValue) size=\(descriptor.width)x\(descriptor.height) format=\(descriptor.format.rawValue)")
+        return handle
+        #else
+        return core.createTexture(descriptor: descriptor, initialData: initialData)
+        #endif
     }
 
     public func registerMesh(vertexBuffer: BufferHandle,
@@ -504,8 +701,26 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
                 if let b = res.buffer { vkDestroyBuffer(dev, b, nil) }
                 if let m = res.memory { vkFreeMemory(dev, m, nil) }
             }
+        case .texture(let h):
+            if let res = textures.removeValue(forKey: h), let dev = device {
+                if let sampler = res.sampler { vkDestroySampler(dev, sampler, nil) }
+                if let view = res.view { vkDestroyImageView(dev, view, nil) }
+                if let image = res.image { vkDestroyImage(dev, image, nil) }
+                if let memory = res.memory { vkFreeMemory(dev, memory, nil) }
+            }
         case .mesh(let h):
             meshes.removeValue(forKey: h)
+        case .pipeline(let handle):
+            if var resource = pipelines.removeValue(forKey: handle), let dev = device {
+                if let pipeline = resource.pipeline { vkDestroyPipeline(dev, pipeline, nil) }
+                if let layout = resource.pipelineLayout { vkDestroyPipelineLayout(dev, layout, nil) }
+                if let setLayout = resource.descriptorSetLayout { vkDestroyDescriptorSetLayout(dev, setLayout, nil) }
+                for pool in resource.descriptorPools { if let pool { vkDestroyDescriptorPool(dev, pool, nil) } }
+                resource.pipeline = nil
+                resource.pipelineLayout = nil
+                resource.descriptorSetLayout = nil
+                resource.descriptorPools.removeAll()
+            }
         case .computePipeline(let handle):
             if var resource = computePipelines.removeValue(forKey: handle), let dev = device {
                 if let pipeline = resource.pipeline { vkDestroyPipeline(dev, pipeline, nil) }
@@ -528,8 +743,93 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
         guard let dev = device else { throw AgentError.internalError("Vulkan device not ready") }
         let module = try ShaderLibrary.shared.module(for: desc.shader)
         try module.validateVertexLayout(desc.vertexLayout)
-        if let existing = pipelines.values.first(where: { $0.vertexStride == UInt32(desc.vertexLayout.stride) }) {
-            return existing.handle
+
+        var bindingMap: [Int: DescriptorBindingInfo] = [:]
+        for (stage, slots) in module.bindings {
+            let stageFlag: UInt32
+            switch stage {
+            case .vertex: stageFlag = UInt32(VK_SHADER_STAGE_VERTEX_BIT)
+            case .fragment: stageFlag = UInt32(VK_SHADER_STAGE_FRAGMENT_BIT)
+            default: stageFlag = 0
+            }
+            guard stageFlag != 0 else { continue }
+            for slot in slots {
+                let descriptorType = try descriptorType(for: slot.kind)
+                if var existing = bindingMap[slot.index] {
+                    if existing.descriptorType != descriptorType {
+                        throw AgentError.invalidArgument("Descriptor type mismatch for binding slot \(slot.index) in shader \(module.id.rawValue)")
+                    }
+                    existing.stageFlags |= stageFlag
+                    bindingMap[slot.index] = existing
+                } else {
+                    bindingMap[slot.index] = DescriptorBindingInfo(index: slot.index, kind: slot.kind, descriptorType: descriptorType, stageFlags: stageFlag)
+                }
+            }
+        }
+        let descriptorBindings = bindingMap.values.sorted { $0.index < $1.index }
+
+        var descriptorSetLayout: VkDescriptorSetLayout? = nil
+        var descriptorPools: [VkDescriptorPool?] = []
+        if !descriptorBindings.isEmpty {
+            var layoutBindings: [VkDescriptorSetLayoutBinding] = []
+            layoutBindings.reserveCapacity(descriptorBindings.count)
+            for info in descriptorBindings {
+                var binding = VkDescriptorSetLayoutBinding()
+                binding.binding = UInt32(info.index)
+                binding.descriptorCount = 1
+                binding.descriptorType = info.descriptorType
+                binding.stageFlags = info.stageFlags
+                layoutBindings.append(binding)
+            }
+            var layoutInfo = VkDescriptorSetLayoutCreateInfo()
+            layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
+            layoutInfo.bindingCount = UInt32(layoutBindings.count)
+            let layoutResult = layoutBindings.withUnsafeMutableBufferPointer { buf -> VkResult in
+                layoutInfo.pBindings = buf.baseAddress
+                return withUnsafePointer(to: layoutInfo) { ptr in vkCreateDescriptorSetLayout(dev, ptr, nil, &descriptorSetLayout) }
+            }
+            if layoutResult != VK_SUCCESS || descriptorSetLayout == nil {
+                throw AgentError.internalError("vkCreateDescriptorSetLayout failed (res=\(layoutResult))")
+            }
+
+            var perTypeCounts: [VkDescriptorType: UInt32] = [:]
+            for info in descriptorBindings {
+                perTypeCounts[info.descriptorType, default: 0] += 1
+            }
+            let maxSets = UInt32(Self.descriptorSetBudgetPerFrame)
+            var poolSizes: [VkDescriptorPoolSize] = []
+            poolSizes.reserveCapacity(perTypeCounts.count)
+            for (type, count) in perTypeCounts {
+                var size = VkDescriptorPoolSize()
+                size.type = type
+                size.descriptorCount = count * maxSets
+                poolSizes.append(size)
+            }
+            for _ in 0..<maxFramesInFlight {
+                var pool: VkDescriptorPool? = nil
+                var poolInfo = VkDescriptorPoolCreateInfo()
+                poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO
+                poolInfo.maxSets = maxSets
+                poolInfo.poolSizeCount = UInt32(poolSizes.count)
+                let poolResult = poolSizes.withUnsafeMutableBufferPointer { buf -> VkResult in
+                    poolInfo.pPoolSizes = buf.baseAddress
+                    return withUnsafePointer(to: poolInfo) { ptr in vkCreateDescriptorPool(dev, ptr, nil, &pool) }
+                }
+                if poolResult != VK_SUCCESS || pool == nil {
+                    if let pool { vkDestroyDescriptorPool(dev, pool, nil) }
+                    if let layout = descriptorSetLayout { vkDestroyDescriptorSetLayout(dev, layout, nil) }
+                    throw AgentError.internalError("vkCreateDescriptorPool failed (res=\(poolResult))")
+                }
+                descriptorPools.append(pool)
+            }
+        }
+
+        var shouldCleanupDescriptors = true
+        defer {
+            if shouldCleanupDescriptors {
+                if let layout = descriptorSetLayout { vkDestroyDescriptorSetLayout(dev, layout, nil) }
+                for pool in descriptorPools { if let pool { vkDestroyDescriptorPool(dev, pool, nil) } }
+            }
         }
 
         // Shader modules
@@ -646,20 +946,36 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
             dynamic.pDynamicStates = db.baseAddress
         }
 
-        // Pipeline layout (no descriptors)
+        var setLayouts: [VkDescriptorSetLayout?] = []
+        if let descriptorSetLayout { setLayouts.append(descriptorSetLayout) }
+
+        var pushRanges: [VkPushConstantRange] = []
+        if module.pushConstantSize > 0 {
+            var range = VkPushConstantRange()
+            range.stageFlags = UInt32(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
+            range.offset = 0
+            range.size = UInt32(module.pushConstantSize)
+            pushRanges.append(range)
+        }
+
+        // Pipeline layout
         var plInfo = VkPipelineLayoutCreateInfo()
         plInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO
-        var pcRange = VkPushConstantRange()
-        pcRange.stageFlags = UInt32(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
-        pcRange.offset = 0
-        pcRange.size = 80 // 4x4 float matrix + light dir (vec4)
-        withUnsafePointer(to: &pcRange) { ptr in
-            plInfo.pushConstantRangeCount = 1
-            plInfo.pPushConstantRanges = ptr
-        }
         var layout: VkPipelineLayout? = nil
-        var r = withUnsafePointer(to: plInfo) { ptr in vkCreatePipelineLayout(dev, ptr, nil, &layout) }
-        if r != VK_SUCCESS || layout == nil { throw AgentError.internalError("vkCreatePipelineLayout failed (res=\(r))") }
+        let layoutResult = setLayouts.withUnsafeMutableBufferPointer { layoutBuf -> VkResult in
+            pushRanges.withUnsafeMutableBufferPointer { rangeBuf -> VkResult in
+                plInfo.setLayoutCount = UInt32(layoutBuf.count)
+                plInfo.pSetLayouts = layoutBuf.baseAddress
+                plInfo.pushConstantRangeCount = UInt32(rangeBuf.count)
+                plInfo.pPushConstantRanges = rangeBuf.baseAddress
+                return withUnsafePointer(to: plInfo) { ptr in vkCreatePipelineLayout(dev, ptr, nil, &layout) }
+            }
+        }
+        if layoutResult != VK_SUCCESS || layout == nil {
+            if let fsModule { vkDestroyShaderModule(dev, fsModule, nil) }
+            if let vsModule { vkDestroyShaderModule(dev, vsModule, nil) }
+            throw AgentError.internalError("vkCreatePipelineLayout failed (res=\(layoutResult))")
+        }
 
         // Graphics pipeline
         guard let rp = renderPass else { throw AgentError.internalError("Render pass not ready") }
@@ -752,16 +1068,29 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
             }
         }
         let r = createResult
-        if r != VK_SUCCESS || pipeline == nil { throw AgentError.internalError("vkCreateGraphicsPipelines failed (res=\(r))") }
+        if r != VK_SUCCESS || pipeline == nil {
+            if let layout = layout { vkDestroyPipelineLayout(dev, layout, nil) }
+            throw AgentError.internalError("vkCreateGraphicsPipelines failed (res=\(r))")
+        }
 
         // Clean shader modules (no longer needed after pipeline creation)
         if let m = vsModule { vkDestroyShaderModule(dev, m, nil) }
         if let m = fsModule { vkDestroyShaderModule(dev, m, nil) }
 
         let handle = PipelineHandle()
-        let resource = PipelineResource(handle: handle, pipelineLayout: layout, pipeline: pipeline, vertexStride: UInt32(desc.vertexLayout.stride))
+        let resource = PipelineResource(
+            handle: handle,
+            pipelineLayout: layout,
+            pipeline: pipeline,
+            vertexStride: UInt32(desc.vertexLayout.stride),
+            module: module,
+            descriptorSetLayout: descriptorSetLayout,
+            descriptorPools: descriptorPools,
+            descriptorBindings: descriptorBindings
+        )
         pipelines[handle] = resource
         if builtinPipeline == nil { builtinPipeline = handle }
+        shouldCleanupDescriptors = false
         return handle
         #else
         return core.makePipeline(desc)
@@ -777,19 +1106,132 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
             throw AgentError.internalError("Unknown pipeline handle")
         }
         guard let pipe = resource.pipeline else { throw AgentError.internalError("Pipeline incomplete") }
+        guard let dev = device else { throw AgentError.internalError("Vulkan device not ready") }
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe)
-        // Push transform as 4x4 floats (column-major)
-        if let layout = resource.pipelineLayout {
-            var data: [Float] = transform.toFloatArray()
-            if let pc = pushConstants {
-                let ptr = pc.bindMemory(to: Float.self, capacity: 20)
-                let buf = UnsafeBufferPointer(start: ptr, count: 20)
-                data = Array(buf)
-            } else {
-                data.append(contentsOf: [0.3, -0.5, 0.8, 0.0])
+        // Bind descriptor sets if required
+        if !resource.descriptorBindings.isEmpty {
+            guard currentFrame < resource.descriptorPools.count, let pool = resource.descriptorPools[currentFrame] else {
+                throw AgentError.internalError("Descriptor pool unavailable for Vulkan pipeline")
             }
-            data.withUnsafeBytes { bytes in
-                _ = vkCmdPushConstants(cmd, layout, UInt32(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT), 0, UInt32(bytes.count), bytes.baseAddress)
+            guard let setLayout = resource.descriptorSetLayout else {
+                throw AgentError.internalError("Descriptor set layout missing for Vulkan pipeline")
+            }
+
+            var descriptorSet: VkDescriptorSet? = nil
+            var allocInfo = VkDescriptorSetAllocateInfo()
+            allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO
+            allocInfo.descriptorPool = pool
+            var layouts: [VkDescriptorSetLayout?] = [setLayout]
+            let allocResult = layouts.withUnsafeMutableBufferPointer { buf -> VkResult in
+                allocInfo.descriptorSetCount = UInt32(buf.count)
+                allocInfo.pSetLayouts = buf.baseAddress
+                return withUnsafePointer(to: allocInfo) { ptr in vkAllocateDescriptorSets(dev, ptr, &descriptorSet) }
+            }
+            if allocResult != VK_SUCCESS || descriptorSet == nil {
+                throw AgentError.internalError("vkAllocateDescriptorSets failed (res=\(allocResult))")
+            }
+
+            var writes: [VkWriteDescriptorSet] = []
+            var bufferInfos: [VkDescriptorBufferInfo] = []
+            var imageInfos: [VkDescriptorImageInfo] = []
+            var bufferIndices: [Int?] = []
+            var imageIndices: [Int?] = []
+
+            for binding in resource.descriptorBindings {
+                var write = VkWriteDescriptorSet()
+                write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
+                write.dstSet = descriptorSet
+                write.dstBinding = UInt32(binding.index)
+                write.descriptorCount = 1
+                write.descriptorType = binding.descriptorType
+
+                switch binding.kind {
+                case .uniformBuffer, .storageBuffer:
+                    guard let handle: BufferHandle = bindings.value(for: binding.index, as: BufferHandle.self),
+                          let bufferRes = buffers[handle],
+                          let buffer = bufferRes.buffer else {
+                        throw AgentError.invalidArgument("Missing buffer binding for slot \(binding.index)")
+                    }
+                    var info = VkDescriptorBufferInfo()
+                    info.buffer = buffer
+                    info.offset = 0
+                    info.range = VkDeviceSize(bufferRes.length)
+                    bufferIndices.append(bufferInfos.count)
+                    imageIndices.append(nil)
+                    bufferInfos.append(info)
+                case .sampledTexture:
+                    let textureHandle: TextureHandle
+                    if let provided: TextureHandle = bindings.value(for: binding.index, as: TextureHandle.self) {
+                        textureHandle = provided
+                    } else {
+                        textureHandle = try ensureFallbackTextureHandle()
+                    }
+                    guard let texture = textures[textureHandle] else {
+                        throw AgentError.invalidArgument("Missing texture binding for slot \(binding.index)")
+                    }
+                    var info = VkDescriptorImageInfo()
+                    info.sampler = texture.sampler
+                    info.imageView = texture.view
+                    info.imageLayout = texture.layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL : texture.layout
+                    bufferIndices.append(nil)
+                    imageIndices.append(imageInfos.count)
+                    imageInfos.append(info)
+                case .storageTexture:
+                    guard let handle: TextureHandle = bindings.value(for: binding.index, as: TextureHandle.self),
+                          let texture = textures[handle] else {
+                        throw AgentError.invalidArgument("Missing storage texture binding for slot \(binding.index)")
+                    }
+                    var info = VkDescriptorImageInfo()
+                    info.sampler = nil
+                    info.imageView = texture.view
+                    info.imageLayout = texture.layout
+                    bufferIndices.append(nil)
+                    imageIndices.append(imageInfos.count)
+                    imageInfos.append(info)
+                case .sampler:
+                    throw AgentError.notImplemented("Standalone sampler bindings are not yet supported on Vulkan")
+                }
+
+                writes.append(write)
+            }
+
+            bufferInfos.withUnsafeMutableBufferPointer { bufPtr in
+                imageInfos.withUnsafeMutableBufferPointer { imgPtr in
+                    for index in 0..<writes.count {
+                        if let b = bufferIndices[index] {
+                            writes[index].pBufferInfo = bufPtr.baseAddress?.advanced(by: b)
+                        }
+                        if let i = imageIndices[index] {
+                            writes[index].pImageInfo = imgPtr.baseAddress?.advanced(by: i)
+                        }
+                    }
+                    writes.withUnsafeMutableBufferPointer { writePtr in
+                        vkUpdateDescriptorSets(dev, UInt32(writePtr.count), writePtr.baseAddress, 0, nil)
+                    }
+                }
+            }
+
+            if let layout = resource.pipelineLayout, let descriptorSet = descriptorSet {
+                var sets = [descriptorSet]
+                sets.withUnsafeMutableBufferPointer { buf in
+                    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, UInt32(buf.count), buf.baseAddress, 0, nil)
+                }
+            }
+        }
+
+        // Push constants (transform + light + base color)
+        if let layout = resource.pipelineLayout, resource.module.pushConstantSize > 0 {
+            let stageFlags = UInt32(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
+            if let pc = pushConstants {
+                _ = vkCmdPushConstants(cmd, layout, stageFlags, 0, UInt32(resource.module.pushConstantSize), pc)
+            } else {
+                var data = transform.toFloatArray()
+                data.append(contentsOf: UniformDefaults.defaultLightDirection)
+                data.append(contentsOf: UniformDefaults.defaultBaseColor)
+                data.withUnsafeBytes { bytes in
+                    let count = min(resource.module.pushConstantSize, bytes.count)
+                    _ = vkCmdPushConstants(cmd, layout, stageFlags, 0, UInt32(count), bytes.baseAddress)
+                }
             }
         }
         guard let meshResource = meshes[mesh] else {
@@ -1176,9 +1618,19 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
 
         var extensions = requiredExtensions
         var layers: [String] = []
-        let enableValidation: Bool = SettingsStore.getBool("vk.validation") ?? {
-            let env = ProcessInfo.processInfo.environment["SDLKIT_VK_VALIDATION"]?.lowercased()
-            return env == "1" || env == "true" || env == "yes"
+        let enableValidation: Bool = {
+            if let override = SettingsStore.getBool("vk.validation") {
+                return override
+            }
+            if let env = ProcessInfo.processInfo.environment["SDLKIT_VK_VALIDATION"]?.lowercased() {
+                if env == "1" || env == "true" || env == "yes" { return true }
+                if env == "0" || env == "false" || env == "no" { return false }
+            }
+            #if DEBUG
+            return true
+            #else
+            return false
+            #endif
         }()
         if enableValidation {
             if !extensions.contains(where: { $0 == String(cString: VK_EXT_DEBUG_UTILS_EXTENSION_NAME) }) {
@@ -1376,6 +1828,11 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
         try recreateSwapchain(width: UInt32(window.config.width), height: UInt32(window.config.height))
         try ensureCommandPoolAndSync()
         try createBuiltinTriangleResources()
+        do {
+            fallbackWhiteTexture = try ensureFallbackTextureHandle()
+        } catch {
+            SDLLogger.warn("SDLKit.Graphics.Vulkan", "Failed to create fallback texture: \(error)")
+        }
     }
 
     private func recreateSwapchain(width: UInt32, height: UInt32) throws {
@@ -1702,6 +2159,174 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
         vkFreeCommandBuffers(dev, pool, 1, [cmd])
     }
 
+    private func resetDescriptorPoolsForFrame(_ frameIndex: Int) {
+        guard let dev = device else { return }
+        for (_, resource) in pipelines {
+            guard frameIndex < resource.descriptorPools.count else { continue }
+            if let pool = resource.descriptorPools[frameIndex] {
+                vkResetDescriptorPool(dev, pool, 0)
+            }
+        }
+    }
+
+    private func convertTextureFormat(_ format: TextureFormat) throws -> VkFormat {
+        switch format {
+        case .rgba8Unorm: return VK_FORMAT_R8G8B8A8_UNORM
+        case .bgra8Unorm: return VK_FORMAT_B8G8R8A8_UNORM
+        case .depth32Float: return VK_FORMAT_D32_SFLOAT
+        }
+    }
+
+    private func imageUsage(for usage: TextureUsage, hasInitialData: Bool) throws -> (UInt32, VkImageLayout) {
+        var flags: UInt32 = 0
+        var layout: VkImageLayout
+        switch usage {
+        case .shaderRead:
+            flags = UInt32(VK_IMAGE_USAGE_SAMPLED_BIT)
+            layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+        case .shaderWrite:
+            flags = UInt32(VK_IMAGE_USAGE_STORAGE_BIT)
+            layout = VK_IMAGE_LAYOUT_GENERAL
+        case .renderTarget:
+            flags = UInt32(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT)
+            layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+        case .depthStencil:
+            flags = UInt32(VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT)
+            layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+        }
+        if hasInitialData {
+            flags |= UInt32(VK_IMAGE_USAGE_TRANSFER_DST_BIT)
+        }
+        return (flags, layout)
+    }
+
+    private func aspectMask(for format: VkFormat) -> UInt32 {
+        switch format {
+        case VK_FORMAT_D32_SFLOAT, VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT:
+            return UInt32(VK_IMAGE_ASPECT_DEPTH_BIT)
+        default:
+            return UInt32(VK_IMAGE_ASPECT_COLOR_BIT)
+        }
+    }
+
+    private func performOneTimeCommands(_ body: (VkCommandBuffer) throws -> Void) throws {
+        guard let dev = device, let pool = commandPool, let queue = graphicsQueue else {
+            throw AgentError.internalError("Vulkan command context unavailable")
+        }
+        var alloc = VkCommandBufferAllocateInfo()
+        alloc.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO
+        alloc.commandPool = pool
+        alloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY
+        alloc.commandBufferCount = 1
+        var commandBuffer: VkCommandBuffer? = nil
+        let allocResult = withUnsafePointer(to: alloc) { ptr in vkAllocateCommandBuffers(dev, ptr, &commandBuffer) }
+        if allocResult != VK_SUCCESS || commandBuffer == nil {
+            throw AgentError.internalError("vkAllocateCommandBuffers(one-shot) failed (res=\(allocResult))")
+        }
+        guard let cmd = commandBuffer else {
+            throw AgentError.internalError("Allocated command buffer was nil")
+        }
+
+        var begin = VkCommandBufferBeginInfo()
+        begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO
+        begin.flags = UInt32(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT)
+        _ = withUnsafePointer(to: begin) { ptr in vkBeginCommandBuffer(cmd, ptr) }
+
+        try body(cmd)
+
+        _ = vkEndCommandBuffer(cmd)
+
+        var submit = VkSubmitInfo()
+        submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO
+        submit.commandBufferCount = 1
+        withUnsafePointer(to: cmd) { ptr in submit.pCommandBuffers = ptr }
+        _ = withUnsafePointer(to: submit) { ptr in vkQueueSubmit(queue, 1, ptr, nil) }
+        _ = vkQueueWaitIdle(queue)
+        withUnsafePointer(to: cmd) { ptr in vkFreeCommandBuffers(dev, pool, 1, ptr) }
+    }
+
+    private func layoutTransitionInfo(oldLayout: VkImageLayout, newLayout: VkImageLayout) throws -> (VkPipelineStageFlags, VkPipelineStageFlags, VkAccessFlags, VkAccessFlags) {
+        switch (oldLayout, newLayout) {
+        case (VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL):
+            return (UInt32(VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT), UInt32(VK_PIPELINE_STAGE_TRANSFER_BIT), 0, UInt32(VK_ACCESS_TRANSFER_WRITE_BIT))
+        case (VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL):
+            return (UInt32(VK_PIPELINE_STAGE_TRANSFER_BIT), UInt32(VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT), UInt32(VK_ACCESS_TRANSFER_WRITE_BIT), UInt32(VK_ACCESS_SHADER_READ_BIT))
+        case (VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL):
+            return (UInt32(VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT), UInt32(VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT), 0, UInt32(VK_ACCESS_SHADER_READ_BIT))
+        case (VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL):
+            return (UInt32(VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT), UInt32(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT), 0, UInt32(VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT))
+        case (VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL):
+            return (UInt32(VK_PIPELINE_STAGE_TRANSFER_BIT), UInt32(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT), UInt32(VK_ACCESS_TRANSFER_WRITE_BIT), UInt32(VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT))
+        case (VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL):
+            return (UInt32(VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT), UInt32(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT), 0, UInt32(VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT))
+        case (VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL):
+            return (UInt32(VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT), UInt32(VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT), 0, UInt32(VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT))
+        default:
+            throw AgentError.notImplemented("Unsupported Vulkan image layout transition (\(oldLayout) -> \(newLayout))")
+        }
+    }
+
+    private func transitionImageLayout(image: VkImage, aspectMask: UInt32, mipLevels: Int, oldLayout: VkImageLayout, newLayout: VkImageLayout) throws {
+        let (srcStage, dstStage, srcAccess, dstAccess) = try layoutTransitionInfo(oldLayout: oldLayout, newLayout: newLayout)
+        try performOneTimeCommands { cmd in
+            var barrier = VkImageMemoryBarrier()
+            barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER
+            barrier.oldLayout = oldLayout
+            barrier.newLayout = newLayout
+            barrier.srcQueueFamilyIndex = UInt32(VK_QUEUE_FAMILY_IGNORED)
+            barrier.dstQueueFamilyIndex = UInt32(VK_QUEUE_FAMILY_IGNORED)
+            barrier.image = image
+            barrier.subresourceRange = VkImageSubresourceRange(aspectMask: aspectMask, baseMipLevel: 0, levelCount: UInt32(mipLevels), baseArrayLayer: 0, layerCount: 1)
+            barrier.srcAccessMask = srcAccess
+            barrier.dstAccessMask = dstAccess
+            var localBarrier = barrier
+            withUnsafePointer(to: &localBarrier) { ptr in
+                vkCmdPipelineBarrier(cmd, srcStage, dstStage, 0, 0, nil, 0, nil, 1, ptr)
+            }
+        }
+    }
+
+    private func copyBufferToImage(buffer: VkBuffer, image: VkImage, width: UInt32, height: UInt32, mipLevel: Int, aspectMask: UInt32) throws {
+        try performOneTimeCommands { cmd in
+            var region = VkBufferImageCopy()
+            region.bufferOffset = 0
+            region.bufferRowLength = 0
+            region.bufferImageHeight = 0
+            region.imageSubresource = VkImageSubresourceLayers(aspectMask: aspectMask, mipLevel: UInt32(mipLevel), baseArrayLayer: 0, layerCount: 1)
+            region.imageOffset = VkOffset3D(x: 0, y: 0, z: 0)
+            region.imageExtent = VkExtent3D(width: width, height: height, depth: 1)
+            withUnsafePointer(to: &region) { ptr in
+                vkCmdCopyBufferToImage(cmd, buffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, ptr)
+            }
+        }
+    }
+
+    private func descriptorType(for kind: BindingSlot.Kind) throws -> VkDescriptorType {
+        switch kind {
+        case .uniformBuffer:
+            return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
+        case .storageBuffer:
+            return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
+        case .sampledTexture:
+            return VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+        case .storageTexture:
+            return VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
+        case .sampler:
+            throw AgentError.notImplemented("Standalone sampler bindings are not yet supported on Vulkan")
+        }
+    }
+
+    private func ensureFallbackTextureHandle() throws -> TextureHandle {
+        if let handle = fallbackWhiteTexture { return handle }
+        let pixel: [UInt8] = [255, 255, 255, 255]
+        let data = Data(pixel)
+        let descriptor = TextureDescriptor(width: 1, height: 1, mipLevels: 1, format: .rgba8Unorm, usage: .shaderRead)
+        let initial = TextureInitialData(mipLevelData: [data])
+        let handle = try createTexture(descriptor: descriptor, initialData: initial)
+        fallbackWhiteTexture = handle
+        return handle
+    }
+
     private func pickSupportedDepthFormat(physicalDevice: VkPhysicalDevice) -> VkFormat {
         let candidates: [VkFormat] = [VK_FORMAT_D32_SFLOAT, VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT]
         for fmt in candidates {
@@ -1917,15 +2542,26 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
     ) -> VkBool32 = { severity, _, callbackData, _ in
         guard let data = callbackData?.pointee else { return 0 }
         let message = data.pMessage.map { String(cString: $0) } ?? "<no message>"
+        let severityLabel: String
         switch severity {
         case VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT:
+            severityLabel = "ERROR"
             SDLLogger.error("SDLKit.Graphics.Vulkan", message)
         case VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT:
+            severityLabel = "WARN"
             SDLLogger.warn("SDLKit.Graphics.Vulkan", message)
         case VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT:
+            severityLabel = "INFO"
             SDLLogger.info("SDLKit.Graphics.Vulkan", message)
         default:
+            severityLabel = "VERBOSE"
             SDLLogger.debug("SDLKit.Graphics.Vulkan", message)
+        }
+        if VulkanRenderBackend.shouldCaptureValidation,
+           severity.rawValue >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT.rawValue {
+            VulkanRenderBackend.validationCaptureQueue.sync {
+                VulkanRenderBackend.capturedValidationMessages.append("[\(severityLabel)] \(message)")
+            }
         }
         return 0
     }

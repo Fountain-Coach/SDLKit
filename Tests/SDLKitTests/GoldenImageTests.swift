@@ -56,6 +56,8 @@ final class GoldenImageTests: XCTestCase {
 
     func testSceneGraphGoldenHash_Vulkan() async throws {
         #if os(Linux)
+        setenv("SDLKIT_VK_VALIDATION_CAPTURE", "1", 1)
+        setenv("SDLKIT_VK_VALIDATION", "1", 1)
         let shouldRun = ProcessInfo.processInfo.environment["SDLKIT_GOLDEN"]
         guard shouldRun == "1" else { throw XCTSkip("Golden test disabled") }
         try await MainActor.run {
@@ -63,8 +65,22 @@ final class GoldenImageTests: XCTestCase {
             try window.open(); defer { window.close() }; try window.show()
             let backend = try RenderBackendFactory.makeBackend(window: window, override: "vulkan")
             guard let cap = backend as? GoldenImageCapturable else { throw XCTSkip("No capture") }
+            guard let vkBackend = backend as? VulkanRenderBackend else { throw XCTSkip("Backend not VulkanRenderBackend") }
+            let pixels: [UInt8] = [
+                255,   0,   0, 255,
+                  0, 255,   0, 255,
+                  0,   0, 255, 255,
+                255, 255, 255, 255
+            ]
+            let textureDescriptor = TextureDescriptor(width: 2, height: 2, format: .rgba8Unorm, usage: .shaderRead)
+            let textureData = TextureInitialData(mipLevelData: [Data(pixels)])
+            let textureHandle = try backend.createTexture(descriptor: textureDescriptor, initialData: textureData)
             let mesh = try MeshFactory.makeLitCube(backend: backend, size: 1.1)
-            let material = Material(shader: ShaderID("basic_lit"), params: .init(lightDirection: (0.3,-0.5,0.8), baseColor: (1,1,1,1)))
+            let tintedBaseColor: (Float, Float, Float, Float) = (0.6, 0.45, 0.9, 1.0)
+            let material = Material(
+                shader: ShaderID("basic_lit"),
+                params: .init(lightDirection: (0.3,-0.5,0.8), baseColor: tintedBaseColor, texture: textureHandle)
+            )
             let node = SceneNode(name: "Cube", transform: .identity, mesh: mesh, material: material)
             let root = SceneNode(name: "Root"); root.addChild(node)
             let scene = Scene(root: root, camera: .identity(aspect: 1.0), lightDirection: (0.3,-0.5,0.8))
@@ -72,6 +88,8 @@ final class GoldenImageTests: XCTestCase {
             try SceneGraphRenderer.updateAndRender(scene: scene, backend: backend)
             let hash = try cap.takeCaptureHash()
             let key = GoldenRefs.key(backend: "vulkan", width: 256, height: 256)
+            let validationMessages = vkBackend.takeValidationMessages()
+            XCTAssertTrue(validationMessages.isEmpty, "Vulkan validation warnings: \(validationMessages)")
             if let expected = GoldenRefs.getExpected(for: key), !expected.isEmpty { XCTAssertEqual(hash, expected, "Golden hash mismatch for \(key)") } else { print("VK Golden hash: \(hash) key=\(key)"); if ProcessInfo.processInfo.environment["SDLKIT_GOLDEN_WRITE"] == "1" { GoldenRefs.setExpected(hash, for: key) } }
         }
         #else
