@@ -189,7 +189,6 @@ struct DemoApp {
                 mesh: mesh,
                 pipeline: pipeline,
                 bindings: bindings,
-                pushConstants: nil,
                 transform: float4x4.identity
             )
             try backend.endFrame()

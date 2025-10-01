@@ -206,15 +206,14 @@ public enum SceneGraphRenderer {
             var data = mvp.toFloatArray()
             data.append(contentsOf: [matLight.0, matLight.1, matLight.2, 0.0])
             data.append(contentsOf: [base.0, base.1, base.2, base.3])
-            try data.withUnsafeBytes { bytes in
-                try backend.draw(
-                    mesh: meshHandle,
-                    pipeline: pipeline,
-                    bindings: bindings,
-                    pushConstants: bytes.baseAddress,
-                    transform: mvp
-                )
-            }
+            let constantsData = data.withUnsafeBytes { buffer in Data(buffer) }
+            bindings.materialConstants = BindingSet.MaterialConstants(data: constantsData)
+            try backend.draw(
+                mesh: meshHandle,
+                pipeline: pipeline,
+                bindings: bindings,
+                transform: mvp
+            )
         }
         for child in node.children { try renderNode(child, backend: backend, colorFormat: colorFormat, depthFormat: depthFormat, vp: vp, lightDir: lightDir) }
     }

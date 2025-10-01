@@ -70,7 +70,6 @@ func updateAndRender(scene: Scene, backend: RenderBackend) {
         try? backend.draw(mesh: m.vertexBuffer.asMeshHandle(index: m.indexBuffer, count: m.indexCount),
                           pipeline: m.material.pipeline,
                           bindings: m.material.bindings,
-                          pushConstants: nil,
                           transform: node.worldTransform)
     }
     try? backend.endFrame()

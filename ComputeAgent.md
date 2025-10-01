@@ -37,8 +37,7 @@ public protocol ComputeScheduler {
     func makeComputePipeline(_ desc: ComputePipelineDescriptor) throws -> ComputePipelineHandle
     func dispatch(_ d: ComputeDispatch,
                   pipeline: ComputePipelineHandle,
-                  bindings: BindingSet,
-                  pushConstants: UnsafeRawPointer?) throws
+                  bindings: BindingSet) throws
     func readback(buffer: BufferHandle, into: UnsafeMutableRawPointer, length: Int) throws
 }
 ```
