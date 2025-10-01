@@ -1,16 +1,14 @@
 # SDLKit — Swift SDL3 Wrapper (Pre‑Alpha)
 
-SDLKit is a Swift Package that wraps SDL3 and exposes a Swift‑friendly API and a small, bounded GUI Agent for the FountainAI ecosystem.
+*Cross-platform Swift access to SDL3 with graphics, compute, and GUI agents built for humans and autonomous planners alike.*
 
-- Purpose: decouple SDL3 interop from higher‑level modules, enable reuse across projects, and provide a safe tool surface for AI planners.
-- SDL upstream: this project targets the Fountain‑Coach SDL fork: https://github.com/Fountain-Coach/SDL
+SDLKit wraps SDL3 with a Swift-first API that keeps the event loop, windowing, and rendering primitives approachable for toolsmiths and automation agents. The package separates SDL interop from higher-level modules so teams can reuse the foundation across projects while exposing a predictable surface area for AI planners. SDLKit targets the Fountain‑Coach SDL fork (https://github.com/Fountain-Coach/SDL) and adds modern 3D, shader, and compute systems on top of it.
+
+> **Start here:** [Quickstart](#quick-start-pre-alpha) · [Install](#install-sdl3) · [Architecture](#project-structure) · [Docs](/docs)
 
 ## Status
 
-- Alpha: Core window + renderer wrappers are wired to SDL3 when available; headless builds remain supported via `-DHEADLESS_CI`.
-- JSON Agent implements the documented tools (window controls, primitives, batches, textures, optional text, events, clipboard, input, display, screenshot).
-- Cross-platform 3D modules are live: the `Graphics` package exposes Metal/D3D12/Vulkan render backends, the `SceneGraph` module owns transform propagation and submission, and compute pipelines ship alongside graphics shaders for reuse across agents.
-- See `AGENTS.md:1` for the official agent contract and repo guidelines.
+SDLKit is currently in **alpha**: core window and renderer wrappers bind to SDL3 when available, and headless builds remain supported via `-DHEADLESS_CI`. The JSON Agent implements the documented window controls, primitive drawing, batching, texture uploads, optional text, events, clipboard access, input, display, and screenshot tools. Cross-platform 3D modules are live, providing Metal, D3D12, and Vulkan backends, a scene graph for transform propagation, and compute pipelines that share shader metadata. See `AGENTS.md:1` for the authoritative agent contract and repository guidelines.
 
 ## Project Structure
 
