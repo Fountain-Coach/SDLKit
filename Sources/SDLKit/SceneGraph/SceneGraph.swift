@@ -3,10 +3,13 @@ import Foundation
 public struct MaterialParams: Equatable {
     public var lightDirection: (Float, Float, Float)?
     public var baseColor: (Float, Float, Float, Float)?
+    public var texture: TextureHandle?
     public init(lightDirection: (Float, Float, Float)? = nil,
-                baseColor: (Float, Float, Float, Float)? = nil) {
+                baseColor: (Float, Float, Float, Float)? = nil,
+                texture: TextureHandle? = nil) {
         self.lightDirection = lightDirection
         self.baseColor = baseColor
+        self.texture = texture
     }
 }
 
@@ -22,9 +25,15 @@ public struct Material {
 public struct Mesh {
     public var vertexBuffer: BufferHandle
     public var vertexCount: Int
-    public init(vertexBuffer: BufferHandle, vertexCount: Int) {
+    public var indexBuffer: BufferHandle?
+    public var indexCount: Int
+    public var indexFormat: IndexFormat
+    public init(vertexBuffer: BufferHandle, vertexCount: Int, indexBuffer: BufferHandle? = nil, indexCount: Int = 0, indexFormat: IndexFormat = .uint16) {
         self.vertexBuffer = vertexBuffer
         self.vertexCount = vertexCount
+        self.indexBuffer = indexBuffer
+        self.indexCount = indexCount
+        self.indexFormat = indexFormat
     }
 }
 
@@ -98,12 +107,24 @@ public enum SceneGraphRenderer {
             let pipeline = try pipelineFor(material: material, backend: backend, colorFormat: colorFormat, depthFormat: depthFormat)
             var bindings = BindingSet()
             bindings.setValue(mesh.vertexBuffer, for: 0)
+            if let ib = mesh.indexBuffer, mesh.indexCount > 0 {
+                bindings.setValue(ib, for: 1) // index buffer
+                bindings.setValue(mesh.indexCount, for: 100) // index count
+                bindings.setValue(mesh.indexFormat, for: 101) // index format
+            }
+            if let textureHandle = material.params.texture {
+                bindings.setValue(textureHandle, for: 10) // fragment texture slot 0
+            }
             let mvp = node.worldTransform * vp
             // Determine light direction preference: material overrides scene
             let matLight = material.params.lightDirection ?? lightDir
-            // Build push constants block: 16 floats for matrix + 4 floats for lightDir (xyz, w=0)
+            // Determine base color: default white if none; alpha encodes hasTexture (1 => texture bound)
+            let base = material.params.baseColor ?? (1,1,1,1)
+            let hasTexture: Float = material.params.baseColor?.3 ?? (material.params.baseColor == nil && material.params.lightDirection == nil ? 0.0 : 0.0)
+            // Build push constants block: 16 floats (MVP) + 4 floats (lightDir) + 4 floats (baseColor)
             var data = mvp.toFloatArray()
             data.append(contentsOf: [matLight.0, matLight.1, matLight.2, 0.0])
+            data.append(contentsOf: [base.0, base.1, base.2, base.3])
             try data.withUnsafeBytes { bytes in
                 try backend.draw(
                     mesh: MeshHandle(),

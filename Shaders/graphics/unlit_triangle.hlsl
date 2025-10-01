@@ -13,6 +13,8 @@ struct VSOutput {
 [[vk::push_constant]] cbuffer SceneCB : register(b0)
 {
     float4x4 uMVP;
+    float4   lightDir; // unused here
+    float4   baseColor;
 };
 
 VSOutput unlit_triangle_vs(VSInput input) {
@@ -23,5 +25,6 @@ VSOutput unlit_triangle_vs(VSInput input) {
 }
 
 float4 unlit_triangle_ps(VSOutput input) : SV_Target {
-    return float4(input.color, 1.0);
+    float3 c = input.color * baseColor.rgb;
+    return float4(c, 1.0);
 }

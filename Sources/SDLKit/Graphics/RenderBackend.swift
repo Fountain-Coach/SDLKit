@@ -115,6 +115,11 @@ public enum VertexFormat: Equatable {
     case float4
 }
 
+public enum IndexFormat: String, Codable {
+    case uint16
+    case uint32
+}
+
 public enum ShaderStage {
     case vertex
     case fragment

@@ -16,6 +16,7 @@ struct VSOutput {
 {
     float4x4 uMVP;
     float4   lightDir; // xyz = direction
+    float4   baseColor;
 };
 
 VSOutput basic_lit_vs(VSInput input) {
@@ -30,6 +31,6 @@ float4 basic_lit_ps(VSOutput input) : SV_Target {
     float3 N = normalize(input.normal);
     float3 L = normalize(lightDir.xyz);
     float ndotl = max(dot(N, L), 0.0);
-    float3 lit = input.color * (0.15 + 0.85 * ndotl);
+    float3 lit = input.color * (0.15 + 0.85 * ndotl) * baseColor.rgb;
     return float4(lit, 1.0);
 }
