@@ -13,6 +13,7 @@ struct VSOut {
 
 struct Uniforms {
     float4x4 uMVP;
+    float4   baseColor;
 };
 
 vertex VSOut unlit_triangle_vs(VSIn in [[stage_in]], constant Uniforms& u [[buffer(1)]]) {
@@ -22,7 +23,8 @@ vertex VSOut unlit_triangle_vs(VSIn in [[stage_in]], constant Uniforms& u [[buff
     return o;
 }
 
-fragment float4 unlit_triangle_ps(VSOut in [[stage_in]]) {
-    return float4(in.color, 1.0);
+fragment float4 unlit_triangle_ps(VSOut in [[stage_in]], constant Uniforms& u [[buffer(1)]]) {
+    float3 tinted = in.color * u.baseColor.rgb;
+    return float4(tinted, u.baseColor.a);
 }
 

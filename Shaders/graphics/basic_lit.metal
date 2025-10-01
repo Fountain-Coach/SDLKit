@@ -16,6 +16,7 @@ struct VSOut {
 struct Uniforms {
     float4x4 uMVP;
     float4   lightDir;
+    float4   baseColor;
 };
 
 vertex VSOut basic_lit_vs(VSIn in [[stage_in]], constant Uniforms& u [[buffer(1)]]) {
@@ -30,7 +31,7 @@ fragment float4 basic_lit_ps(VSOut in [[stage_in]], constant Uniforms& u [[buffe
     float3 N = normalize(in.normal);
     float3 L = normalize(u.lightDir.xyz);
     float ndotl = max(dot(N, L), 0.0);
-    float3 lit = in.color * (0.15 + 0.85 * ndotl);
-    return float4(lit, 1.0);
+    float3 lit = in.color * (0.15 + 0.85 * ndotl) * u.baseColor.rgb;
+    return float4(lit, u.baseColor.a);
 }
 

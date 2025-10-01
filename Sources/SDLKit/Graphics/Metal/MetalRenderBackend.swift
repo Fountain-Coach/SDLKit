@@ -19,6 +19,8 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
         let vertexStride: Int
         let colorPixelFormats: [MTLPixelFormat]
         let depthPixelFormat: MTLPixelFormat?
+        let vertexBindings: [BindingSlot]
+        let fragmentBindings: [BindingSlot]
     }
 
     private struct ComputePipelineResource {
@@ -32,6 +34,12 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
         let indexBuffer: BufferHandle?
         let indexCount: Int
         let indexFormat: IndexFormat
+    }
+
+    private enum UniformConstants {
+        static let floatCount = 24
+        static let defaultLightDirection: [Float] = [0.3, -0.5, 0.8, 0.0]
+        static let defaultBaseColor: [Float] = [1.0, 1.0, 1.0, 1.0]
     }
 
     private let window: SDLWindow
@@ -371,7 +379,9 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
             descriptor: desc,
             vertexStride: max(1, module.vertexLayout.stride),
             colorPixelFormats: colorPixelFormats,
-            depthPixelFormat: depthAttachmentPixelFormat
+            depthPixelFormat: depthAttachmentPixelFormat,
+            vertexBindings: module.bindings[.vertex] ?? [],
+            fragmentBindings: module.bindings[.fragment] ?? []
         )
         pipelines[handle] = resource
         SDLLogger.debug("SDLKit.Graphics.Metal", "makePipeline id=\(handle.rawValue) label=\(pipelineDescriptor.label ?? "<nil>")")
@@ -399,22 +409,26 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
 
         let encoder = try obtainRenderEncoder(for: pipelineResource, commandBuffer: commandBuffer)
         encoder.setRenderPipelineState(pipelineResource.state)
-        // Push uniforms (matrix + optional lightDir) at buffer index 1 for both VS/FS
-        var uniformData: [Float] = transform.toFloatArray()
+        // Push uniforms (matrix + optional lightDir/baseColor) at buffer index 1 for both VS/FS
+        let uniformFloats: [Float]
         if let pc = pushConstants {
-            // Expect 16 floats matrix + 4 floats light
-            let count = 20
-            let ptr = pc.bindMemory(to: Float.self, capacity: count)
-            uniformData = Array(UnsafeBufferPointer(start: ptr, count: min(count, 20)))
+            let ptr = pc.bindMemory(to: Float.self, capacity: UniformConstants.floatCount)
+            let buffer = UnsafeBufferPointer(start: ptr, count: UniformConstants.floatCount)
+            uniformFloats = Array(buffer)
         } else {
-            // Append default light direction
-            uniformData.append(contentsOf: [0.3, -0.5, 0.8, 0.0])
+            var data = transform.toFloatArray()
+            data.append(contentsOf: UniformConstants.defaultLightDirection)
+            data.append(contentsOf: UniformConstants.defaultBaseColor)
+            uniformFloats = data
         }
-        uniformData.withUnsafeBytes { bytes in
+        uniformFloats.withUnsafeBytes { bytes in
             encoder.setVertexBytes(bytes.baseAddress!, length: bytes.count, index: 1)
             encoder.setFragmentBytes(bytes.baseAddress!, length: bytes.count, index: 1)
         }
         encoder.setVertexBuffer(vertexResource.buffer, offset: 0, index: 0)
+
+        try bindResources(pipelineResource.vertexBindings, stage: .vertex, encoder: encoder, bindings: bindings)
+        try bindResources(pipelineResource.fragmentBindings, stage: .fragment, encoder: encoder, bindings: bindings)
 
         let vertexCount = meshResource.vertexCount > 0
             ? meshResource.vertexCount
@@ -526,6 +540,79 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
     }
 
     // MARK: - Helpers
+
+    private func bindResources(_ slots: [BindingSlot],
+                               stage: ShaderStage,
+                               encoder: MTLRenderCommandEncoder,
+                               bindings: BindingSet) throws {
+        guard !slots.isEmpty else { return }
+        for slot in slots {
+            switch slot.kind {
+            case .uniformBuffer:
+                guard let handle: BufferHandle = bindings.value(for: slot.index, as: BufferHandle.self) else { continue }
+                guard let bufferResource = buffers[handle] else {
+                    throw AgentError.invalidArgument("Missing buffer resource for slot \(slot.index)")
+                }
+                let index = metalBufferIndex(for: slot)
+                switch stage {
+                case .vertex:
+                    encoder.setVertexBuffer(bufferResource.buffer, offset: 0, index: index)
+                case .fragment:
+                    encoder.setFragmentBuffer(bufferResource.buffer, offset: 0, index: index)
+                default:
+                    continue
+                }
+            case .storageBuffer:
+                guard let handle: BufferHandle = bindings.value(for: slot.index, as: BufferHandle.self),
+                      let bufferResource = buffers[handle] else {
+                    throw AgentError.invalidArgument("Missing buffer binding for slot \(slot.index)")
+                }
+                let index = metalBufferIndex(for: slot)
+                switch stage {
+                case .vertex:
+                    encoder.setVertexBuffer(bufferResource.buffer, offset: 0, index: index)
+                case .fragment:
+                    encoder.setFragmentBuffer(bufferResource.buffer, offset: 0, index: index)
+                default:
+                    continue
+                }
+            case .sampledTexture, .storageTexture:
+                guard let handle: TextureHandle = bindings.value(for: slot.index, as: TextureHandle.self),
+                      let texture = textures[handle] else {
+                    throw AgentError.invalidArgument("Missing texture binding for slot \(slot.index)")
+                }
+                switch stage {
+                case .vertex:
+                    encoder.setVertexTexture(texture, index: slot.index)
+                case .fragment:
+                    encoder.setFragmentTexture(texture, index: slot.index)
+                default:
+                    continue
+                }
+            case .sampler:
+                guard let sampler = bindings.value(for: slot.index, as: MTLSamplerState.self) else {
+                    throw AgentError.invalidArgument("Missing sampler binding for slot \(slot.index)")
+                }
+                switch stage {
+                case .vertex:
+                    encoder.setVertexSamplerState(sampler, index: slot.index)
+                case .fragment:
+                    encoder.setFragmentSamplerState(sampler, index: slot.index)
+                default:
+                    continue
+                }
+            }
+        }
+    }
+
+    private func metalBufferIndex(for slot: BindingSlot) -> Int {
+        switch slot.kind {
+        case .uniformBuffer, .storageBuffer:
+            return slot.index + 1
+        default:
+            return slot.index
+        }
+    }
 
     private func obtainRenderEncoder(for pipeline: PipelineResource, commandBuffer: MTLCommandBuffer) throws -> MTLRenderCommandEncoder {
         if let encoder = currentRenderEncoder {
