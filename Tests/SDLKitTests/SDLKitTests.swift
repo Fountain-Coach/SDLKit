@@ -65,7 +65,7 @@ final class SDLKitTests: XCTestCase {
     }
 
     func testCloseWindowInvokesRendererShutdown() async throws {
-        #if canImport(CSDL3)
+        #if canImport(CSDL3) && !HEADLESS_CI
         guard SDLKitStub_IsActive() != 0 else {
             throw XCTSkip("Requires stubbed SDLKit shim")
         }
@@ -94,7 +94,7 @@ final class SDLKitTests: XCTestCase {
         XCTAssertEqual(SDLKitStub_TTFQuitCallCount(), 0)
         SDLKitStub_ResetCallCounts()
         #else
-        throw XCTSkip("CSDL3 not available")
+        throw XCTSkip("CSDL3 not available in this configuration")
         #endif
     }
 

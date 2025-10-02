@@ -213,7 +213,15 @@ let package = Package(
         targets.append(
             .testTarget(
                 name: "SDLKitTests",
-                dependencies: ["SDLKit", .product(name: "FountainStore", package: "Fountain-Store")],
+                dependencies: {
+                    var deps: [Target.Dependency] = [
+                        "SDLKit",
+                        .product(name: "FountainStore", package: "Fountain-Store")
+                    ]
+                    // C shim types used in tests (SDL_Renderer/SDL_Texture)
+                    deps.append("CSDL3")
+                    return deps
+                }(),
                 path: "Tests/SDLKitTests"
             )
         )

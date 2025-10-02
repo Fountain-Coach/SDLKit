@@ -257,7 +257,7 @@ jobs:
           set -euo pipefail
           swift build -v -Xswiftc -DHEADLESS_CI
 
-      - name: Run tests
+      - name: Run tests (core suite)
         env:
           SDLKIT_GUI_ENABLED: 'false'
         run: |
@@ -265,9 +265,12 @@ jobs:
           attempt=1
           max_attempts=3
           backoff=5
+          test_log="${{ runner.temp }}/macos-swift-test.log"
+          : > "$test_log"
           while [ $attempt -le $max_attempts ]; do
             echo "macOS test attempt $attempt/$max_attempts"
-            if swift test -v -Xswiftc -DHEADLESS_CI; then
+            # Run fast, headless-friendly tests; GPU harness runs in next step
+            if swift test --skip-build --filter SDLKitTests -Xswiftc -DHEADLESS_CI 2>&1 | tee -a "$test_log"; then
               break
             fi
             if [ $attempt -eq $max_attempts ]; then
@@ -277,6 +280,14 @@ jobs:
             sleep $((backoff * attempt))
             attempt=$((attempt + 1))
           done
+
+      - name: Upload macOS test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-swift-test-log
+          path: ${{ runner.temp }}/macos-swift-test.log
+          if-no-files-found: ignore
 
       - name: Run regression harness (Metal)
         env:
