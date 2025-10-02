@@ -10,6 +10,10 @@ import VulkanMinimal
 import CVulkan
 #endif
 
+private let missingVulkanDependencyMessage = "Vulkan headers and the loader were not detected. Install the Vulkan SDK for your distribution (see docs/install.md) and re-run the build."
+
+#if canImport(CVulkan)
+
 @MainActor
 public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
     private static let descriptorSetBudgetPerFrame = 64
@@ -199,6 +203,8 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
         try initializeVulkan()
         #if canImport(CVulkan)
         try initializeDeviceAndQueues()
+        #else
+        throw AgentError.missingDependency(missingVulkanDependencyMessage)
         #endif
     }
 
@@ -3644,4 +3650,125 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
     }
     #endif
 }
+#else
+@MainActor
+public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
+    public var deviceEventHandler: RenderBackendDeviceEventHandler?
+
+    public required init(window: SDLWindow) throws {
+        throw AgentError.missingDependency(missingVulkanDependencyMessage)
+    }
+
+    private func missingDependencyError() -> AgentError {
+        AgentError.missingDependency(missingVulkanDependencyMessage)
+    }
+
+    private func missingDependencyTrap() -> Never {
+        fatalError(missingVulkanDependencyMessage)
+    }
+
+    public func beginFrame() throws {
+        throw missingDependencyError()
+    }
+
+    public func endFrame() throws {
+        throw missingDependencyError()
+    }
+
+    public func resize(width: Int, height: Int) throws {
+        throw missingDependencyError()
+    }
+
+    public func waitGPU() throws {
+        throw missingDependencyError()
+    }
+
+    public func createBuffer(bytes: UnsafeRawPointer?, length: Int, usage: BufferUsage) throws -> BufferHandle {
+        throw missingDependencyError()
+    }
+
+    public func requestCapture() {
+        missingDependencyTrap()
+    }
+
+    public func takeCaptureHash() throws -> String {
+        throw missingDependencyError()
+    }
+
+    public func takeValidationMessages() -> [String] {
+        missingDependencyTrap()
+    }
+
+    static func drainCapturedValidationMessages() -> [String] {
+        fatalError(missingVulkanDependencyMessage)
+    }
+
+    public func createTexture(descriptor: TextureDescriptor, initialData: TextureInitialData?) throws -> TextureHandle {
+        throw missingDependencyError()
+    }
+
+    public func createSampler(descriptor: SamplerDescriptor) throws -> SamplerHandle {
+        throw missingDependencyError()
+    }
+
+    public func destroy(_ handle: ResourceHandle) {
+        missingDependencyTrap()
+    }
+
+    public func registerMesh(vertexBuffer: BufferHandle,
+                             vertexCount: Int,
+                             indexBuffer: BufferHandle?,
+                             indexCount: Int,
+                             indexFormat: IndexFormat) throws -> MeshHandle {
+        throw missingDependencyError()
+    }
+
+    public func makePipeline(_ desc: GraphicsPipelineDescriptor) throws -> PipelineHandle {
+        throw missingDependencyError()
+    }
+
+    public func draw(mesh: MeshHandle, pipeline: PipelineHandle, bindings: BindingSet, transform: float4x4) throws {
+        throw missingDependencyError()
+    }
+
+    public func makeComputePipeline(_ desc: ComputePipelineDescriptor) throws -> ComputePipelineHandle {
+        throw missingDependencyError()
+    }
+
+    public func dispatchCompute(_ pipeline: ComputePipelineHandle, groupsX: Int, groupsY: Int, groupsZ: Int, bindings: BindingSet) throws {
+        throw missingDependencyError()
+    }
+
+    internal struct DebugResourceInventory: Equatable {
+        let bufferCount: Int
+        let textureCount: Int
+        let samplerCount: Int
+        let meshCount: Int
+        let graphicsPipelineCount: Int
+        let computePipelineCount: Int
+    }
+
+    internal func debugResourceInventory() -> DebugResourceInventory {
+        missingDependencyTrap()
+    }
+
+#if DEBUG
+    public func debugSimulateDeviceLoss() {
+        missingDependencyTrap()
+    }
+
+    internal func debugTextureDescriptor(for handle: TextureHandle) -> TextureDescriptor? {
+        missingDependencyTrap()
+    }
+
+    internal func debugBufferLength(for handle: BufferHandle) -> Int? {
+        missingDependencyTrap()
+    }
+
+    internal func debugTextureCount() -> Int {
+        missingDependencyTrap()
+    }
+#endif
+}
+#endif
 #endif

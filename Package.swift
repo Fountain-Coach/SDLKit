@@ -2,6 +2,12 @@
 import PackageDescription
 import Foundation
 
+#if os(Linux)
+let isLinux = true
+#else
+let isLinux = false
+#endif
+
 let env = ProcessInfo.processInfo.environment
 let useYams = (env["SDLKIT_NO_YAMS"] ?? "0") != "1"
 
@@ -33,6 +39,12 @@ let hasSDL3 = shouldUseSystemPackage("sdl3")
 let hasSDL3Image = shouldUseSystemPackage("sdl3-image")
 let hasSDL3TTF = shouldUseSystemPackage("sdl3-ttf")
 let hasVulkan = pkgConfigExists("vulkan")
+
+if isLinux && !hasVulkan {
+    fatalError("""
+    Vulkan development files are required to build SDLKit on Linux. Install the Vulkan SDK (headers, loader, and validation layers) via your distribution's package manager—for example `sudo apt install libvulkan-dev vulkan-validationlayers` on Debian/Ubuntu—then re-run the build.
+    """)
+}
 
 let package = Package(
     name: "SDLKit",
@@ -128,7 +140,7 @@ let package = Package(
                         "CSDL3",
                         .target(name: "CSDL3IMAGE", condition: .when(platforms: [.macOS, .linux]))
                     ]
-                    if hasVulkan {
+                    if isLinux {
                         deps.append(.target(name: "CVulkan", condition: .when(platforms: [.linux])))
                     }
                     if useYams { deps.append(.product(name: "Yams", package: "Yams")) }
@@ -168,7 +180,7 @@ let package = Package(
             )
         )
 
-        if hasVulkan {
+        if isLinux {
             targets.append(
                 .systemLibrary(
                     name: "CVulkan",
@@ -180,7 +192,7 @@ let package = Package(
             )
         }
 
-        if hasVulkan {
+        if isLinux {
             targets.append(
                 .target(
                     name: "VulkanMinimal",
@@ -222,7 +234,7 @@ let package = Package(
                         "SDLKit",
                         .target(name: "SDLKitTTF", condition: .when(platforms: [.macOS, .linux]))
                     ]
-                    if hasVulkan {
+                    if isLinux {
                         deps.append(.target(name: "VulkanMinimal", condition: .when(platforms: [.linux])))
                     }
                     return deps
