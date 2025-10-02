@@ -141,67 +141,8 @@ jobs:
           path: ${{ env.SDLKIT_GOLDEN_ARTIFACT_DIR }}
           if-no-files-found: ignore
 
-  windows:
-    if: >-
-      ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.os == 'all' || github.event.inputs.os == 'windows') }}
-    runs-on: windows-2022
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Swift
-        uses: swift-actions/setup-swift@v1
-        with:
-          swift-version: '6.0.2'
-
-      - name: Prepare regression artifact directory
-        shell: pwsh
-        run: |
-          $dir = Join-Path $env:RUNNER_TEMP 'sdlkit-golden\windows'
-          New-Item -ItemType Directory -Force -Path $dir | Out-Null
-          "SDLKIT_GOLDEN_ARTIFACT_DIR=$dir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
-      - name: Build and test (with retry)
-        shell: pwsh
-        env:
-          SDLKIT_GUI_ENABLED: 'false'
-        run: |
-          $ErrorActionPreference = 'Stop'
-          swift build -v -Xswiftc -DHEADLESS_CI
-          $attempt = 1
-          $maxAttempts = 3
-          $backoff = 5
-          while ($attempt -le $maxAttempts) {
-            Write-Host "Windows test attempt $attempt/$maxAttempts"
-            try {
-              swift test -v -Xswiftc -DHEADLESS_CI
-              break
-            } catch {
-              if ($attempt -eq $maxAttempts) {
-                throw
-              }
-              $sleep = $backoff * $attempt
-              Start-Sleep -Seconds $sleep
-            }
-            $attempt++
-          }
-
-      - name: Run regression harness (D3D12)
-        shell: pwsh
-        env:
-          SDLKIT_GOLDEN: '1'
-          SDLKIT_GUI_ENABLED: 'false'
-        run: |
-          $ErrorActionPreference = 'Stop'
-          swift test --skip-build --filter BackendHarnessTests -Xswiftc -DHEADLESS_CI
-
-      - name: Upload regression harness artifacts (D3D12)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-golden-artifacts
-          path: ${{ env.SDLKIT_GOLDEN_ARTIFACT_DIR }}
-          if-no-files-found: ignore
+  # Windows (D3D12) is disabled in CI because Swift ≥ 6 is required for Concurrency
+  # and is not currently available on Windows runners. Re-enable when toolchains catch up.
 
   macos:
     if: >-
