@@ -89,7 +89,7 @@ jobs:
           VK_INSTANCE_LAYERS: VK_LAYER_KHRONOS_validation
         run: |
           set -euo pipefail
-          swift build -v -Xswiftc -DHEADLESS_CI
+          swift build --build-tests -v -Xswiftc -DHEADLESS_CI
           log_dir="${{ runner.temp }}/vulkan-validation"
           mkdir -p "$log_dir"
           test_log="$log_dir/linux-swift-test.log"
