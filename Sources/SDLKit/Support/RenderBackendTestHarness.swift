@@ -312,7 +312,7 @@ public enum RenderBackendTestHarness {
     }
 
     public nonisolated(unsafe) static func artifactDirectoryFromEnvironment() -> URL? {
-
+      
         guard let raw = ProcessInfo.processInfo.environment["SDLKIT_GOLDEN_ARTIFACT_DIR"], !raw.isEmpty else {
             return nil
         }
