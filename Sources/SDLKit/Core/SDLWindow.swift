@@ -14,10 +14,6 @@ import Vulkan
 #if os(Linux) && canImport(CVulkan)
 import CVulkan
 #endif
-#if !canImport(Vulkan) && !(os(Linux) && canImport(CVulkan))
-public typealias VkInstance = OpaquePointer?
-public typealias VkSurfaceKHR = UInt64
-#endif
 #if canImport(QuartzCore)
 public typealias SDLKitMetalLayer = CAMetalLayer
 #else
