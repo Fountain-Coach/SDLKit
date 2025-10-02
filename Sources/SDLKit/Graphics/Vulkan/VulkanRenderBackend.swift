@@ -188,7 +188,7 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
             }
             computePipelines.removeAll()
             for (_, texture) in textures {
-                if let sampler = texture.sampler { vkDestroySampler(dev, sampler, nil) }
+                destroySampler(texture.sampler, device: dev)
                 if let view = texture.view { vkDestroyImageView(dev, view, nil) }
                 if let image = texture.image { vkDestroyImage(dev, image, nil) }
                 if let memory = texture.memory { vkFreeMemory(dev, memory, nil) }
@@ -608,28 +608,26 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
 
         var sampler: VkSampler? = nil
         if descriptor.usage == .shaderRead {
-            var samplerInfo = VkSamplerCreateInfo()
-            samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO
-            samplerInfo.magFilter = VK_FILTER_LINEAR
-            samplerInfo.minFilter = VK_FILTER_LINEAR
-            samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT
-            samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT
-            samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT
-            samplerInfo.anisotropyEnable = VK_FALSE
-            samplerInfo.maxAnisotropy = 1.0
-            samplerInfo.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK
-            samplerInfo.unnormalizedCoordinates = VK_FALSE
-            samplerInfo.compareEnable = VK_FALSE
-            samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR
-            samplerInfo.minLod = 0.0
-            samplerInfo.maxLod = Float(mipLevels)
-            let samplerResult = withUnsafePointer(to: samplerInfo) { ptr in vkCreateSampler(dev, ptr, nil, &sampler) }
-            if samplerResult != VK_SUCCESS {
-                if let sampler { vkDestroySampler(dev, sampler, nil) }
+            let mipFilter: SamplerMipFilter = mipLevels > 1 ? .linear : .notMipmapped
+            let defaultSampler = SamplerDescriptor(
+                label: "TextureSampler",
+                minFilter: .linear,
+                magFilter: .linear,
+                mipFilter: mipFilter,
+                addressModeU: .repeatTexture,
+                addressModeV: .repeatTexture,
+                addressModeW: .repeatTexture,
+                lodMinClamp: 0,
+                lodMaxClamp: Float(mipLevels),
+                maxAnisotropy: 1
+            )
+            do {
+                sampler = try allocateSampler(descriptor: defaultSampler, maxLODOverride: Float(mipLevels))
+            } catch {
                 if let view = imageView { vkDestroyImageView(dev, view, nil) }
                 vkDestroyImage(dev, createdImage, nil)
                 if let memory { vkFreeMemory(dev, memory, nil) }
-                throw AgentError.internalError("vkCreateSampler failed (res=\(samplerResult))")
+                throw error
             }
         }
 
@@ -654,39 +652,7 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
 
     public func createSampler(descriptor: SamplerDescriptor) throws -> SamplerHandle {
         #if canImport(CVulkan)
-        guard let dev = device else {
-            throw AgentError.internalError("Vulkan device not ready")
-        }
-        var info = VkSamplerCreateInfo()
-        info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO
-        info.magFilter = convertSamplerFilter(descriptor.magFilter)
-        info.minFilter = convertSamplerFilter(descriptor.minFilter)
-        info.mipmapMode = convertSamplerMipFilter(descriptor.mipFilter)
-        info.addressModeU = convertSamplerAddressMode(descriptor.addressModeU)
-        info.addressModeV = convertSamplerAddressMode(descriptor.addressModeV)
-        info.addressModeW = convertSamplerAddressMode(descriptor.addressModeW)
-        info.mipLodBias = 0
-        info.minLod = descriptor.lodMinClamp
-        info.maxLod = descriptor.mipFilter == .notMipmapped ? descriptor.lodMinClamp : descriptor.lodMaxClamp
-        let anisotropy = Float(max(1, descriptor.maxAnisotropy))
-        if anisotropy > 1 {
-            info.anisotropyEnable = VK_TRUE
-            info.maxAnisotropy = anisotropy
-        } else {
-            info.anisotropyEnable = VK_FALSE
-            info.maxAnisotropy = 1
-        }
-        info.compareEnable = VK_FALSE
-        info.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK
-        info.unnormalizedCoordinates = VK_FALSE
-
-        var sampler: VkSampler? = nil
-        let result = withUnsafePointer(to: info) { ptr in vkCreateSampler(dev, ptr, nil, &sampler) }
-        if result != VK_SUCCESS || sampler == nil {
-            if let sampler { vkDestroySampler(dev, sampler, nil) }
-            throw AgentError.internalError("vkCreateSampler failed (res=\(result))")
-        }
-
+        let sampler = try allocateSampler(descriptor: descriptor)
         let handle = SamplerHandle()
         samplers[handle] = SamplerResource(descriptor: descriptor, sampler: sampler)
         return handle
@@ -751,14 +717,14 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
             }
         case .texture(let h):
             if let res = textures.removeValue(forKey: h), let dev = device {
-                if let sampler = res.sampler { vkDestroySampler(dev, sampler, nil) }
+                destroySampler(res.sampler, device: dev)
                 if let view = res.view { vkDestroyImageView(dev, view, nil) }
                 if let image = res.image { vkDestroyImage(dev, image, nil) }
                 if let memory = res.memory { vkFreeMemory(dev, memory, nil) }
             }
         case .sampler(let handle):
             if let res = samplers.removeValue(forKey: handle), let dev = device {
-                if let sampler = res.sampler { vkDestroySampler(dev, sampler, nil) }
+                destroySampler(res.sampler, device: dev)
             }
         case .mesh(let h):
             meshes.removeValue(forKey: h)
@@ -1394,16 +1360,7 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
         var descriptorBindings: [VkDescriptorSetLayoutBinding] = []
         var descriptorTypeCounts: [VkDescriptorType: UInt32] = [:]
         for slot in module.bindings {
-            let descriptorType: VkDescriptorType
-            switch slot.kind {
-            case .uniformBuffer:
-                descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
-            case .storageBuffer:
-                descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
-            case .sampledTexture, .storageTexture, .sampler:
-                if let shaderModule { vkDestroyShaderModule(dev, shaderModule, nil) }
-                throw AgentError.notImplemented("Vulkan compute textures and samplers are not yet supported")
-            }
+            let descriptorType = try descriptorType(for: slot.kind)
             var binding = VkDescriptorSetLayoutBinding()
             binding.binding = UInt32(slot.index)
             binding.descriptorCount = 1
@@ -1537,6 +1494,9 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
 
         var descriptorSet: VkDescriptorSet? = nil
         var bufferInfos: [VkDescriptorBufferInfo] = []
+        var imageInfos: [VkDescriptorImageInfo] = []
+        var bufferIndices: [Int?] = []
+        var imageIndices: [Int?] = []
         var writes: [VkWriteDescriptorSet] = []
         if !resource.module.bindings.isEmpty {
             guard let layout = resource.descriptorSetLayout, let descriptorPool = resource.descriptorPool else {
@@ -1554,51 +1514,123 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
             if allocResult != VK_SUCCESS || descriptorSet == nil {
                 throw AgentError.internalError("vkAllocateDescriptorSets failed (res=\(allocResult))")
             }
+            guard let descriptorSetHandle = descriptorSet else {
+                throw AgentError.internalError("Descriptor set allocation returned nil handle")
+            }
 
             for slot in resource.module.bindings {
-                let descriptorType: VkDescriptorType
-                switch slot.kind {
-                case .uniformBuffer:
-                    descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
-                case .storageBuffer:
-                    descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
-                case .sampledTexture, .storageTexture, .sampler:
-                    throw AgentError.notImplemented("Vulkan compute textures and samplers are not yet supported")
-                }
-                guard let entry = bindings.resource(at: slot.index) else {
-                    throw AgentError.invalidArgument("Missing buffer binding for compute slot \(slot.index)")
-                }
-                let handle: BufferHandle
-                switch entry {
-                case .buffer(let bufferHandle):
-                    handle = bufferHandle
-                case .texture:
-                    throw AgentError.invalidArgument("Texture bound to buffer slot \(slot.index) in Vulkan compute dispatch")
-                }
-                guard let bufferRes = buffers[handle], let buffer = bufferRes.buffer else {
-                    throw AgentError.invalidArgument("Unknown buffer handle for compute slot \(slot.index)")
-                }
-                var info = VkDescriptorBufferInfo()
-                info.buffer = buffer
-                info.offset = 0
-                info.range = VkDeviceSize(bufferRes.length)
-                bufferInfos.append(info)
-
+                let descriptorType = try descriptorType(for: slot.kind)
                 var write = VkWriteDescriptorSet()
                 write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
-                write.dstSet = descriptorSet
+                write.dstSet = descriptorSetHandle
                 write.dstBinding = UInt32(slot.index)
                 write.descriptorCount = 1
                 write.descriptorType = descriptorType
+
+                switch slot.kind {
+                case .uniformBuffer, .storageBuffer:
+                    guard let entry = bindings.resource(at: slot.index) else {
+                        throw AgentError.invalidArgument("Missing buffer binding for compute slot \(slot.index)")
+                    }
+                    let handle: BufferHandle
+                    switch entry {
+                    case .buffer(let bufferHandle):
+                        handle = bufferHandle
+                    case .texture:
+                        throw AgentError.invalidArgument("Texture bound to buffer slot \(slot.index) in Vulkan compute dispatch")
+                    }
+                    guard let bufferRes = buffers[handle], let buffer = bufferRes.buffer else {
+                        throw AgentError.invalidArgument("Unknown buffer handle for compute slot \(slot.index)")
+                    }
+                    var info = VkDescriptorBufferInfo()
+                    info.buffer = buffer
+                    info.offset = 0
+                    info.range = VkDeviceSize(bufferRes.length)
+                    bufferIndices.append(bufferInfos.count)
+                    imageIndices.append(nil)
+                    bufferInfos.append(info)
+                case .sampledTexture:
+                    guard let entry = bindings.resource(at: slot.index) else {
+                        throw AgentError.invalidArgument("Missing texture binding for compute slot \(slot.index)")
+                    }
+                    let textureHandle: TextureHandle
+                    switch entry {
+                    case .texture(let handle):
+                        textureHandle = handle
+                    case .buffer:
+                        throw AgentError.invalidArgument("Buffer bound to texture slot \(slot.index) in Vulkan compute dispatch")
+                    }
+                    guard let texture = textures[textureHandle] else {
+                        throw AgentError.invalidArgument("Unknown texture handle for compute slot \(slot.index)")
+                    }
+                    var info = VkDescriptorImageInfo()
+                    if let samplerHandle = bindings.sampler(at: slot.index),
+                       let samplerRes = samplers[samplerHandle],
+                       let sampler = samplerRes.sampler {
+                        info.sampler = sampler
+                    } else {
+                        info.sampler = texture.sampler
+                    }
+                    guard info.sampler != nil else {
+                        throw AgentError.invalidArgument("Missing sampler for combined image slot \(slot.index) in Vulkan compute dispatch")
+                    }
+                    info.imageView = texture.view
+                    info.imageLayout = texture.layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL : texture.layout
+                    bufferIndices.append(nil)
+                    imageIndices.append(imageInfos.count)
+                    imageInfos.append(info)
+                case .storageTexture:
+                    guard let entry = bindings.resource(at: slot.index) else {
+                        throw AgentError.invalidArgument("Missing storage texture binding for compute slot \(slot.index)")
+                    }
+                    let textureHandle: TextureHandle
+                    switch entry {
+                    case .texture(let handle):
+                        textureHandle = handle
+                    case .buffer:
+                        throw AgentError.invalidArgument("Buffer bound to storage texture slot \(slot.index)")
+                    }
+                    guard let texture = textures[textureHandle] else {
+                        throw AgentError.invalidArgument("Unknown storage texture handle for compute slot \(slot.index)")
+                    }
+                    var info = VkDescriptorImageInfo()
+                    info.sampler = nil
+                    info.imageView = texture.view
+                    info.imageLayout = texture.layout
+                    bufferIndices.append(nil)
+                    imageIndices.append(imageInfos.count)
+                    imageInfos.append(info)
+                case .sampler:
+                    guard let samplerHandle = bindings.sampler(at: slot.index),
+                          let samplerRes = samplers[samplerHandle],
+                          let sampler = samplerRes.sampler else {
+                        throw AgentError.invalidArgument("Missing sampler binding for compute slot \(slot.index)")
+                    }
+                    var info = VkDescriptorImageInfo()
+                    info.sampler = sampler
+                    info.imageView = nil
+                    info.imageLayout = VK_IMAGE_LAYOUT_UNDEFINED
+                    bufferIndices.append(nil)
+                    imageIndices.append(imageInfos.count)
+                    imageInfos.append(info)
+                }
+
                 writes.append(write)
             }
 
             bufferInfos.withUnsafeMutableBufferPointer { bufferPtr in
-                writes.withUnsafeMutableBufferPointer { writePtr in
-                    for index in 0..<writePtr.count {
-                        writePtr[index].pBufferInfo = bufferPtr.baseAddress?.advanced(by: index)
+                imageInfos.withUnsafeMutableBufferPointer { imagePtr in
+                    for index in 0..<writes.count {
+                        if let bufferOffset = bufferIndices[index] {
+                            writes[index].pBufferInfo = bufferPtr.baseAddress?.advanced(by: bufferOffset)
+                        }
+                        if let imageOffset = imageIndices[index] {
+                            writes[index].pImageInfo = imagePtr.baseAddress?.advanced(by: imageOffset)
+                        }
                     }
-                    _ = vkUpdateDescriptorSets(dev, UInt32(writePtr.count), writePtr.baseAddress, 0, nil)
+                    writes.withUnsafeMutableBufferPointer { writePtr in
+                        vkUpdateDescriptorSets(dev, UInt32(writePtr.count), writePtr.baseAddress, 0, nil)
+                    }
                 }
             }
         }
@@ -2335,6 +2367,62 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
             return VK_SAMPLER_ADDRESS_MODE_REPEAT
         case .mirrorRepeat:
             return VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT
+        }
+    }
+
+    private func makeSamplerCreateInfo(from descriptor: SamplerDescriptor,
+                                       maxLODOverride: Float? = nil) -> VkSamplerCreateInfo {
+        var info = VkSamplerCreateInfo()
+        info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO
+        info.magFilter = convertSamplerFilter(descriptor.magFilter)
+        info.minFilter = convertSamplerFilter(descriptor.minFilter)
+        info.mipmapMode = convertSamplerMipFilter(descriptor.mipFilter)
+        info.addressModeU = convertSamplerAddressMode(descriptor.addressModeU)
+        info.addressModeV = convertSamplerAddressMode(descriptor.addressModeV)
+        info.addressModeW = convertSamplerAddressMode(descriptor.addressModeW)
+        info.mipLodBias = 0
+        info.minLod = descriptor.lodMinClamp
+        if descriptor.mipFilter == .notMipmapped {
+            info.maxLod = descriptor.lodMinClamp
+        } else if let override = maxLODOverride {
+            info.maxLod = override
+        } else {
+            info.maxLod = descriptor.lodMaxClamp
+        }
+        let anisotropy = Float(max(1, descriptor.maxAnisotropy))
+        if anisotropy > 1 {
+            info.anisotropyEnable = VK_TRUE
+            info.maxAnisotropy = anisotropy
+        } else {
+            info.anisotropyEnable = VK_FALSE
+            info.maxAnisotropy = 1
+        }
+        info.compareEnable = VK_FALSE
+        info.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK
+        info.unnormalizedCoordinates = VK_FALSE
+        return info
+    }
+
+    private func allocateSampler(descriptor: SamplerDescriptor,
+                                  maxLODOverride: Float? = nil) throws -> VkSampler {
+        guard let dev = device else {
+            throw AgentError.internalError("Vulkan device not ready")
+        }
+        var info = makeSamplerCreateInfo(from: descriptor, maxLODOverride: maxLODOverride)
+        var sampler: VkSampler? = nil
+        let result = withUnsafePointer(to: &info) { ptr in vkCreateSampler(dev, ptr, nil, &sampler) }
+        if result != VK_SUCCESS || sampler == nil {
+            if let sampler { vkDestroySampler(dev, sampler, nil) }
+            throw AgentError.internalError("vkCreateSampler failed (res=\(result))")
+        }
+        return sampler!
+    }
+
+    private func destroySampler(_ sampler: VkSampler?, device override: VkDevice? = nil) {
+        guard let sampler else { return }
+        let targetDevice = override ?? device
+        if let dev = targetDevice {
+            vkDestroySampler(dev, sampler, nil)
         }
     }
 
