@@ -188,6 +188,9 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
     // Capture state
     private var captureRequested: Bool = false
     private var lastCaptureHash: String?
+    private var lastCaptureData: Data?
+    private var lastCaptureBytesPerRow: Int = 0
+    private var lastCaptureSize: (width: Int, height: Int) = (0, 0)
     private var readbackBuffer: UnsafeMutablePointer<ID3D12Resource>?
     private var readbackBufferSize: UINT64 = 0
     private var recoveringDeviceLoss = false
@@ -235,6 +238,9 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
         }
 
         frameActive = true
+        lastCaptureData = nil
+        lastCaptureBytesPerRow = 0
+        lastCaptureSize = (0, 0)
         do {
             try waitForFrameCompletion(Int(frameIndex))
 
@@ -402,6 +408,9 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
                         }
                     }
                     lastCaptureHash = D3D12RenderBackend.hashHexRowMajor(data: data, width: width, height: height, rowPitch: rowPitch, bpp: 4)
+                    lastCaptureData = data
+                    lastCaptureBytesPerRow = rowPitch
+                    lastCaptureSize = (width, height)
                 }
                 rb.pointee.lpVtbl.pointee.Unmap(rb, 0, nil)
             }
@@ -2946,6 +2955,20 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
     public func takeCaptureHash() throws -> String {
         guard let h = lastCaptureHash else { throw AgentError.internalError("No capture hash available; call requestCapture() before endFrame") }
         return h
+    }
+
+    public func takeCapturePayload() throws -> GoldenImageCapture {
+        guard let data = lastCaptureData else {
+            throw AgentError.internalError("No capture data available; call requestCapture() before endFrame")
+        }
+        let width = lastCaptureSize.width > 0 ? lastCaptureSize.width : Int(currentWidth)
+        let height = lastCaptureSize.height > 0 ? lastCaptureSize.height : Int(currentHeight)
+        let bytesPerRow = lastCaptureBytesPerRow > 0 ? lastCaptureBytesPerRow : max(1, width * 4)
+        return GoldenImageCapture(width: width,
+                                  height: height,
+                                  bytesPerRow: bytesPerRow,
+                                  layout: .bgra8Unorm,
+                                  data: data)
     }
 
     private static func hashHexRowMajor(data: Data, width: Int, height: Int, rowPitch: Int, bpp: Int) -> String {

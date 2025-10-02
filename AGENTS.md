@@ -160,6 +160,8 @@ public protocol ComputeScheduler {
 
 ## 6) Milestones & Cross‑Agent Acceptance
 
+> **Quality Gate:** The RenderBackend regression harness (golden image + compute suite) must pass on Metal, D3D12, and Vulkan before closing milestones **M1–M5**. CI runs the harness on each platform leg and publishes capture hashes/images for review when a failure occurs.
+
 **M0 — C Shim & Windowing**
 - Shim exposes: `CAMetalLayer`, `HWND`, `VkSurfaceKHR`. Minimal sample retrieves each and logs success.
 - Acceptance: sample runs on each platform; correct handle types; no crashes.

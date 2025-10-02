@@ -324,12 +324,68 @@ public enum ResourceHandle: Hashable {
     case mesh(MeshHandle)
 }
 
+public struct GoldenImageCapture: Sendable {
+    public enum PixelLayout: Sendable {
+        case rgba8Unorm
+        case bgra8Unorm
+        case depth32Float
+    }
+
+    public let width: Int
+    public let height: Int
+    public let bytesPerRow: Int
+    public let layout: PixelLayout
+    public let data: Data
+
+    public func writePPM(to url: URL) throws {
+        guard width > 0, height > 0 else { return }
+        let header = "P6\n\(width) \(height)\n255\n"
+        var body = Data(count: width * height * 3)
+        data.withUnsafeBytes { src in
+            body.withUnsafeMutableBytes { dst in
+                guard let srcBase = src.baseAddress, let dstBase = dst.baseAddress else { return }
+                let srcBytes = srcBase.assumingMemoryBound(to: UInt8.self)
+                let dstBytes = dstBase.assumingMemoryBound(to: UInt8.self)
+                for y in 0..<height {
+                    let srcRow = srcBytes.advanced(by: y * bytesPerRow)
+                    let dstRow = dstBytes.advanced(by: y * width * 3)
+                    for x in 0..<width {
+                        let srcPixel = srcRow.advanced(by: x * 4)
+                        let dstPixel = dstRow.advanced(by: x * 3)
+                        switch layout {
+                        case .rgba8Unorm:
+                            dstPixel[0] = srcPixel[0]
+                            dstPixel[1] = srcPixel[1]
+                            dstPixel[2] = srcPixel[2]
+                        case .bgra8Unorm:
+                            dstPixel[0] = srcPixel[2]
+                            dstPixel[1] = srcPixel[1]
+                            dstPixel[2] = srcPixel[0]
+                        case .depth32Float:
+                            let floatValue = srcPixel.withMemoryRebound(to: Float.self, capacity: 1) { $0.pointee }
+                            let clamped = max(0.0, min(1.0, floatValue))
+                            let byte = UInt8(clamped * 255)
+                            dstPixel[0] = byte
+                            dstPixel[1] = byte
+                            dstPixel[2] = byte
+                        }
+                    }
+                }
+            }
+        }
+        var fileData = Data(header.utf8)
+        fileData.append(body)
+        try fileData.write(to: url)
+    }
+}
+
 // Optional protocol: backends may support golden-image capture for tests.
 // Call `requestCapture()` before ending a frame, then fetch the hash via `takeCaptureHash()`.
 @MainActor
 public protocol GoldenImageCapturable {
     func requestCapture()
     func takeCaptureHash() throws -> String
+    func takeCapturePayload() throws -> GoldenImageCapture
 }
 
 @MainActor

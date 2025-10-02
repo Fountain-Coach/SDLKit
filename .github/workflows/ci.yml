@@ -55,6 +55,13 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-shader-
 
+      - name: Prepare regression artifact directory
+        run: |
+          set -euo pipefail
+          harness_root="${RUNNER_TEMP}/sdlkit-golden/linux"
+          mkdir -p "$harness_root"
+          echo "SDLKIT_GOLDEN_ARTIFACT_DIR=$harness_root" >> "$GITHUB_ENV"
+
       - name: Build shader bundle (best effort)
         run: |
           python3 Scripts/ShaderBuild/build-shaders.py "$PWD" .build/shader-cache
@@ -96,6 +103,25 @@ jobs:
           name: linux-vulkan-validation-logs
           path: ${{ runner.temp }}/vulkan-validation
 
+      - name: Run regression harness (Vulkan)
+        env:
+          SDLKIT_GOLDEN: '1'
+          SDLKIT_GUI_ENABLED: 'false'
+          SDLKIT_VK_VALIDATION_CAPTURE: '1'
+          SDLKIT_VK_VALIDATION: '1'
+          VK_INSTANCE_LAYERS: VK_LAYER_KHRONOS_validation
+        run: |
+          set -euo pipefail
+          swift test --skip-build --filter BackendHarnessTests -Xswiftc -DHEADLESS_CI
+
+      - name: Upload regression harness artifacts (Vulkan)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-golden-artifacts
+          path: ${{ env.SDLKIT_GOLDEN_ARTIFACT_DIR }}
+          if-no-files-found: ignore
+
   windows:
     runs-on: windows-2022
     steps:
@@ -106,6 +132,13 @@ jobs:
         uses: swift-actions/setup-swift@v1
         with:
           swift-version: '6.0.2'
+
+      - name: Prepare regression artifact directory
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP 'sdlkit-golden\windows'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          "SDLKIT_GOLDEN_ARTIFACT_DIR=$dir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Build and test (with retry)
         shell: pwsh
@@ -131,3 +164,72 @@ jobs:
             }
             $attempt++
           }
+
+      - name: Run regression harness (D3D12)
+        shell: pwsh
+        env:
+          SDLKIT_GOLDEN: '1'
+          SDLKIT_GUI_ENABLED: 'false'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          swift test --skip-build --filter BackendHarnessTests -Xswiftc -DHEADLESS_CI
+
+      - name: Upload regression harness artifacts (D3D12)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-golden-artifacts
+          path: ${{ env.SDLKIT_GOLDEN_ARTIFACT_DIR }}
+          if-no-files-found: ignore
+
+  macos:
+    runs-on: macos-13
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install SDL2
+        run: brew install sdl2
+
+      - name: Install Swift 6.1.0 toolchain
+        run: |
+          set -euo pipefail
+          curl -fLO https://download.swift.org/swift-6.1-release/xcode/swift-6.1-RELEASE/swift-6.1-RELEASE-osx.pkg
+          sudo installer -pkg swift-6.1-RELEASE-osx.pkg -target /
+          echo "/Library/Developer/Toolchains/swift-6.1-RELEASE.xctoolchain/usr/bin" >> "$GITHUB_PATH"
+          rm swift-6.1-RELEASE-osx.pkg
+
+      - name: Prepare regression artifact directory
+        run: |
+          set -euo pipefail
+          harness_root="${RUNNER_TEMP}/sdlkit-golden/macos"
+          mkdir -p "$harness_root"
+          echo "SDLKIT_GOLDEN_ARTIFACT_DIR=$harness_root" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: |
+          set -euo pipefail
+          swift build -v -Xswiftc -DHEADLESS_CI
+
+      - name: Run tests
+        env:
+          SDLKIT_GUI_ENABLED: 'false'
+        run: |
+          set -euo pipefail
+          swift test -v -Xswiftc -DHEADLESS_CI
+
+      - name: Run regression harness (Metal)
+        env:
+          SDLKIT_GOLDEN: '1'
+          SDLKIT_GUI_ENABLED: 'false'
+        run: |
+          set -euo pipefail
+          swift test --skip-build --filter BackendHarnessTests -Xswiftc -DHEADLESS_CI
+
+      - name: Upload regression harness artifacts (Metal)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-golden-artifacts
+          path: ${{ env.SDLKIT_GOLDEN_ARTIFACT_DIR }}
+          if-no-files-found: ignore
