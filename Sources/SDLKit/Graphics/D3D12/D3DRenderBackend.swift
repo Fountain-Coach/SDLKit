@@ -49,6 +49,18 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
         let textureParameterIndices: [Int: Int]
         let storageTextureParameterIndices: [Int: Int]
         let samplerParameterIndices: [Int: Int]
+        let pushConstantBinding: ComputePushConstantBinding?
+    }
+
+    private enum ComputePushConstantBinding {
+        case rootConstants(parameterIndex: Int, valueCount: Int)
+        case constantBuffer(parameterIndex: Int, size: Int)
+    }
+
+    private struct ComputeCommandContext {
+        let commandList: UnsafeMutablePointer<ID3D12GraphicsCommandList>
+        let allocator: UnsafeMutablePointer<ID3D12CommandAllocator>?
+        let requiresSubmission: Bool
     }
 
     private struct TextureResource {
@@ -145,6 +157,13 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
     private var nextSamplerDescriptorIndex: UINT = 0
     private var freeSamplerDescriptorIndices: [UINT] = []
     private let maxSamplerDescriptors: UINT = 64
+
+    private var computeCommandAllocator: UnsafeMutablePointer<ID3D12CommandAllocator>?
+    private var computeCommandList: UnsafeMutablePointer<ID3D12GraphicsCommandList>?
+    private var pendingComputeFenceValue: UInt64?
+    private var fenceValueCounter: UInt64 = 0
+    private var computePushConstantBuffer: UnsafeMutablePointer<ID3D12Resource>?
+    private var computePushConstantBufferSize: Int = 0
 
     // Capture state
     private var captureRequested: Bool = false
@@ -315,15 +334,16 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
         try checkHRESULT(swapChain.pointee.lpVtbl.pointee.Present(swapChain, 1, 0), "IDXGISwapChain3.Present")
 
         let currentFrame = Int(frameIndex)
-        let fenceValue = fenceValues[currentFrame] + 1
+        let fenceValue = allocateFenceValue()
         fenceValues[currentFrame] = fenceValue
         try checkHRESULT(commandQueue.pointee.lpVtbl.pointee.Signal(commandQueue, fence, fenceValue), "ID3D12CommandQueue.Signal")
 
         // If capture requested, wait for GPU and compute hash now
         if captureRequested {
-            try checkHRESULT(commandQueue.pointee.lpVtbl.pointee.Signal(commandQueue, fence, fenceValues[Int(frameIndex)] + 1), "ID3D12CommandQueue.Signal(capture)")
-            fenceValues[Int(frameIndex)] += 1
-            try waitForFence(value: fenceValues[Int(frameIndex)])
+            let captureFenceValue = allocateFenceValue()
+            try checkHRESULT(commandQueue.pointee.lpVtbl.pointee.Signal(commandQueue, fence, captureFenceValue), "ID3D12CommandQueue.Signal(capture)")
+            fenceValues[currentFrame] = captureFenceValue
+            try waitForFence(value: captureFenceValue)
             if let rb = readbackBuffer {
                 var mapped: UnsafeMutableRawPointer?
                 try checkHRESULT(rb.pointee.lpVtbl.pointee.Map(rb, 0, nil, &mapped), "ID3D12Resource.Map(readback)")
@@ -392,8 +412,9 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
 
     public func waitGPU() throws {
         guard let commandQueue, let fence else { return }
+        try waitForPendingComputeWork()
         let currentFrame = Int(frameIndex)
-        let signalValue = fenceValues[currentFrame] + 1
+        let signalValue = allocateFenceValue()
         fenceValues[currentFrame] = signalValue
         try checkHRESULT(commandQueue.pointee.lpVtbl.pointee.Signal(commandQueue, fence, signalValue), "ID3D12CommandQueue.Signal")
         try waitForFence(value: signalValue)
@@ -1117,8 +1138,9 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
         return index
     }
 
-    private func transitionBuffer(_ handle: BufferHandle, to newState: D3D12_RESOURCE_STATES) {
-        guard let commandList else { return }
+    private func transitionBuffer(_ handle: BufferHandle,
+                                  to newState: D3D12_RESOURCE_STATES,
+                                  commandList: UnsafeMutablePointer<ID3D12GraphicsCommandList>) {
         guard var resource = buffers[handle] else { return }
         if resource.state == newState { return }
         var barrier = D3D12_RESOURCE_BARRIER()
@@ -1135,8 +1157,9 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
         buffers[handle] = resource
     }
 
-    private func transitionTexture(_ handle: TextureHandle, to newState: D3D12_RESOURCE_STATES) {
-        guard let commandList else { return }
+    private func transitionTexture(_ handle: TextureHandle,
+                                   to newState: D3D12_RESOURCE_STATES,
+                                   commandList: UnsafeMutablePointer<ID3D12GraphicsCommandList>) {
         guard var texture = textures[handle] else { return }
         if texture.state == newState { return }
         var barrier = D3D12_RESOURCE_BARRIER()
@@ -1153,8 +1176,8 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
         textures[handle] = texture
     }
 
-    private func insertUAVBarrier(_ handle: BufferHandle) {
-        guard let commandList else { return }
+    private func insertUAVBarrier(_ handle: BufferHandle,
+                                  commandList: UnsafeMutablePointer<ID3D12GraphicsCommandList>) {
         guard let resource = buffers[handle] else { return }
         var barrier = D3D12_RESOURCE_BARRIER()
         barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV
@@ -1163,8 +1186,8 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
         commandList.pointee.lpVtbl.pointee.ResourceBarrier(commandList, 1, &barrier)
     }
 
-    private func insertTextureUAVBarrier(_ handle: TextureHandle) {
-        guard let commandList else { return }
+    private func insertTextureUAVBarrier(_ handle: TextureHandle,
+                                         commandList: UnsafeMutablePointer<ID3D12GraphicsCommandList>) {
         guard let resource = textures[handle] else { return }
         var barrier = D3D12_RESOURCE_BARRIER()
         barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV
@@ -1221,7 +1244,7 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
         guard let texture = textures[handle], let rtvHandle = texture.rtvCPUHandle else {
             throw AgentError.invalidArgument("Texture handle does not have an RTV descriptor")
         }
-        transitionTexture(handle, to: D3D12_RESOURCE_STATE_RENDER_TARGET)
+        transitionTexture(handle, to: D3D12_RESOURCE_STATE_RENDER_TARGET, commandList: commandList)
         var rtv = rtvHandle
         commandList.pointee.lpVtbl.pointee.OMSetRenderTargets(commandList, 1, &rtv, false, nil)
         if let clearColor {
@@ -1672,7 +1695,7 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
                 guard let texture = textures[textureHandle] else {
                     throw AgentError.invalidArgument("Missing texture binding for slot \(slot)")
                 }
-                transitionTexture(textureHandle, to: D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)
+                transitionTexture(textureHandle, to: D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, commandList: commandList)
                 guard let gpuHandle = texture.srvGPUHandle else {
                     throw AgentError.invalidArgument("Texture bound to slot \(slot) does not have a shader resource view")
                 }
@@ -1732,7 +1755,7 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
         }
         commandList.pointee.lpVtbl.pointee.IASetPrimitiveTopology(commandList, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST)
 
-        transitionBuffer(meshResource.vertexBuffer, to: D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER)
+        transitionBuffer(meshResource.vertexBuffer, to: D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER, commandList: commandList)
         var view = D3D12_VERTEX_BUFFER_VIEW(
             BufferLocation: buffer.resource.pointee.lpVtbl.pointee.GetGPUVirtualAddress(buffer.resource),
             SizeInBytes: UINT(buffer.length),
@@ -1742,7 +1765,7 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
         if let indexHandle = meshResource.indexBuffer,
            meshResource.indexCount > 0,
            let indexBuffer = buffers[indexHandle] {
-            transitionBuffer(indexHandle, to: D3D12_RESOURCE_STATE_INDEX_BUFFER)
+            transitionBuffer(indexHandle, to: D3D12_RESOURCE_STATE_INDEX_BUFFER, commandList: commandList)
             var ibView = D3D12_INDEX_BUFFER_VIEW(
                 BufferLocation: indexBuffer.resource.pointee.lpVtbl.pointee.GetGPUVirtualAddress(indexBuffer.resource),
                 SizeInBytes: UINT(indexBuffer.length),
@@ -1772,6 +1795,7 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
         var textureIndices: [Int: Int] = [:]
         var storageTextureIndices: [Int: Int] = [:]
         var samplerIndices: [Int: Int] = [:]
+        var pushConstantBinding: ComputePushConstantBinding?
         for slot in module.bindings.sorted(by: { $0.index < $1.index }) {
             switch slot.kind {
             case .uniformBuffer:
@@ -1833,6 +1857,32 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
                 rootParameters.append(parameter)
                 descriptorParameterIndices.append(rootParameters.count - 1)
                 storageTextureIndices[slot.index] = rootParameters.count - 1
+            }
+        }
+
+        let pushConstantSize = module.pushConstantSize
+        if pushConstantSize > 0 {
+            if uniformIndices.keys.contains(0) {
+                let message = "Compute shader \(module.id.rawValue) declares push constants but also uses a uniform buffer at slot 0, which is not supported on the D3D12 backend."
+                SDLLogger.error("SDLKit.Graphics.D3D12", message)
+                throw AgentError.invalidArgument(message)
+            }
+            let valueCount = (pushConstantSize + 3) / 4
+            if valueCount <= 64 {
+                var param = D3D12_ROOT_PARAMETER()
+                param.ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS
+                param.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL
+                param.Anonymous.Constants = D3D12_ROOT_CONSTANTS(ShaderRegister: 0, RegisterSpace: 0, Num32BitValues: UINT(valueCount))
+                pushConstantBinding = .rootConstants(parameterIndex: rootParameters.count, valueCount: valueCount)
+                rootParameters.append(param)
+            } else {
+                var param = D3D12_ROOT_PARAMETER()
+                param.ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV
+                param.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL
+                param.Anonymous.Descriptor = D3D12_ROOT_DESCRIPTOR(ShaderRegister: 0, RegisterSpace: 0)
+                let alignedSize = alignUp(pushConstantSize, to: 256)
+                pushConstantBinding = .constantBuffer(parameterIndex: rootParameters.count, size: alignedSize)
+                rootParameters.append(param)
             }
         }
 
@@ -1942,7 +1992,8 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
             storageParameterIndices: storageIndices,
             textureParameterIndices: textureIndices,
             storageTextureParameterIndices: storageTextureIndices,
-            samplerParameterIndices: samplerIndices
+            samplerParameterIndices: samplerIndices,
+            pushConstantBinding: pushConstantBinding
         )
         computePipelines[handle] = resource
         SDLLogger.debug("SDLKit.Graphics.D3D12", "makeComputePipeline id=\(handle.rawValue) shader=\(module.id.rawValue)")
@@ -1950,180 +2001,365 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
     }
 
     public func dispatchCompute(_ pipeline: ComputePipelineHandle, groupsX: Int, groupsY: Int, groupsZ: Int, bindings: BindingSet) throws {
-        guard frameActive else {
-            throw AgentError.internalError("dispatchCompute called outside of beginFrame/endFrame")
-        }
-        guard let commandList else {
-            throw AgentError.internalError("D3D12 command list unavailable for compute dispatch")
-        }
         guard let resource = computePipelines[pipeline] else {
             throw AgentError.internalError("Unknown compute pipeline handle")
         }
 
-        commandList.pointee.lpVtbl.pointee.SetPipelineState(commandList, resource.pipelineState)
-        commandList.pointee.lpVtbl.pointee.SetComputeRootSignature(commandList, resource.rootSignature)
+        let context = try acquireComputeCommandContext()
+        let commandList = context.commandList
 
-        let needsTextures = !resource.textureParameterIndices.isEmpty
-        let needsStorageTextures = !resource.storageTextureParameterIndices.isEmpty
-        let needsSamplers = !resource.samplerParameterIndices.isEmpty
-        var descriptorHeaps: [UnsafeMutablePointer<ID3D12DescriptorHeap>?] = []
-        if needsTextures || needsStorageTextures {
-            if srvHeap == nil {
-                try ensureSrvHeap()
-            }
-            if let srvHeap { descriptorHeaps.append(srvHeap) }
-        }
-        if needsSamplers {
-            if samplerHeap == nil {
-                try ensureSamplerHeap()
-            }
-            if let samplerHeap { descriptorHeaps.append(samplerHeap) }
-        }
-        if !descriptorHeaps.isEmpty {
-            descriptorHeaps.withUnsafeMutableBufferPointer { buffer in
-                commandList.pointee.lpVtbl.pointee.SetDescriptorHeaps(commandList, UINT(buffer.count), buffer.baseAddress)
-            }
-        }
+        do {
+            commandList.pointee.lpVtbl.pointee.SetPipelineState(commandList, resource.pipelineState)
+            commandList.pointee.lpVtbl.pointee.SetComputeRootSignature(commandList, resource.rootSignature)
 
-        for (slot, parameterIndex) in resource.uniformParameterIndices {
-            guard let entry = bindings.resource(at: slot) else {
-                throw AgentError.invalidArgument("Missing uniform buffer binding at slot \(slot)")
+            let needsTextures = !resource.textureParameterIndices.isEmpty
+            let needsStorageTextures = !resource.storageTextureParameterIndices.isEmpty
+            let needsSamplers = !resource.samplerParameterIndices.isEmpty
+            var descriptorHeaps: [UnsafeMutablePointer<ID3D12DescriptorHeap>?] = []
+            if needsTextures || needsStorageTextures {
+                if srvHeap == nil {
+                    try ensureSrvHeap()
+                }
+                if let srvHeap { descriptorHeaps.append(srvHeap) }
             }
-            let handle: BufferHandle
-            switch entry {
-            case .buffer(let bufferHandle):
-                handle = bufferHandle
-            case .texture:
-                throw AgentError.invalidArgument("Texture bound to uniform buffer slot \(slot) in compute dispatch")
+            if needsSamplers {
+                if samplerHeap == nil {
+                    try ensureSamplerHeap()
+                }
+                if let samplerHeap { descriptorHeaps.append(samplerHeap) }
             }
-            guard let buffer = buffers[handle] else {
-                throw AgentError.invalidArgument("Unknown buffer handle bound at slot \(slot)")
+            if !descriptorHeaps.isEmpty {
+                descriptorHeaps.withUnsafeMutableBufferPointer { buffer in
+                    commandList.pointee.lpVtbl.pointee.SetDescriptorHeaps(commandList, UINT(buffer.count), buffer.baseAddress)
+                }
             }
-            transitionBuffer(handle, to: D3D12_RESOURCE_STATE_GENERIC_READ)
-            let gpuAddress = buffer.resource.pointee.lpVtbl.pointee.GetGPUVirtualAddress(buffer.resource)
-            commandList.pointee.lpVtbl.pointee.SetComputeRootConstantBufferView(commandList, UINT(parameterIndex), gpuAddress)
-        }
 
-        var storageBindings: [BufferHandle] = []
-        var storageTextureBindings: [TextureHandle] = []
-        for (slot, parameterIndex) in resource.storageParameterIndices {
-            guard let entry = bindings.resource(at: slot) else {
-                throw AgentError.invalidArgument("Missing storage buffer binding at slot \(slot)")
-            }
-            let handle: BufferHandle
-            switch entry {
-            case .buffer(let bufferHandle):
-                handle = bufferHandle
-            case .texture:
-                throw AgentError.invalidArgument("Texture bound to storage buffer slot \(slot) in compute dispatch")
-            }
-            guard let buffer = buffers[handle] else {
-                throw AgentError.invalidArgument("Unknown buffer handle bound at slot \(slot)")
-            }
-            transitionBuffer(handle, to: D3D12_RESOURCE_STATE_UNORDERED_ACCESS)
-            let gpuAddress = buffer.resource.pointee.lpVtbl.pointee.GetGPUVirtualAddress(buffer.resource)
-            commandList.pointee.lpVtbl.pointee.SetComputeRootUnorderedAccessView(commandList, UINT(parameterIndex), gpuAddress)
-            storageBindings.append(handle)
-        }
-
-        if needsTextures {
-            for (slot, parameterIndex) in resource.textureParameterIndices.sorted(by: { $0.key < $1.key }) {
+            for (slot, parameterIndex) in resource.uniformParameterIndices {
                 guard let entry = bindings.resource(at: slot) else {
-                    throw AgentError.invalidArgument("Missing texture binding at slot \(slot) for compute dispatch")
+                    throw AgentError.invalidArgument("Missing uniform buffer binding at slot \(slot)")
                 }
-                let textureHandle: TextureHandle
+                let handle: BufferHandle
                 switch entry {
-                case .texture(let handle):
-                    textureHandle = handle
-                case .buffer:
-                    throw AgentError.invalidArgument("Buffer bound to texture slot \(slot) for compute dispatch")
+                case .buffer(let bufferHandle):
+                    handle = bufferHandle
+                case .texture:
+                    throw AgentError.invalidArgument("Texture bound to uniform buffer slot \(slot) in compute dispatch")
                 }
-                guard let texture = textures[textureHandle] else {
-                    throw AgentError.invalidArgument("Unknown texture handle bound at slot \(slot)")
+                guard let buffer = buffers[handle] else {
+                    throw AgentError.invalidArgument("Unknown buffer handle bound at slot \(slot)")
                 }
-                transitionTexture(textureHandle, to: D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE)
-                guard let gpuHandle = texture.srvGPUHandle else {
-                    throw AgentError.invalidArgument("Texture bound at slot \(slot) is missing a shader resource view")
-                }
-                commandList.pointee.lpVtbl.pointee.SetComputeRootDescriptorTable(commandList, UINT(parameterIndex), gpuHandle)
+                transitionBuffer(handle, to: D3D12_RESOURCE_STATE_GENERIC_READ, commandList: commandList)
+                let gpuAddress = buffer.resource.pointee.lpVtbl.pointee.GetGPUVirtualAddress(buffer.resource)
+                commandList.pointee.lpVtbl.pointee.SetComputeRootConstantBufferView(commandList, UINT(parameterIndex), gpuAddress)
             }
-        }
 
-        if needsStorageTextures {
-            for (slot, parameterIndex) in resource.storageTextureParameterIndices.sorted(by: { $0.key < $1.key }) {
+            var storageBindings: [BufferHandle] = []
+            var storageTextureBindings: [TextureHandle] = []
+            for (slot, parameterIndex) in resource.storageParameterIndices {
                 guard let entry = bindings.resource(at: slot) else {
-                    throw AgentError.invalidArgument("Missing storage texture binding at slot \(slot)")
+                    throw AgentError.invalidArgument("Missing storage buffer binding at slot \(slot)")
                 }
-                let textureHandle: TextureHandle
+                let handle: BufferHandle
                 switch entry {
-                case .texture(let handle):
-                    textureHandle = handle
-                case .buffer:
-                    throw AgentError.invalidArgument("Buffer bound to storage texture slot \(slot) in compute dispatch")
+                case .buffer(let bufferHandle):
+                    handle = bufferHandle
+                case .texture:
+                    throw AgentError.invalidArgument("Texture bound to storage buffer slot \(slot) in compute dispatch")
                 }
-                guard let texture = textures[textureHandle] else {
-                    throw AgentError.invalidArgument("Unknown texture handle bound at slot \(slot)")
+                guard let buffer = buffers[handle] else {
+                    throw AgentError.invalidArgument("Unknown buffer handle bound at slot \(slot)")
                 }
-                guard let uavHandle = texture.uavGPUHandle else {
-                    throw AgentError.invalidArgument("Texture bound at slot \(slot) does not expose an unordered access view")
-                }
-                transitionTexture(textureHandle, to: D3D12_RESOURCE_STATE_UNORDERED_ACCESS)
-                commandList.pointee.lpVtbl.pointee.SetComputeRootDescriptorTable(commandList, UINT(parameterIndex), uavHandle)
-                storageTextureBindings.append(textureHandle)
+                transitionBuffer(handle, to: D3D12_RESOURCE_STATE_UNORDERED_ACCESS, commandList: commandList)
+                let gpuAddress = buffer.resource.pointee.lpVtbl.pointee.GetGPUVirtualAddress(buffer.resource)
+                commandList.pointee.lpVtbl.pointee.SetComputeRootUnorderedAccessView(commandList, UINT(parameterIndex), gpuAddress)
+                storageBindings.append(handle)
             }
+
+            if needsTextures {
+                for (slot, parameterIndex) in resource.textureParameterIndices.sorted(by: { $0.key < $1.key }) {
+                    guard let entry = bindings.resource(at: slot) else {
+                        throw AgentError.invalidArgument("Missing texture binding at slot \(slot) for compute dispatch")
+                    }
+                    let textureHandle: TextureHandle
+                    switch entry {
+                    case .texture(let handle):
+                        textureHandle = handle
+                    case .buffer:
+                        throw AgentError.invalidArgument("Buffer bound to texture slot \(slot) for compute dispatch")
+                    }
+                    guard let texture = textures[textureHandle] else {
+                        throw AgentError.invalidArgument("Unknown texture handle bound at slot \(slot)")
+                    }
+                    transitionTexture(textureHandle, to: D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, commandList: commandList)
+                    guard let gpuHandle = texture.srvGPUHandle else {
+                        throw AgentError.invalidArgument("Texture bound at slot \(slot) is missing a shader resource view")
+                    }
+                    commandList.pointee.lpVtbl.pointee.SetComputeRootDescriptorTable(commandList, UINT(parameterIndex), gpuHandle)
+                }
+            }
+
+            if needsStorageTextures {
+                for (slot, parameterIndex) in resource.storageTextureParameterIndices.sorted(by: { $0.key < $1.key }) {
+                    guard let entry = bindings.resource(at: slot) else {
+                        throw AgentError.invalidArgument("Missing storage texture binding at slot \(slot)")
+                    }
+                    let textureHandle: TextureHandle
+                    switch entry {
+                    case .texture(let handle):
+                        textureHandle = handle
+                    case .buffer:
+                        throw AgentError.invalidArgument("Buffer bound to storage texture slot \(slot) in compute dispatch")
+                    }
+                    guard let texture = textures[textureHandle] else {
+                        throw AgentError.invalidArgument("Unknown texture handle bound at slot \(slot)")
+                    }
+                    guard let uavHandle = texture.uavGPUHandle else {
+                        throw AgentError.invalidArgument("Texture bound at slot \(slot) does not expose an unordered access view")
+                    }
+                    transitionTexture(textureHandle, to: D3D12_RESOURCE_STATE_UNORDERED_ACCESS, commandList: commandList)
+                    commandList.pointee.lpVtbl.pointee.SetComputeRootDescriptorTable(commandList, UINT(parameterIndex), uavHandle)
+                    storageTextureBindings.append(textureHandle)
+                }
+            }
+
+            if needsSamplers {
+                guard let samplerHeap else {
+                    throw AgentError.internalError("Sampler descriptor heap unavailable for compute bindings")
+                }
+                for (slot, parameterIndex) in resource.samplerParameterIndices.sorted(by: { $0.key < $1.key }) {
+                    guard let samplerHandle = bindings.sampler(at: slot) else {
+                        throw AgentError.invalidArgument("Missing sampler binding at slot \(slot) for compute dispatch")
+                    }
+                    guard let sampler = samplers[samplerHandle] else {
+                        throw AgentError.invalidArgument("Unknown sampler handle bound at slot \(slot)")
+                    }
+                    commandList.pointee.lpVtbl.pointee.SetComputeRootDescriptorTable(commandList, UINT(parameterIndex), sampler.gpuHandle)
+                }
+            }
+
+            let expectedSize = resource.module.pushConstantSize
+            if expectedSize > 0 {
+                guard let payload = bindings.materialConstants else {
+                    let message = "Compute shader \(resource.module.id.rawValue) expects \(expectedSize) bytes of push constants but none were provided."
+                    SDLLogger.error("SDLKit.Graphics.D3D12", message)
+                    throw AgentError.invalidArgument(message)
+                }
+                let byteCount = payload.byteCount
+                guard byteCount == expectedSize else {
+                    let message = "Compute shader \(resource.module.id.rawValue) expects \(expectedSize) bytes of push constants but received \(byteCount)."
+                    SDLLogger.error("SDLKit.Graphics.D3D12", message)
+                    throw AgentError.invalidArgument(message)
+                }
+                guard let binding = resource.pushConstantBinding else {
+                    throw AgentError.internalError("Missing push constant binding metadata for compute shader \(resource.module.id.rawValue)")
+                }
+                switch binding {
+                case .rootConstants(let parameterIndex, let valueCount):
+                    var words = [UInt32](repeating: 0, count: valueCount)
+                    payload.withUnsafeBytes { bytes in
+                        if let base = bytes.baseAddress {
+                            memcpy(&words, base, min(bytes.count, valueCount * MemoryLayout<UInt32>.size))
+                        }
+                    }
+                    words.withUnsafeBufferPointer { buffer in
+                        commandList.pointee.lpVtbl.pointee.SetComputeRoot32BitConstants(commandList, UINT(parameterIndex), UINT(valueCount), buffer.baseAddress, 0)
+                    }
+                case .constantBuffer(let parameterIndex, let size):
+                    let buffer = try ensureComputePushConstantBuffer(minimumSize: size)
+                    var mapped: UnsafeMutableRawPointer?
+                    try checkHRESULT(buffer.pointee.lpVtbl.pointee.Map(buffer, 0, nil, &mapped), "ID3D12Resource.Map(computePushConstants)")
+                    if let mapped {
+                        memset(mapped, 0, size)
+                        payload.withUnsafeBytes { bytes in
+                            if let base = bytes.baseAddress {
+                                memcpy(mapped, base, min(bytes.count, size))
+                            }
+                        }
+                    }
+                    buffer.pointee.lpVtbl.pointee.Unmap(buffer, 0, nil)
+                    let gpuAddress = buffer.pointee.lpVtbl.pointee.GetGPUVirtualAddress(buffer)
+                    commandList.pointee.lpVtbl.pointee.SetComputeRootConstantBufferView(commandList, UINT(parameterIndex), gpuAddress)
+                }
+            } else if let payload = bindings.materialConstants, payload.byteCount > 0 {
+                SDLLogger.warn(
+                    "SDLKit.Graphics.D3D12",
+                    "Material constants of size \(payload.byteCount) bytes provided for compute shader \(resource.module.id.rawValue) which does not declare push constants. Data will be ignored."
+                )
+            }
+
+            let dispatchX = max(1, groupsX)
+            let dispatchY = max(1, groupsY)
+            let dispatchZ = max(1, groupsZ)
+            commandList.pointee.lpVtbl.pointee.Dispatch(commandList, UINT(dispatchX), UINT(dispatchY), UINT(dispatchZ))
+
+            for handle in storageBindings {
+                insertUAVBarrier(handle, commandList: commandList)
+            }
+            for textureHandle in storageTextureBindings {
+                insertTextureUAVBarrier(textureHandle, commandList: commandList)
+            }
+        } catch {
+            if context.requiresSubmission {
+                _ = commandList.pointee.lpVtbl.pointee.Close(commandList)
+            }
+            throw error
         }
 
-        if needsSamplers {
-            guard let samplerHeap else {
-                throw AgentError.internalError("Sampler descriptor heap unavailable for compute bindings")
-            }
-            for (slot, parameterIndex) in resource.samplerParameterIndices.sorted(by: { $0.key < $1.key }) {
-                guard let samplerHandle = bindings.sampler(at: slot) else {
-                    throw AgentError.invalidArgument("Missing sampler binding at slot \(slot) for compute dispatch")
-                }
-                guard let sampler = samplers[samplerHandle] else {
-                    throw AgentError.invalidArgument("Unknown sampler handle bound at slot \(slot)")
-                }
-                commandList.pointee.lpVtbl.pointee.SetComputeRootDescriptorTable(commandList, UINT(parameterIndex), sampler.gpuHandle)
-            }
+        if context.requiresSubmission {
+            try finalizeComputeCommandContext(context)
+        }
+    }
+
+    private func ensureComputeCommandResources() throws {
+        if computeCommandAllocator != nil, computeCommandList != nil { return }
+        guard let device else {
+            throw AgentError.internalError("Device unavailable for compute command resource creation")
         }
 
-        let expectedSize = resource.module.pushConstantSize
-        if expectedSize > 0 {
-            guard let payload = bindings.materialConstants else {
-                let message = "Compute shader \(resource.module.id.rawValue) expects \(expectedSize) bytes of push constants but none were provided."
-                SDLLogger.error("SDLKit.Graphics.D3D12", message)
-                throw AgentError.invalidArgument(message)
+        var allocator: UnsafeMutablePointer<ID3D12CommandAllocator>?
+        try withUnsafeMutablePointer(to: &allocator) { pointer in
+            try pointer.withMemoryRebound(to: Optional<UnsafeMutableRawPointer>.self, capacity: 1) { raw in
+                try checkHRESULT(
+                    device.pointee.lpVtbl.pointee.CreateCommandAllocator(
+                        device,
+                        D3D12_COMMAND_LIST_TYPE_COMPUTE,
+                        &IID_ID3D12CommandAllocator,
+                        raw
+                    ),
+                    "ID3D12Device.CreateCommandAllocator(compute)"
+                )
             }
-            let byteCount = payload.byteCount
-            guard byteCount == expectedSize else {
-                let message = "Compute shader \(resource.module.id.rawValue) expects \(expectedSize) bytes of push constants but received \(byteCount)."
-                SDLLogger.error("SDLKit.Graphics.D3D12", message)
-                throw AgentError.invalidArgument(message)
-            }
-            SDLLogger.error(
-                "SDLKit.Graphics.D3D12",
-                "Compute push constants of size \(byteCount) bytes requested for shader \(resource.module.id.rawValue), but D3D12 backend does not yet implement them."
-            )
-            throw AgentError.invalidArgument("Compute push constants are not supported on the D3D12 backend yet")
-        } else if let payload = bindings.materialConstants, payload.byteCount > 0 {
-            SDLLogger.warn(
-                "SDLKit.Graphics.D3D12",
-                "Material constants of size \(payload.byteCount) bytes provided for compute shader \(resource.module.id.rawValue) which does not declare push constants. Data will be ignored."
-            )
+        }
+        guard let allocator else {
+            throw AgentError.internalError("Failed to create compute command allocator")
         }
 
-        let dispatchX = max(1, groupsX)
-        let dispatchY = max(1, groupsY)
-        let dispatchZ = max(1, groupsZ)
-        commandList.pointee.lpVtbl.pointee.Dispatch(commandList, UINT(dispatchX), UINT(dispatchY), UINT(dispatchZ))
+        var list: UnsafeMutablePointer<ID3D12GraphicsCommandList>?
+        try withUnsafeMutablePointer(to: &list) { pointer in
+            try pointer.withMemoryRebound(to: Optional<UnsafeMutableRawPointer>.self, capacity: 1) { raw in
+                try checkHRESULT(
+                    device.pointee.lpVtbl.pointee.CreateCommandList(
+                        device,
+                        0,
+                        D3D12_COMMAND_LIST_TYPE_COMPUTE,
+                        allocator,
+                        nil,
+                        &IID_ID3D12GraphicsCommandList,
+                        raw
+                    ),
+                    "ID3D12Device.CreateCommandList(compute)"
+                )
+            }
+        }
+        guard let list else {
+            var tempAllocator: UnsafeMutablePointer<ID3D12CommandAllocator>? = allocator
+            releaseCOM(&tempAllocator)
+            throw AgentError.internalError("Failed to create compute command list")
+        }
+        computeCommandAllocator = allocator
+        computeCommandList = list
+        try checkHRESULT(list.pointee.lpVtbl.pointee.Close(list), "ID3D12GraphicsCommandList.Close(compute)")
+    }
 
-        for handle in storageBindings {
-            insertUAVBarrier(handle)
+    private func acquireComputeCommandContext() throws -> ComputeCommandContext {
+        if frameActive {
+            guard let commandList else {
+                throw AgentError.internalError("D3D12 command list unavailable for compute dispatch")
+            }
+            return ComputeCommandContext(commandList: commandList, allocator: nil, requiresSubmission: false)
         }
-        for textureHandle in storageTextureBindings {
-            insertTextureUAVBarrier(textureHandle)
+
+        try ensureComputeCommandResources()
+        guard let computeCommandAllocator, let computeCommandList else {
+            throw AgentError.internalError("Compute command resources unavailable")
         }
+
+        try waitForPendingComputeWork()
+        try checkHRESULT(computeCommandAllocator.pointee.lpVtbl.pointee.Reset(computeCommandAllocator), "ID3D12CommandAllocator.Reset(compute)")
+        try checkHRESULT(computeCommandList.pointee.lpVtbl.pointee.Reset(computeCommandList, computeCommandAllocator, nil), "ID3D12GraphicsCommandList.Reset(compute)")
+        return ComputeCommandContext(commandList: computeCommandList, allocator: computeCommandAllocator, requiresSubmission: true)
+    }
+
+    private func finalizeComputeCommandContext(_ context: ComputeCommandContext) throws {
+        guard context.requiresSubmission else { return }
+        guard let commandQueue else {
+            throw AgentError.internalError("Command queue unavailable for compute dispatch execution")
+        }
+        guard let fence else {
+            throw AgentError.internalError("Fence unavailable for compute dispatch execution")
+        }
+
+        try checkHRESULT(context.commandList.pointee.lpVtbl.pointee.Close(context.commandList), "ID3D12GraphicsCommandList.Close(compute)")
+        var listPointer = UnsafeMutableRawPointer(context.commandList).assumingMemoryBound(to: ID3D12CommandList.self)
+        commandQueue.pointee.lpVtbl.pointee.ExecuteCommandLists(commandQueue, 1, &listPointer)
+
+        let fenceValue = allocateFenceValue()
+        pendingComputeFenceValue = fenceValue
+        try checkHRESULT(commandQueue.pointee.lpVtbl.pointee.Signal(commandQueue, fence, fenceValue), "ID3D12CommandQueue.Signal(compute)")
+    }
+
+    private func waitForPendingComputeWork() throws {
+        if let pending = pendingComputeFenceValue {
+            try waitForFence(value: pending)
+            pendingComputeFenceValue = nil
+        }
+    }
+
+    private func ensureComputePushConstantBuffer(minimumSize: Int) throws -> UnsafeMutablePointer<ID3D12Resource> {
+        guard minimumSize > 0 else {
+            throw AgentError.invalidArgument("Compute push constant buffer size must be positive")
+        }
+        guard let device else {
+            throw AgentError.internalError("Device unavailable for compute push constant buffer creation")
+        }
+
+        let alignedSize = alignUp(minimumSize, to: 256)
+        if let buffer = computePushConstantBuffer, computePushConstantBufferSize >= alignedSize {
+            return buffer
+        }
+
+        if var existing = computePushConstantBuffer {
+            releaseCOM(&existing)
+            computePushConstantBuffer = nil
+        }
+
+        var heapProperties = D3D12_HEAP_PROPERTIES(
+            Type: D3D12_HEAP_TYPE_UPLOAD,
+            CPUPageProperty: D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
+            MemoryPoolPreference: D3D12_MEMORY_POOL_UNKNOWN,
+            CreationNodeMask: 0,
+            VisibleNodeMask: 0
+        )
+        var desc = D3D12_RESOURCE_DESC.Buffer(UINT64(alignedSize))
+        var resource: UnsafeMutablePointer<ID3D12Resource>?
+        try withUnsafeMutablePointer(to: &resource) { pointer in
+            try pointer.withMemoryRebound(to: Optional<UnsafeMutableRawPointer>.self, capacity: 1) { raw in
+                try checkHRESULT(
+                    device.pointee.lpVtbl.pointee.CreateCommittedResource(
+                        device,
+                        &heapProperties,
+                        D3D12_HEAP_FLAG_NONE,
+                        &desc,
+                        D3D12_RESOURCE_STATE_GENERIC_READ,
+                        nil,
+                        &IID_ID3D12Resource,
+                        raw
+                    ),
+                    "ID3D12Device.CreateCommittedResource(computePushConstants)"
+                )
+            }
+        }
+        guard let resource else {
+            throw AgentError.internalError("Failed to create compute push constant buffer")
+        }
+        computePushConstantBuffer = resource
+        computePushConstantBufferSize = alignedSize
+        return resource
+    }
+
+    private func allocateFenceValue() -> UInt64 {
+        fenceValueCounter += 1
+        return fenceValueCounter
     }
 
     // MARK: - Initialization
@@ -2634,6 +2870,11 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
         return String(format: "%016llx", hash)
     }
 
+    private func alignUp(_ value: Int, to alignment: Int) -> Int {
+        let mask = alignment - 1
+        return (value + mask) & ~mask
+    }
+
     private func convertIndexFormat(_ format: IndexFormat) -> DXGI_FORMAT {
         switch format {
         case .uint16:
@@ -2646,6 +2887,10 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
     // MARK: - Cleanup
 
     private func releaseResources() {
+        if let pending = pendingComputeFenceValue {
+            try? waitForFence(value: pending)
+            pendingComputeFenceValue = nil
+        }
         for (_, resource) in computePipelines {
             var state: UnsafeMutablePointer<ID3D12PipelineState>? = resource.pipelineState
             var signature: UnsafeMutablePointer<ID3D12RootSignature>? = resource.rootSignature
@@ -2684,12 +2929,19 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
             releaseCOM(&rb)
         }
         readbackBuffer = nil
+        if var computeBuffer = computePushConstantBuffer {
+            releaseCOM(&computeBuffer)
+        }
+        computePushConstantBuffer = nil
+        computePushConstantBufferSize = 0
         for index in 0..<Constants.frameCount {
             releaseCOM(&frames[index].renderTarget)
             releaseCOM(&frames[index].commandAllocator)
         }
         releaseCOM(&depthStencil)
         releaseCOM(&commandList)
+        releaseCOM(&computeCommandList)
+        releaseCOM(&computeCommandAllocator)
         releaseCOM(&commandQueue)
         releaseCOM(&swapChain)
         releaseCOM(&rtvHeap)
