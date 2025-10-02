@@ -15,9 +15,23 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: swift:6.1-jammy
+      options: --user root
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Install Vulkan SDK components
+        run: |
+          set -euo pipefail
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            libvulkan1 \
+            libvulkan-dev \
+            vulkan-utils \
+            vulkan-validationlayers \
+            spirv-tools \
+            glslang-tools
+          rm -rf /var/lib/apt/lists/*
 
       # No SDL provisioning needed for headless tests
       - name: Prepare build env (headless)
@@ -51,15 +65,20 @@ jobs:
           SDLKIT_GUI_ENABLED: 'false'
           SDLKIT_VK_VALIDATION_CAPTURE: '1'
           SDLKIT_VK_VALIDATION: '1'
+          VK_INSTANCE_LAYERS: VK_LAYER_KHRONOS_validation
         run: |
-          set -e
+          set -euo pipefail
           swift build -v -Xswiftc -DHEADLESS_CI
+          log_dir="${{ runner.temp }}/vulkan-validation"
+          mkdir -p "$log_dir"
+          test_log="$log_dir/linux-swift-test.log"
+          : > "$test_log"
           attempt=1
           max_attempts=3
           backoff=5
           while [ $attempt -le $max_attempts ]; do
-            echo "Linux test attempt $attempt/$max_attempts"
-            if swift test -v -Xswiftc -DHEADLESS_CI; then
+            echo "Linux test attempt $attempt/$max_attempts" | tee -a "$test_log"
+            if swift test -v -Xswiftc -DHEADLESS_CI 2>&1 | tee -a "$test_log"; then
               break
             fi
             if [ $attempt -eq $max_attempts ]; then
@@ -69,6 +88,13 @@ jobs:
             sleep $((backoff * attempt))
             attempt=$((attempt + 1))
           done
+
+      - name: Upload Vulkan validation logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-vulkan-validation-logs
+          path: ${{ runner.temp }}/vulkan-validation
 
   windows:
     runs-on: windows-2022
