@@ -27,6 +27,7 @@ public enum RenderBackendTestHarness {
         public let test: Test
         public let hash: String
         public let goldenKey: String
+        public let capture: GoldenImageCapture?
     }
 
     public struct Options: Sendable {
@@ -35,17 +36,20 @@ public enum RenderBackendTestHarness {
         public var computeTextureSize: (width: Int, height: Int)
         public var allowGoldenWrite: Bool
         public var logger: (@Sendable (String) -> Void)?
+        public var artifactDirectory: URL?
 
         public init(width: Int = 256,
                     height: Int = 256,
                     computeTextureSize: (Int, Int) = (40, 30),
                     allowGoldenWrite: Bool = ProcessInfo.processInfo.environment["SDLKIT_GOLDEN_WRITE"] == "1",
-                    logger: (@Sendable (String) -> Void)? = nil) {
+                    logger: (@Sendable (String) -> Void)? = nil,
+                    artifactDirectory: URL? = RenderBackendTestHarness.artifactDirectoryFromEnvironment()) {
             self.width = width
             self.height = height
             self.computeTextureSize = computeTextureSize
             self.allowGoldenWrite = allowGoldenWrite
             self.logger = logger
+            self.artifactDirectory = artifactDirectory
         }
     }
 
@@ -64,21 +68,36 @@ public enum RenderBackendTestHarness {
         }
 
         var results: [Result] = []
-        results.append(try runUnlitTriangle(window: window,
+        let backendArtifacts = try prepareArtifactDirectory(root: options.artifactDirectory, backend: backendOverride)
+
+        let triangle = try runUnlitTriangle(window: window,
                                             backend: backend,
                                             capturable: capturable,
                                             backendKey: backendOverride,
-                                            options: options))
-        results.append(try runBasicLit(window: window,
+                                            options: options)
+        try storeArtifactsIfNeeded(result: triangle, backendDirectory: backendArtifacts, options: options)
+        results.append(triangle)
+
+        let basicLit = try runBasicLit(window: window,
                                        backend: backend,
                                        capturable: capturable,
                                        backendKey: backendOverride,
-                                       options: options))
-        results.append(try runComputeStorageTexture(window: window,
-                                                    backend: backend,
-                                                    capturable: capturable,
-                                                    backendKey: backendOverride,
-                                                    options: options))
+                                       options: options)
+        try storeArtifactsIfNeeded(result: basicLit, backendDirectory: backendArtifacts, options: options)
+        results.append(basicLit)
+
+        let compute = try runComputeStorageTexture(window: window,
+                                                   backend: backend,
+                                                   capturable: capturable,
+                                                   backendKey: backendOverride,
+                                                   options: options)
+        try storeArtifactsIfNeeded(result: compute, backendDirectory: backendArtifacts, options: options)
+        results.append(compute)
+
+        try writeSummaryIfNeeded(results: results,
+                                 backend: backendOverride,
+                                 backendDirectory: backendArtifacts,
+                                 options: options)
         return results
     }
 
@@ -124,12 +143,13 @@ public enum RenderBackendTestHarness {
                                                colorFormat: .bgra8Unorm,
                                                depthFormat: .depth32Float)
         let hash = try capturable.takeCaptureHash()
+        let capture = try capturable.takeCapturePayload()
         let key = GoldenRefs.key(backend: backendKey,
                                  width: options.width,
                                  height: options.height,
                                  material: Test.unlitTriangle.rawValue)
         try compareGolden(hash: hash, key: key, options: options)
-        return Result(backend: backendKey, test: .unlitTriangle, hash: hash, goldenKey: key)
+        return Result(backend: backendKey, test: .unlitTriangle, hash: hash, goldenKey: key, capture: capture)
     }
 
     private static func runBasicLit(window: SDLWindow,
@@ -178,12 +198,13 @@ public enum RenderBackendTestHarness {
                                                colorFormat: .bgra8Unorm,
                                                depthFormat: .depth32Float)
         let hash = try capturable.takeCaptureHash()
+        let capture = try capturable.takeCapturePayload()
         let key = GoldenRefs.key(backend: backendKey,
                                  width: options.width,
                                  height: options.height,
                                  material: Test.basicLit.rawValue)
         try compareGolden(hash: hash, key: key, options: options)
-        return Result(backend: backendKey, test: .basicLit, hash: hash, goldenKey: key)
+        return Result(backend: backendKey, test: .basicLit, hash: hash, goldenKey: key, capture: capture)
     }
 
     private static func runComputeStorageTexture(window: SDLWindow,
@@ -265,12 +286,13 @@ public enum RenderBackendTestHarness {
         frameEnded = true
 
         let hash = try capturable.takeCaptureHash()
+        let capture = try capturable.takeCapturePayload()
         let key = GoldenRefs.key(backend: backendKey,
                                  width: options.width,
                                  height: options.height,
                                  material: Test.computeStorageTexture.rawValue)
         try compareGolden(hash: hash, key: key, options: options)
-        return Result(backend: backendKey, test: .computeStorageTexture, hash: hash, goldenKey: key)
+        return Result(backend: backendKey, test: .computeStorageTexture, hash: hash, goldenKey: key, capture: capture)
     }
 
     private static func compareGolden(hash: String,
@@ -286,5 +308,96 @@ public enum RenderBackendTestHarness {
                 GoldenRefs.setExpected(hash, for: key)
             }
         }
+    }
+
+    private static func artifactDirectoryFromEnvironment() -> URL? {
+        guard let raw = ProcessInfo.processInfo.environment["SDLKIT_GOLDEN_ARTIFACT_DIR"], !raw.isEmpty else {
+            return nil
+        }
+        return URL(fileURLWithPath: raw, isDirectory: true)
+    }
+
+    private static func prepareArtifactDirectory(root: URL?, backend: String) throws -> URL? {
+        guard let root else { return nil }
+        let sanitizedBackend = sanitizedFilenameComponent(backend)
+        let directory = root.appendingPathComponent(sanitizedBackend.isEmpty ? backend : sanitizedBackend, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
+    }
+
+    private static func storeArtifactsIfNeeded(result: Result,
+                                               backendDirectory: URL?,
+                                               options: Options) throws {
+        guard let backendDirectory, let capture = result.capture else { return }
+        let fm = FileManager.default
+        try fm.createDirectory(at: backendDirectory, withIntermediateDirectories: true)
+        let base = sanitizedFilenameComponent(result.test.rawValue)
+        let imageName = (base.isEmpty ? result.test.rawValue : base) + ".ppm"
+        let hashName = (base.isEmpty ? result.test.rawValue : base) + ".hash.txt"
+        let imageURL = backendDirectory.appendingPathComponent(imageName)
+        let hashURL = backendDirectory.appendingPathComponent(hashName)
+        try capture.writePPM(to: imageURL)
+        let body = "hash=\(result.hash)\nkey=\(result.goldenKey)\n"
+        if let data = body.data(using: .utf8) {
+            try data.write(to: hashURL)
+        }
+        options.logger?("Harness artifact saved: \(imageName)")
+    }
+
+    private struct SummaryEntry: Codable {
+        let test: String
+        let hash: String
+        let goldenKey: String
+        let image: String
+        let hashFile: String
+    }
+
+    private struct SummaryDocument: Codable {
+        let backend: String
+        let width: Int
+        let height: Int
+        let entries: [SummaryEntry]
+    }
+
+    private static func writeSummaryIfNeeded(results: [Result],
+                                             backend: String,
+                                             backendDirectory: URL?,
+                                             options: Options) throws {
+        guard let backendDirectory else { return }
+        let entries: [SummaryEntry] = results.compactMap { result in
+            guard result.capture != nil else { return nil }
+            let base = sanitizedFilenameComponent(result.test.rawValue)
+            let filenameBase = base.isEmpty ? result.test.rawValue : base
+            return SummaryEntry(test: result.test.rawValue,
+                                hash: result.hash,
+                                goldenKey: result.goldenKey,
+                                image: "\(filenameBase).ppm",
+                                hashFile: "\(filenameBase).hash.txt")
+        }
+        guard !entries.isEmpty else { return }
+        let summary = SummaryDocument(backend: backend,
+                                      width: options.width,
+                                      height: options.height,
+                                      entries: entries)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(summary)
+        let url = backendDirectory.appendingPathComponent("summary.json")
+        try data.write(to: url)
+        options.logger?("Harness summary written: \(url.lastPathComponent)")
+    }
+
+    private static func sanitizedFilenameComponent(_ value: String) -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
+        var scalars: [UnicodeScalar] = []
+        let replacement = UnicodeScalar("_")!
+        for scalar in value.unicodeScalars {
+            if allowed.contains(scalar) {
+                scalars.append(scalar)
+            } else {
+                scalars.append(replacement)
+            }
+        }
+        return String(String.UnicodeScalarView(scalars))
     }
 }

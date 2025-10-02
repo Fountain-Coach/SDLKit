@@ -144,6 +144,9 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
     private var captureMemory: VkDeviceMemory? = nil
     private var captureBufferSize: VkDeviceSize = 0
     private var lastCaptureHash: String?
+    private var lastCaptureData: Data?
+    private var lastCaptureBytesPerRow: Int = 0
+    private var lastCaptureSize: (width: Int, height: Int) = (0, 0)
 
     private struct BufferResource {
         var buffer: VkBuffer?
@@ -232,6 +235,9 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
         }
         try ensureCommandPoolAndSync()
         drainPendingComputeSubmissions(waitAll: true)
+        lastCaptureData = nil
+        lastCaptureBytesPerRow = 0
+        lastCaptureSize = (0, 0)
 
         // Wait for the previous frame to finish
         if var fence = inFlightFences[currentFrame] {
@@ -427,6 +433,11 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
                     let count = Int(captureBufferSize)
                     let data = Data(bytes: mapped, count: count)
                     lastCaptureHash = VulkanRenderBackend.hashHex(data: data)
+                    let width = Int(surfaceExtent.width)
+                    let height = Int(surfaceExtent.height)
+                    lastCaptureData = data
+                    lastCaptureBytesPerRow = max(1, width * 4)
+                    lastCaptureSize = (width, height)
                 }
                 vkUnmapMemory(dev, mem)
             }
@@ -709,6 +720,20 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
     public func takeCaptureHash() throws -> String {
         guard let h = lastCaptureHash else { throw AgentError.internalError("No capture hash available; call requestCapture() before endFrame") }
         return h
+    }
+
+    public func takeCapturePayload() throws -> GoldenImageCapture {
+        guard let data = lastCaptureData else {
+            throw AgentError.internalError("No capture data available; call requestCapture() before endFrame")
+        }
+        let width = lastCaptureSize.width > 0 ? lastCaptureSize.width : Int(surfaceExtent.width)
+        let height = lastCaptureSize.height > 0 ? lastCaptureSize.height : Int(surfaceExtent.height)
+        let bytesPerRow = lastCaptureBytesPerRow > 0 ? lastCaptureBytesPerRow : max(1, width * 4)
+        return GoldenImageCapture(width: width,
+                                  height: height,
+                                  bytesPerRow: bytesPerRow,
+                                  layout: .bgra8Unorm,
+                                  data: data)
     }
 
     public func takeValidationMessages() -> [String] {
