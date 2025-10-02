@@ -43,13 +43,14 @@ public enum RenderBackendTestHarness {
                     computeTextureSize: (Int, Int) = (40, 30),
                     allowGoldenWrite: Bool = ProcessInfo.processInfo.environment["SDLKIT_GOLDEN_WRITE"] == "1",
                     logger: (@Sendable (String) -> Void)? = nil,
-                    artifactDirectory: URL? = RenderBackendTestHarness.artifactDirectoryFromEnvironment()) {
+                    artifactDirectory: URL? = nil) {
+
             self.width = width
             self.height = height
             self.computeTextureSize = computeTextureSize
             self.allowGoldenWrite = allowGoldenWrite
             self.logger = logger
-            self.artifactDirectory = artifactDirectory
+            self.artifactDirectory = artifactDirectory ?? RenderBackendTestHarness.artifactDirectoryFromEnvironment()
         }
     }
 
@@ -118,7 +119,7 @@ public enum RenderBackendTestHarness {
                                      length: buffer.count,
                                      usage: .vertex)
         }
-        var mesh = Mesh(vertexBuffer: vertexBuffer, vertexCount: vertices.count)
+        let mesh = Mesh(vertexBuffer: vertexBuffer, vertexCount: vertices.count)
         let material = Material(shader: ShaderID("unlit_triangle"),
                                 params: .init(baseColor: tintedBaseColor))
         let node = SceneNode(name: "HarnessTriangle",
@@ -310,7 +311,8 @@ public enum RenderBackendTestHarness {
         }
     }
 
-    private static func artifactDirectoryFromEnvironment() -> URL? {
+    public nonisolated(unsafe) static func artifactDirectoryFromEnvironment() -> URL? {
+
         guard let raw = ProcessInfo.processInfo.environment["SDLKIT_GOLDEN_ARTIFACT_DIR"], !raw.isEmpty else {
             return nil
         }
@@ -390,7 +392,7 @@ public enum RenderBackendTestHarness {
     private static func sanitizedFilenameComponent(_ value: String) -> String {
         let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
         var scalars: [UnicodeScalar] = []
-        let replacement = UnicodeScalar("_")!
+        let replacement: UnicodeScalar = "_"
         for scalar in value.unicodeScalars {
             if allowed.contains(scalar) {
                 scalars.append(scalar)
