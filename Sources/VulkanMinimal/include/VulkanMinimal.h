@@ -8,11 +8,49 @@
 extern "C" {
 #endif
 
-typedef struct VkInstance_T *VkInstance;
-typedef uint32_t VkFlags;
-typedef VkFlags VkInstanceCreateFlags;
-typedef int32_t VkResult;
-typedef uint64_t VkSurfaceKHR;
+#if __has_include(<vulkan/vulkan.h>)
+    #include <vulkan/vulkan.h>
+#else
+    typedef struct VkInstance_T *VkInstance;
+    typedef uint32_t VkFlags;
+    typedef VkFlags VkInstanceCreateFlags;
+    typedef int32_t VkResult;
+    typedef uint64_t VkSurfaceKHR;
+
+    typedef enum VkStructureType {
+        VK_STRUCTURE_TYPE_APPLICATION_INFO = 0,
+        VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO = 1
+    } VkStructureType;
+
+    typedef struct VkApplicationInfo {
+        VkStructureType sType;
+        const void *pNext;
+        const char *pApplicationName;
+        uint32_t applicationVersion;
+        const char *pEngineName;
+        uint32_t engineVersion;
+        uint32_t apiVersion;
+    } VkApplicationInfo;
+
+    typedef struct VkInstanceCreateInfo {
+        VkStructureType sType;
+        const void *pNext;
+        VkInstanceCreateFlags flags;
+        const VkApplicationInfo *pApplicationInfo;
+        uint32_t enabledLayerCount;
+        const char *const *ppEnabledLayerNames;
+        uint32_t enabledExtensionCount;
+        const char *const *ppEnabledExtensionNames;
+    } VkInstanceCreateInfo;
+#endif
+
+static inline uint32_t VulkanMinimalMakeVersion(uint32_t major, uint32_t minor, uint32_t patch) {
+#if __has_include(<vulkan/vulkan.h>)
+    return VK_MAKE_API_VERSION(0, major, minor, patch);
+#else
+    return (major << 22) | (minor << 12) | patch;
+#endif
+}
 
 typedef struct VulkanMinimalInstance {
     VkInstance handle;
@@ -20,39 +58,11 @@ typedef struct VulkanMinimalInstance {
 
 typedef struct VkAllocationCallbacks VkAllocationCallbacks;
 
-typedef enum VkStructureType {
-    VK_STRUCTURE_TYPE_APPLICATION_INFO = 0,
-    VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO = 1
-} VkStructureType;
-
-typedef struct VkApplicationInfo {
-    VkStructureType sType;
-    const void *pNext;
-    const char *pApplicationName;
-    uint32_t applicationVersion;
-    const char *pEngineName;
-    uint32_t engineVersion;
-    uint32_t apiVersion;
-} VkApplicationInfo;
-
-typedef struct VkInstanceCreateInfo {
-    VkStructureType sType;
-    const void *pNext;
-    VkInstanceCreateFlags flags;
-    const VkApplicationInfo *pApplicationInfo;
-    uint32_t enabledLayerCount;
-    const char *const *ppEnabledLayerNames;
-    uint32_t enabledExtensionCount;
-    const char *const *ppEnabledExtensionNames;
-} VkInstanceCreateInfo;
-
-static inline uint32_t VulkanMinimalMakeVersion(uint32_t major, uint32_t minor, uint32_t patch) {
-    return (major << 22) | (minor << 12) | patch;
-}
-
-#define VK_SUCCESS 0
-#define VK_ERROR_INITIALIZATION_FAILED -3
-#define VK_API_VERSION_1_0 VulkanMinimalMakeVersion(1, 0, 0)
+#if !__has_include(<vulkan/vulkan.h>)
+    #define VK_SUCCESS 0
+    #define VK_ERROR_INITIALIZATION_FAILED -3
+    #define VK_API_VERSION_1_0 VulkanMinimalMakeVersion(1, 0, 0)
+#endif
 
 VkResult VulkanMinimalCreateInstance(VulkanMinimalInstance *instance);
 void VulkanMinimalDestroyInstance(VulkanMinimalInstance *instance);

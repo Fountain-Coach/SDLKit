@@ -1,4 +1,9 @@
 import Foundation
+#if canImport(Vulkan)
+import Vulkan
+#elseif os(Linux) && canImport(CVulkan)
+import CVulkan
+#endif
 
 public struct float4x4 {
     public typealias Column = (Float, Float, Float, Float)

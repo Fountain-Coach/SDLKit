@@ -265,8 +265,12 @@ typedef struct SDLKit_Event {
   typedef struct SDL_FRect { float x; float y; float w; float h; } SDL_FRect;
   typedef struct SDL_FPoint { float x; float y; } SDL_FPoint;
   typedef struct SDLKit_TTF_Font { int _unused_font; } SDLKit_TTF_Font;
-  typedef struct VkInstance_T *VkInstance;
-  typedef uint64_t VkSurfaceKHR;
+  #if __has_include(<vulkan/vulkan.h>)
+    #include <vulkan/vulkan.h>
+  #else
+    typedef struct VkInstance_T *VkInstance;
+    typedef uint64_t VkSurfaceKHR;
+  #endif
   const char *SDLKit_GetError(void);
   int SDLKit_Init(uint32_t flags);
   SDL_Window *SDLKit_CreateWindow(const char *title, int32_t width, int32_t height, uint32_t flags);
