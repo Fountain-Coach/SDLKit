@@ -96,7 +96,7 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
         self.window = window
         self.surface = try RenderSurface(window: window)
 
-        guard let layer = surface.metalLayer as? CAMetalLayer else {
+        guard let layer = surface.metalLayer else {
             throw AgentError.internalError("SDL window does not expose a CAMetalLayer")
         }
 
@@ -398,7 +398,8 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
             pipelineDescriptor.fragmentFunction = try makeFunction(fragment, library: library)
         }
         pipelineDescriptor.vertexDescriptor = vertexDescriptor
-        pipelineDescriptor.sampleCount = desc.sampleCount
+        // Use modern rasterSampleCount to avoid deprecation warnings
+        pipelineDescriptor.rasterSampleCount = desc.sampleCount
 
         if desc.colorFormats.isEmpty {
             throw AgentError.invalidArgument("Pipeline requires at least one color attachment")
