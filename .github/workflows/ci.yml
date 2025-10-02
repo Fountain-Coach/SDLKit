@@ -27,7 +27,7 @@ jobs:
           apt-get install -y --no-install-recommends \
             libvulkan1 \
             libvulkan-dev \
-            vulkan-utils \
+            vulkan-tools \
             vulkan-validationlayers \
             spirv-tools \
             glslang-tools
