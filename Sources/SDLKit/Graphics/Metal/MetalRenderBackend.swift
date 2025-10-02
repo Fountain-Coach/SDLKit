@@ -77,6 +77,9 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
     private var lastSubmittedCommandBuffer: MTLCommandBuffer?
     private var captureRequested: Bool = false
     private var lastCaptureHash: String?
+    private var lastCaptureData: Data?
+    private var lastCaptureBytesPerRow: Int = 0
+    private var lastCaptureSize: (width: Int, height: Int) = (0, 0)
 
     private let shaderLibrary: ShaderLibrary
     public var deviceEventHandler: RenderBackendDeviceEventHandler?
@@ -152,6 +155,9 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
         }
 
         inflightSemaphore.wait()
+        lastCaptureData = nil
+        lastCaptureBytesPerRow = 0
+        lastCaptureSize = (0, 0)
 
         guard let drawable = layer.nextDrawable() else {
             inflightSemaphore.signal()
@@ -200,6 +206,9 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
                 }
             }
             lastCaptureHash = MetalRenderBackend.hashHex(data: data)
+            lastCaptureData = data
+            lastCaptureBytesPerRow = bytesPerRow
+            lastCaptureSize = (width, height)
             captureRequested = false
         }
 
@@ -1176,6 +1185,20 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
     public func takeCaptureHash() throws -> String {
         guard let h = lastCaptureHash else { throw AgentError.internalError("No capture hash available; call requestCapture() before endFrame") }
         return h
+    }
+
+    public func takeCapturePayload() throws -> GoldenImageCapture {
+        guard let data = lastCaptureData else {
+            throw AgentError.internalError("No capture data available; call requestCapture() before endFrame")
+        }
+        let width = lastCaptureSize.width > 0 ? lastCaptureSize.width : Int(layer.drawableSize.width)
+        let height = lastCaptureSize.height > 0 ? lastCaptureSize.height : Int(layer.drawableSize.height)
+        let bytesPerRow = lastCaptureBytesPerRow > 0 ? lastCaptureBytesPerRow : max(1, width * 4)
+        return GoldenImageCapture(width: width,
+                                  height: height,
+                                  bytesPerRow: bytesPerRow,
+                                  layout: .bgra8Unorm,
+                                  data: data)
     }
 
     private static func hashHex(data: Data) -> String {
