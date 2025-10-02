@@ -23,7 +23,12 @@ final class StubRenderBackendCore {
 
     struct TextureResource {
         var descriptor: TextureDescriptor
-        var data: TextureInitialData?
+        var data: Data
+
+        var width: Int { descriptor.width }
+        var height: Int { descriptor.height }
+        var usage: TextureUsage { descriptor.usage }
+        var format: TextureFormat { descriptor.format }
     }
 
     struct PipelineResource {
@@ -64,6 +69,10 @@ final class StubRenderBackendCore {
     private var computePipelines: [ComputePipelineHandle: ComputePipelineResource] = [:]
     private var meshes: [MeshHandle: MeshResource] = [:]
     private var frameActive = false
+    private var framebuffer: Data = Data()
+    private var depthbuffer: Data = Data()
+    private var captureRequested = false
+    private var lastCaptureHash: String?
 
     init(kind: Kind, window: SDLWindow) throws {
         self.kind = kind
@@ -113,6 +122,10 @@ final class StubRenderBackendCore {
         }
         frameActive = true
         SDLLogger.debug("SDLKit.Graphics", "beginFrame on \(kind.label)")
+        let colorBytes = max(1, currentSize.width * currentSize.height * 4)
+        framebuffer = Data(count: colorBytes)
+        depthbuffer = Data(count: max(1, currentSize.width * currentSize.height * MemoryLayout<Float>.size))
+        lastCaptureHash = nil
     }
 
     func endFrame() throws {
@@ -121,6 +134,12 @@ final class StubRenderBackendCore {
         }
         frameActive = false
         SDLLogger.debug("SDLKit.Graphics", "endFrame on \(kind.label)")
+        if captureRequested {
+            var combined = framebuffer
+            combined.append(depthbuffer)
+            lastCaptureHash = StubRenderBackendCore.hashHex(combined)
+            captureRequested = false
+        }
     }
 
     func resize(width: Int, height: Int) {
@@ -157,7 +176,20 @@ final class StubRenderBackendCore {
 
     func createTexture(descriptor: TextureDescriptor, initialData: TextureInitialData?) -> TextureHandle {
         let handle = TextureHandle()
-        textures[handle] = TextureResource(descriptor: descriptor, data: initialData)
+        let bytesPerPixel: Int
+        switch descriptor.format {
+        case .rgba8Unorm, .bgra8Unorm:
+            bytesPerPixel = 4
+        case .depth32Float:
+            bytesPerPixel = MemoryLayout<Float>.size
+        }
+        let pixelCount = max(1, descriptor.width * descriptor.height)
+        var storage = Data(count: pixelCount * bytesPerPixel)
+        if let firstLevel = initialData?.mipLevelData.first, !firstLevel.isEmpty {
+            let copyCount = min(storage.count, firstLevel.count)
+            storage.replaceSubrange(0..<copyCount, with: firstLevel.prefix(copyCount))
+        }
+        textures[handle] = TextureResource(descriptor: descriptor, data: storage)
         SDLLogger.debug("SDLKit.Graphics", "createTexture id=\(handle.rawValue) size=\(descriptor.width)x\(descriptor.height) format=\(descriptor.format.rawValue)")
         return handle
     }
@@ -214,7 +246,11 @@ final class StubRenderBackendCore {
             "SDLKit.Graphics",
             "draw mesh=\(mesh.rawValue) pipeline=\(pipeline.rawValue) vertexBuffer=\(meshResource.vertexBuffer.rawValue) vertexCount=\(meshResource.vertexCount) indexBuffer=\(meshResource.indexBuffer?.rawValue ?? 0) indexCount=\(meshResource.indexCount)"
         )
-        _ = bindings
+        if let pipelineResource = pipelines[pipeline], pipelineResource.descriptor.shader.rawValue == "basic_lit" {
+            if let textureHandle = bindings.texture(at: 10), let resource = textures[textureHandle] {
+                blit(texture: resource)
+            }
+        }
         _ = transform
     }
 
@@ -232,7 +268,112 @@ final class StubRenderBackendCore {
             throw AgentError.internalError("Unknown compute pipeline")
         }
         SDLLogger.debug("SDLKit.Graphics", "dispatchCompute pipeline=\(pipeline.rawValue) groups=(\(groupsX),\(groupsY),\(groupsZ))")
-        _ = bindings
+        try applyComputeWork(for: pipeline, groupsX: groupsX, groupsY: groupsY, groupsZ: groupsZ, bindings: bindings)
+    }
+
+    func requestCapture() {
+        captureRequested = true
+    }
+
+    func takeCaptureHash() throws -> String {
+        guard let hash = lastCaptureHash else {
+            throw AgentError.internalError("No capture hash available; call requestCapture() before endFrame")
+        }
+        return hash
+    }
+
+    private func applyComputeWork(for pipeline: ComputePipelineHandle,
+                                   groupsX: Int,
+                                   groupsY: Int,
+                                   groupsZ: Int,
+                                   bindings: BindingSet) throws {
+        guard let descriptor = computePipelines[pipeline]?.descriptor else { return }
+        guard descriptor.shader.rawValue == "compute_storage_texture" else { return }
+        guard let textureHandle = bindings.texture(at: 0) else {
+            throw AgentError.invalidArgument("Missing storage texture binding at slot 0")
+        }
+        guard var resource = textures[textureHandle] else {
+            throw AgentError.invalidArgument("Unknown storage texture handle")
+        }
+        guard resource.usage == .shaderWrite else {
+            throw AgentError.invalidArgument("Storage texture binding must have shaderWrite usage")
+        }
+        guard resource.format == .rgba8Unorm || resource.format == .bgra8Unorm else {
+            throw AgentError.invalidArgument("Storage texture must be a color format")
+        }
+
+        let width = max(1, resource.width)
+        let height = max(1, resource.height)
+        let totalPixels = width * height
+        if resource.data.count < totalPixels * 4 {
+            resource.data = Data(count: totalPixels * 4)
+        }
+
+        resource.data.withUnsafeMutableBytes { buffer in
+            guard let base = buffer.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return }
+            for y in 0..<height {
+                for x in 0..<width {
+                    let offset = (y * width + x) * 4
+                    let normalizedX = Float(x) / Float(max(1, width - 1))
+                    let normalizedY = Float(y) / Float(max(1, height - 1))
+                    base[offset + 0] = UInt8(min(255, max(0, Int(normalizedX * 255.0))))
+                    base[offset + 1] = UInt8(min(255, max(0, Int(normalizedY * 255.0))))
+                    let pattern = UInt8(((x + y + groupsX + groupsY + groupsZ) % 256))
+                    base[offset + 2] = pattern
+                    base[offset + 3] = 255
+                }
+            }
+        }
+
+        textures[textureHandle] = resource
+    }
+
+    private func blit(texture resource: TextureResource) {
+        guard resource.format == .rgba8Unorm || resource.format == .bgra8Unorm else { return }
+        let targetWidth = max(1, currentSize.width)
+        let targetHeight = max(1, currentSize.height)
+        let sourceWidth = max(1, resource.width)
+        let sourceHeight = max(1, resource.height)
+        if framebuffer.count < targetWidth * targetHeight * 4 {
+            framebuffer = Data(count: targetWidth * targetHeight * 4)
+        }
+
+        framebuffer.withUnsafeMutableBytes { dstBuf in
+            resource.data.withUnsafeBytes { srcBuf in
+                guard let dstBase = dstBuf.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return }
+                guard let srcBase = srcBuf.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return }
+                for y in 0..<targetHeight {
+                    let srcY = min(sourceHeight - 1, y * sourceHeight / max(1, targetHeight))
+                    for x in 0..<targetWidth {
+                        let srcX = min(sourceWidth - 1, x * sourceWidth / max(1, targetWidth))
+                        let dstOffset = (y * targetWidth + x) * 4
+                        let srcOffset = (srcY * sourceWidth + srcX) * 4
+                        dstBase[dstOffset + 0] = srcBase[srcOffset + 0]
+                        dstBase[dstOffset + 1] = srcBase[srcOffset + 1]
+                        dstBase[dstOffset + 2] = srcBase[srcOffset + 2]
+                        dstBase[dstOffset + 3] = srcBase[srcOffset + 3]
+                    }
+                }
+            }
+        }
+
+        depthbuffer.withUnsafeMutableBytes { buffer in
+            guard let depthBase = buffer.baseAddress?.assumingMemoryBound(to: Float.self) else { return }
+            let count = targetWidth * targetHeight
+            for index in 0..<count {
+                let x = index % targetWidth
+                depthBase[index] = Float(x) / Float(max(1, targetWidth - 1))
+            }
+        }
+    }
+
+    private static func hashHex(_ data: Data) -> String {
+        var hash: UInt64 = 0xcbf29ce484222325
+        for byte in data {
+            hash ^= UInt64(byte)
+            hash &*= 0x100000001b3
+        }
+        return String(format: "%016llx", hash)
     }
 }
 
@@ -277,6 +418,16 @@ public class StubRenderBackend: RenderBackend {
 
     func withMutableBufferData(_ handle: BufferHandle, _ body: (inout Data) throws -> Void) throws {
         try core.withMutableBufferData(handle, body)
+    }
+}
+
+extension StubRenderBackend: GoldenImageCapturable {
+    public func requestCapture() {
+        core.requestCapture()
+    }
+
+    public func takeCaptureHash() throws -> String {
+        try core.takeCaptureHash()
     }
 }
 
