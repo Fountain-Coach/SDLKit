@@ -35,6 +35,28 @@ sudo apt-get install -y libsdl3-dev
 
 Alternatively, build and install the fork manually, then export `PKG_CONFIG_PATH` so `pkg-config` finds the resulting `.pc` file.
 
+Install the Vulkan SDK packages so SwiftPM can link the `CVulkan` module:
+
+```bash
+sudo apt-get install -y libvulkan-dev vulkan-headers vulkan-validationlayers vulkan-tools
+```
+
+This brings in the loader, headers, and validation layers used by SDLKit’s Vulkan backend.
+
+### Linux (Fedora/RHEL)
+
+```bash
+sudo dnf install -y vulkan-devel vulkan-headers vulkan-validation-layers vulkan-tools
+```
+
+### Linux (Arch/Manjaro)
+
+```bash
+sudo pacman -S --needed vulkan-headers vulkan-icd-loader vulkan-validation-layers vulkan-tools
+```
+
+After installation, confirm `pkg-config --exists vulkan` succeeds; SDLKit’s manifest now fails fast when these packages are missing.
+
 ### Windows
 
 Install SDL3 via vcpkg:
