@@ -44,6 +44,7 @@ public enum RenderBackendTestHarness {
                     allowGoldenWrite: Bool = ProcessInfo.processInfo.environment["SDLKIT_GOLDEN_WRITE"] == "1",
                     logger: (@Sendable (String) -> Void)? = nil,
                     artifactDirectory: URL? = nil) {
+
             self.width = width
             self.height = height
             self.computeTextureSize = computeTextureSize
@@ -311,6 +312,7 @@ public enum RenderBackendTestHarness {
     }
 
     public nonisolated(unsafe) static func artifactDirectoryFromEnvironment() -> URL? {
+
         guard let raw = ProcessInfo.processInfo.environment["SDLKIT_GOLDEN_ARTIFACT_DIR"], !raw.isEmpty else {
             return nil
         }
