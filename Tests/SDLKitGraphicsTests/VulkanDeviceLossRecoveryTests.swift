@@ -16,6 +16,11 @@ final class VulkanDeviceLossRecoveryTests: XCTestCase {
                 events.append(event)
             }
 
+#if DEBUG
+            let logCapture = SDLLogCapture()
+            defer { logCapture.stop() }
+#endif
+
             let module = try ShaderLibrary.shared.module(for: ShaderID("unlit_triangle"))
             let vertexStride = module.vertexLayout.stride
             let vertexCount = 3
@@ -58,6 +63,10 @@ final class VulkanDeviceLossRecoveryTests: XCTestCase {
                                                                 depthFormat: .depth32Float)
             _ = try backend.makePipeline(pipelineDescriptor)
 
+#if DEBUG
+            let baselineInventory = backend.debugResourceInventory()
+#endif
+
             try backend.beginFrame()
             // The GraphicsAgent risk guidance calls for centralized recovery; we drive the synthetic
             // loss path here so contributors can validate reset handling without removing hardware.
@@ -71,6 +80,17 @@ final class VulkanDeviceLossRecoveryTests: XCTestCase {
 
             XCTAssertTrue(events.contains { if case .willReset = $0 { return true } else { return false } })
             XCTAssertTrue(events.contains { if case .didReset = $0 { return true } else { return false } })
+#if DEBUG
+            XCTAssertFalse(events.contains { if case .resetFailed = $0 { return true } else { return false } })
+            let recoveredInventory = backend.debugResourceInventory()
+            XCTAssertEqual(recoveredInventory, baselineInventory)
+            XCTAssertTrue(logCapture.entries.contains(where: { entry in
+                entry.component == "SDLKit.Graphics.Vulkan" && entry.message.contains("VkResult")
+            }))
+            XCTAssertTrue(logCapture.entries.contains(where: { entry in
+                entry.component == "SDLKit.Graphics.Vulkan" && entry.message.contains("Device reset completed after loss")
+            }))
+#endif
 
             XCTAssertEqual(backend.debugBufferLength(for: vertexBuffer), vertexData.count)
             XCTAssertEqual(backend.debugTextureDescriptor(for: textureHandle)?.width, textureDescriptor.width)
@@ -81,6 +101,13 @@ final class VulkanDeviceLossRecoveryTests: XCTestCase {
             try backend.beginFrame()
             try backend.endFrame()
 
+            try backend.resize(width: 192, height: 192)
+
+#if DEBUG
+            let postResizeInventory = backend.debugResourceInventory()
+            XCTAssertEqual(postResizeInventory, baselineInventory)
+#endif
+
             _ = try backend.registerMesh(vertexBuffer: vertexBuffer,
                                          vertexCount: vertexCount,
                                          indexBuffer: nil,
@@ -89,6 +116,9 @@ final class VulkanDeviceLossRecoveryTests: XCTestCase {
             _ = try backend.makePipeline(pipelineDescriptor)
             _ = meshHandle
             _ = sampler
+
+            try backend.beginFrame()
+            try backend.endFrame()
         }
     }
 }
