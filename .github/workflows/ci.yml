@@ -183,21 +183,40 @@ jobs:
           if-no-files-found: ignore
 
   macos:
-    runs-on: macos-13
+    runs-on: macos-14
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install SDL2
-        run: brew install sdl2
+      - name: Set up Swift
+        id: swift-setup
+        uses: swift-actions/setup-swift@v1
+        with:
+          swift-version: '6.1.2'
 
-      - name: Install Swift 6.1.0 toolchain
+      - name: Install dependencies (SDL3 + tools)
         run: |
           set -euo pipefail
-          curl -fLO https://download.swift.org/swift-6.1-release/xcode/swift-6.1-RELEASE/swift-6.1-RELEASE-osx.pkg
-          sudo installer -pkg swift-6.1-RELEASE-osx.pkg -target /
-          echo "/Library/Developer/Toolchains/swift-6.1-RELEASE.xctoolchain/usr/bin" >> "$GITHUB_PATH"
-          rm swift-6.1-RELEASE-osx.pkg
+          brew update
+          brew install pkg-config sdl3 sdl3_image sdl3_ttf spirv-tools glslang
+
+      - name: Cache Swift build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            .build
+            ~/Library/Developer/Xcode/DerivedData
+          key: ${{ runner.os }}-swift-${{ steps.swift-setup.outputs.swift-version || '6.1.2' }}-build-${{ hashFiles('Package.swift', 'Sources/**', 'Tests/**') }}
+          restore-keys: |
+            ${{ runner.os }}-swift-${{ steps.swift-setup.outputs.swift-version || '6.1.2' }}-build-
+
+      - name: Cache shader artifacts
+        uses: actions/cache@v4
+        with:
+          path: Sources/SDLKit/Generated
+          key: ${{ runner.os }}-shader-${{ hashFiles('Shaders/**', 'Plugins/ShaderBuildPlugin/**', 'Scripts/ShaderBuild/**') }}
+          restore-keys: |
+            ${{ runner.os }}-shader-
 
       - name: Prepare regression artifact directory
         run: |
@@ -206,7 +225,14 @@ jobs:
           mkdir -p "$harness_root"
           echo "SDLKIT_GOLDEN_ARTIFACT_DIR=$harness_root" >> "$GITHUB_ENV"
 
+      - name: Build shader bundle (best effort)
+        run: |
+          python3 Scripts/ShaderBuild/build-shaders.py "$PWD" .build/shader-cache
+        continue-on-error: true
+
       - name: Build
+        env:
+          SDLKIT_GUI_ENABLED: 'false'
         run: |
           set -euo pipefail
           swift build -v -Xswiftc -DHEADLESS_CI
@@ -217,6 +243,22 @@ jobs:
         run: |
           set -euo pipefail
           swift test -v -Xswiftc -DHEADLESS_CI
+
+      - name: Run regression harness (Metal)
+        env:
+          SDLKIT_GOLDEN: '1'
+          SDLKIT_GUI_ENABLED: 'false'
+        run: |
+          set -euo pipefail
+          swift test --skip-build --filter BackendHarnessTests -Xswiftc -DHEADLESS_CI
+
+      - name: Upload regression harness artifacts (Metal)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-golden-artifacts
+          path: ${{ env.SDLKIT_GOLDEN_ARTIFACT_DIR }}
+          if-no-files-found: ignore
 
       - name: Run regression harness (Metal)
         env:
