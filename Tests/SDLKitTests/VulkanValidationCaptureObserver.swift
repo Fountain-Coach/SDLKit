@@ -17,7 +17,7 @@ private final class VulkanValidationCaptureObserver: NSObject, XCTestObservation
         guard messages.isEmpty else {
             let joined = messages.joined(separator: "\n")
             fputs("Vulkan validation warnings captured during tests:\n\(joined)\n", stderr)
-            fatalError("Vulkan validation warnings detected")
+            fatalError("Vulkan validation warnings detected:\n\(joined)")
         }
     }
 }
