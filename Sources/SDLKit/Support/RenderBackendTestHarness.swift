@@ -16,7 +16,7 @@ public enum RenderBackendTestHarness {
         }
     }
 
-    public enum Test: String, CaseIterable {
+    public enum Test: String, CaseIterable, Sendable {
         case unlitTriangle = "unlit_triangle"
         case basicLit = "basic_lit"
         case computeStorageTexture = "compute_storage_texture"
