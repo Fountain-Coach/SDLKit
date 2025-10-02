@@ -73,6 +73,8 @@ final class StubRenderBackendCore {
     private var depthbuffer: Data = Data()
     private var captureRequested = false
     private var lastCaptureHash: String?
+    private var lastCaptureData: Data?
+    private var lastCaptureBytesPerRow: Int = 0
 
     init(kind: Kind, window: SDLWindow) throws {
         self.kind = kind
@@ -126,6 +128,8 @@ final class StubRenderBackendCore {
         framebuffer = Data(count: colorBytes)
         depthbuffer = Data(count: max(1, currentSize.width * currentSize.height * MemoryLayout<Float>.size))
         lastCaptureHash = nil
+        lastCaptureData = nil
+        lastCaptureBytesPerRow = 0
     }
 
     func endFrame() throws {
@@ -138,6 +142,8 @@ final class StubRenderBackendCore {
             var combined = framebuffer
             combined.append(depthbuffer)
             lastCaptureHash = StubRenderBackendCore.hashHex(combined)
+            lastCaptureData = framebuffer
+            lastCaptureBytesPerRow = max(1, currentSize.width * 4)
             captureRequested = false
         }
     }
@@ -280,6 +286,22 @@ final class StubRenderBackendCore {
             throw AgentError.internalError("No capture hash available; call requestCapture() before endFrame")
         }
         return hash
+    }
+
+    func takeCapturePayload() throws -> GoldenImageCapture {
+        guard let data = lastCaptureData else {
+            throw AgentError.internalError("No capture data available; call requestCapture() before endFrame")
+        }
+        let width = max(1, currentSize.width)
+        let height = max(1, currentSize.height)
+        let bytesPerRow = lastCaptureBytesPerRow > 0 ? lastCaptureBytesPerRow : max(1, width * 4)
+        return GoldenImageCapture(
+            width: width,
+            height: height,
+            bytesPerRow: bytesPerRow,
+            layout: .bgra8Unorm,
+            data: data
+        )
     }
 
     private func applyComputeWork(for pipeline: ComputePipelineHandle,
@@ -429,6 +451,10 @@ extension StubRenderBackend: GoldenImageCapturable {
 
     public func takeCaptureHash() throws -> String {
         try core.takeCaptureHash()
+    }
+
+    public func takeCapturePayload() throws -> GoldenImageCapture {
+        try core.takeCapturePayload()
     }
 }
 
