@@ -313,6 +313,7 @@ public enum ResourceHandle: Hashable {
 
 // Optional protocol: backends may support golden-image capture for tests.
 // Call `requestCapture()` before ending a frame, then fetch the hash via `takeCaptureHash()`.
+@MainActor
 public protocol GoldenImageCapturable {
     func requestCapture()
     func takeCaptureHash() throws -> String

@@ -243,14 +243,17 @@ Use the SwiftPM demo and focused XCTest targets to validate each GPU backend aft
 - **Metal (macOS)**
   1. `SDLKIT_GUI_ENABLED=1 swift run SDLKitDemo` boots the triangle + lit scene walkthrough using the Metal backend by default.【F:Sources/SDLKitDemo/main.swift†L24-L115】【F:Sources/SDLKitDemo/main.swift†L160-L221】
   2. `SDLKIT_GOLDEN=1 swift test --filter GoldenImageTests/testSceneGraphGoldenHash_Metal` captures a lit cube frame and compares it to the recorded hash.【F:Tests/SDLKitTests/GoldenImageTests.swift†L1-L44】
+  3. `SDLKIT_GOLDEN=1 swift test --filter GoldenComputeStorageTextureTests/testComputeStorageTextureMetal` exercises the compute-to-texture path, capturing the final color/depth hash with the Metal stub or backend; the test skips unless capture support is available.【F:Tests/SDLKitTests/GoldenComputeStorageTextureTests.swift†L1-L116】
 
 - **Direct3D 12 (Windows)**
   1. Set `SDLKIT_BACKEND=d3d12` if needed and run `swift run SDLKitDemo` to exercise swap-chain setup and the SceneGraph demo on D3D12.【F:Sources/SDLKitDemo/main.swift†L160-L221】
   2. `SDLKIT_GOLDEN=1 swift test --filter GoldenImageTests/testSceneGraphGoldenHash_D3D12` validates the lit-scene output and ensures GPU capture support is wired up.【F:Tests/SDLKitTests/GoldenImageTests.swift†L59-L80】
+  3. `SDLKIT_GOLDEN=1 swift test --filter GoldenComputeStorageTextureTests/testComputeStorageTextureD3D12` validates compute writes into a storage texture before drawing, skipping automatically when capture is unsupported on the current configuration.【F:Tests/SDLKitTests/GoldenComputeStorageTextureTests.swift†L80-L116】
 
 - **Vulkan (Linux)**
   1. `swift run SDLKitDemo` automatically chooses the Vulkan backend when running on Linux, exercising triangle + lit scene rendering.【F:Sources/SDLKitDemo/main.swift†L24-L115】【F:Sources/SDLKitDemo/main.swift†L160-L221】
   2. `SDLKIT_GOLDEN=1 swift test --filter GoldenImageTests/testSceneGraphGoldenHash_Vulkan` renders the lit cube and compares its capture hash against the stored baseline.【F:Tests/SDLKitTests/GoldenImageTests.swift†L45-L58】
+  3. `SDLKIT_GOLDEN=1 swift test --filter GoldenComputeStorageTextureTests/testComputeStorageTextureVulkan` covers the compute-to-texture path while enabling validation captures; the test documents its Linux-only skip when invoked elsewhere.【F:Tests/SDLKitTests/GoldenComputeStorageTextureTests.swift†L58-L79】
 
 All platforms can additionally run `swift test --filter SceneGraphComputeInteropTests` when the SDL3 stub is enabled to verify compute dispatch + render interop (`scenegraph_wave`).【F:Tests/SDLKitTests/SceneGraphComputeInteropTests.swift†L1-L41】
 
