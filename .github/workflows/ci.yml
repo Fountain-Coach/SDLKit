@@ -110,6 +110,14 @@ jobs:
             attempt=$((attempt + 1))
           done
 
+      - name: Upload Linux test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-swift-test-log
+          path: ${{ runner.temp }}/vulkan-validation/linux-swift-test.log
+          if-no-files-found: ignore
+
       - name: Upload Vulkan validation logs
         if: always()
         uses: actions/upload-artifact@v4
