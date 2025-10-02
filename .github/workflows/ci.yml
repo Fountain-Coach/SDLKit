@@ -138,7 +138,7 @@ jobs:
 
   windows:
     if: >-
-      ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.os == 'all' || github.event.inputs.os == 'windows' }}
+      ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.os == 'all' || github.event.inputs.os == 'windows') }}
     runs-on: windows-2022
     steps:
       - name: Checkout
@@ -273,7 +273,7 @@ jobs:
           while [ $attempt -le $max_attempts ]; do
             echo "macOS test attempt $attempt/$max_attempts"
             # Run fast, headless-friendly tests; GPU harness runs in next step
-            if swift test --skip-build --filter SDLKitTests -Xswiftc -DHEADLESS_CI 2> >(grep -v "warning: prohibited flag(s)" >&2) | grep -v "warning: prohibited flag(s)" | tee -a "$test_log"; then
+            if swift test --filter SDLKitTests -Xswiftc -DHEADLESS_CI 2> >(grep -v "warning: prohibited flag(s)" >&2) | grep -v "warning: prohibited flag(s)" | tee -a "$test_log"; then
               break
             fi
             if [ $attempt -eq $max_attempts ]; then
