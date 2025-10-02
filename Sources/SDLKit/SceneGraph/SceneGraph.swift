@@ -166,6 +166,15 @@ public enum SceneGraphRenderer {
         pipelineCache.removeAll()
     }
 
+    private static func propagateDeviceLoss<T>(_ work: () throws -> T) throws -> T {
+        do {
+            return try work()
+        } catch AgentError.deviceLost(let reason) {
+            resetPipelineCache()
+            throw AgentError.deviceLost(reason)
+        }
+    }
+
     public static func updateAndRender(
         scene: Scene,
         backend: RenderBackend,
@@ -173,11 +182,25 @@ public enum SceneGraphRenderer {
         depthFormat: TextureFormat? = .depth32Float,
         beforeRender: (() throws -> Void)? = nil
     ) throws {
+        if backend.deviceEventHandler == nil {
+            backend.deviceEventHandler = { event in
+                switch event {
+                case .willReset, .resetFailed:
+                    resetPipelineCache()
+                case .didReset:
+                    break
+                }
+            }
+        }
+
         scene.root.updateWorldTransform(parent: .identity)
-        try backend.beginFrame()
-        defer { try? backend.endFrame() }
+        var frameStarted = false
+        try propagateDeviceLoss {
+            try backend.beginFrame()
+            frameStarted = true
+        }
         if let beforeRender {
-            try beforeRender()
+            try propagateDeviceLoss { try beforeRender() }
         }
         let vp: float4x4
         if let cam = scene.camera {
@@ -185,7 +208,18 @@ public enum SceneGraphRenderer {
         } else {
             vp = .identity
         }
-        try renderNode(scene.root, backend: backend, colorFormat: colorFormat, depthFormat: depthFormat, vp: vp, lightDir: scene.lightDirection)
+        try propagateDeviceLoss {
+            try renderNode(scene.root,
+                            backend: backend,
+                            colorFormat: colorFormat,
+                            depthFormat: depthFormat,
+                            vp: vp,
+                            lightDir: scene.lightDirection)
+        }
+        try propagateDeviceLoss {
+            try backend.endFrame()
+            frameStarted = false
+        }
     }
 
     private static func renderNode(_ node: SceneNode, backend: RenderBackend, colorFormat: TextureFormat, depthFormat: TextureFormat?, vp: float4x4, lightDir: (Float, Float, Float)) throws {

@@ -380,6 +380,7 @@ final class StubRenderBackendCore {
 @MainActor
 public class StubRenderBackend: RenderBackend {
     fileprivate let core: StubRenderBackendCore
+    public var deviceEventHandler: RenderBackendDeviceEventHandler?
 
     fileprivate init(kind: StubRenderBackendCore.Kind, window: SDLWindow) throws {
         self.core = try StubRenderBackendCore(kind: kind, window: window)

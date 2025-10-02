@@ -17,6 +17,7 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
         let length: Int
         let usage: BufferUsage
         var state: D3D12_RESOURCE_STATES
+        var shadowCopy: Data?
     }
 
     private struct PipelineResource {
@@ -64,8 +65,9 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
     }
 
     private struct TextureResource {
+        let descriptor: TextureDescriptor
+        var shadowMipData: [Data]
         let resource: UnsafeMutablePointer<ID3D12Resource>
-        let usage: TextureUsage
         var state: D3D12_RESOURCE_STATES
         let srvDescriptorIndex: UINT?
         let srvGPUHandle: D3D12_GPU_DESCRIPTOR_HANDLE?
@@ -75,6 +77,23 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
         let dsvCPUHandle: D3D12_CPU_DESCRIPTOR_HANDLE?
         let uavDescriptorIndex: UINT?
         let uavGPUHandle: D3D12_GPU_DESCRIPTOR_HANDLE?
+    }
+
+    private struct BufferSnapshot {
+        let length: Int
+        let usage: BufferUsage
+        let state: D3D12_RESOURCE_STATES
+        let shadowCopy: Data?
+    }
+
+    private struct TextureSnapshot {
+        let descriptor: TextureDescriptor
+        let state: D3D12_RESOURCE_STATES
+        let shadowMipData: [Data]
+    }
+
+    private struct SamplerSnapshot {
+        let descriptor: SamplerDescriptor
     }
 
     private struct SamplerResource {
@@ -136,6 +155,7 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
     private var frameActive = false
     private var debugLayerEnabled = false
     private let shaderLibrary = ShaderLibrary.shared
+    public var deviceEventHandler: RenderBackendDeviceEventHandler?
 
     private var srvDescriptorSize: UINT = 0
     private var nextSrvDescriptorIndex: UINT = 0
@@ -170,6 +190,10 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
     private var lastCaptureHash: String?
     private var readbackBuffer: UnsafeMutablePointer<ID3D12Resource>?
     private var readbackBufferSize: UINT64 = 0
+    private var recoveringDeviceLoss = false
+#if DEBUG
+    private var debugForcedDeviceRemovalReason: HRESULT?
+#endif
 
     public required init(window: SDLWindow) throws {
         self.window = window
@@ -211,45 +235,50 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
         }
 
         frameActive = true
-        try waitForFrameCompletion(Int(frameIndex))
+        do {
+            try waitForFrameCompletion(Int(frameIndex))
 
-        guard let allocator = frames[Int(frameIndex)].commandAllocator else {
-            throw AgentError.internalError("Missing command allocator for frame")
-        }
-        try checkHRESULT(allocator.pointee.lpVtbl.pointee.Reset(allocator), "ID3D12CommandAllocator.Reset")
-        try checkHRESULT(commandList.pointee.lpVtbl.pointee.Reset(commandList, allocator, nil), "ID3D12GraphicsCommandList.Reset")
-
-        var vp = viewport
-        commandList.pointee.lpVtbl.pointee.RSSetViewports(commandList, 1, &vp)
-        var rect = scissorRect
-        commandList.pointee.lpVtbl.pointee.RSSetScissorRects(commandList, 1, &rect)
-
-        var barrier = D3D12_RESOURCE_BARRIER()
-        barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION
-        barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE
-        barrier.Transition = D3D12_RESOURCE_TRANSITION_BARRIER(
-            pResource: frames[Int(frameIndex)].renderTarget,
-            Subresource: D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
-            StateBefore: D3D12_RESOURCE_STATE_PRESENT,
-            StateAfter: D3D12_RESOURCE_STATE_RENDER_TARGET
-        )
-        commandList.pointee.lpVtbl.pointee.ResourceBarrier(commandList, 1, &barrier)
-
-        var rtvHandle = frames[Int(frameIndex)].rtvHandle
-        if let dsvHeap {
-            var dsvHandle = dsvHeap.pointee.lpVtbl.pointee.GetCPUDescriptorHandleForHeapStart(dsvHeap)
-            commandList.pointee.lpVtbl.pointee.OMSetRenderTargets(commandList, 1, &rtvHandle, false, &dsvHandle)
-            var clearColor: [Float] = [0.05, 0.05, 0.08, 1.0]
-            clearColor.withUnsafeMutableBufferPointer { buffer in
-                commandList.pointee.lpVtbl.pointee.ClearRenderTargetView(commandList, rtvHandle, buffer.baseAddress, 0, nil)
+            guard let allocator = frames[Int(frameIndex)].commandAllocator else {
+                throw AgentError.internalError("Missing command allocator for frame")
             }
-            commandList.pointee.lpVtbl.pointee.ClearDepthStencilView(commandList, dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0, 0, 0, nil)
-        } else {
-            commandList.pointee.lpVtbl.pointee.OMSetRenderTargets(commandList, 1, &rtvHandle, false, nil)
-            var clearColor: [Float] = [0.05, 0.05, 0.08, 1.0]
-            clearColor.withUnsafeMutableBufferPointer { buffer in
-                commandList.pointee.lpVtbl.pointee.ClearRenderTargetView(commandList, rtvHandle, buffer.baseAddress, 0, nil)
+            try checkHRESULT(allocator.pointee.lpVtbl.pointee.Reset(allocator), "ID3D12CommandAllocator.Reset")
+            try checkHRESULT(commandList.pointee.lpVtbl.pointee.Reset(commandList, allocator, nil), "ID3D12GraphicsCommandList.Reset")
+
+            var vp = viewport
+            commandList.pointee.lpVtbl.pointee.RSSetViewports(commandList, 1, &vp)
+            var rect = scissorRect
+            commandList.pointee.lpVtbl.pointee.RSSetScissorRects(commandList, 1, &rect)
+
+            var barrier = D3D12_RESOURCE_BARRIER()
+            barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION
+            barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE
+            barrier.Transition = D3D12_RESOURCE_TRANSITION_BARRIER(
+                pResource: frames[Int(frameIndex)].renderTarget,
+                Subresource: D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+                StateBefore: D3D12_RESOURCE_STATE_PRESENT,
+                StateAfter: D3D12_RESOURCE_STATE_RENDER_TARGET
+            )
+            commandList.pointee.lpVtbl.pointee.ResourceBarrier(commandList, 1, &barrier)
+
+            var rtvHandle = frames[Int(frameIndex)].rtvHandle
+            if let dsvHeap {
+                var dsvHandle = dsvHeap.pointee.lpVtbl.pointee.GetCPUDescriptorHandleForHeapStart(dsvHeap)
+                commandList.pointee.lpVtbl.pointee.OMSetRenderTargets(commandList, 1, &rtvHandle, false, &dsvHandle)
+                var clearColor: [Float] = [0.05, 0.05, 0.08, 1.0]
+                clearColor.withUnsafeMutableBufferPointer { buffer in
+                    commandList.pointee.lpVtbl.pointee.ClearRenderTargetView(commandList, rtvHandle, buffer.baseAddress, 0, nil)
+                }
+                commandList.pointee.lpVtbl.pointee.ClearDepthStencilView(commandList, dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0, 0, 0, nil)
+            } else {
+                commandList.pointee.lpVtbl.pointee.OMSetRenderTargets(commandList, 1, &rtvHandle, false, nil)
+                var clearColor: [Float] = [0.05, 0.05, 0.08, 1.0]
+                clearColor.withUnsafeMutableBufferPointer { buffer in
+                    commandList.pointee.lpVtbl.pointee.ClearRenderTargetView(commandList, rtvHandle, buffer.baseAddress, 0, nil)
+                }
             }
+        } catch {
+            frameActive = false
+            throw error
         }
     }
 
@@ -260,6 +289,8 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
         guard let commandList, let commandQueue, let swapChain, let fence else {
             throw AgentError.internalError("D3D12 command resources unavailable")
         }
+
+        defer { frameActive = false }
 
         // Optional capture: transition to COPY_SOURCE, copy to readback buffer, then to PRESENT
         if captureRequested, let rt = frames[Int(frameIndex)].renderTarget {
@@ -331,6 +362,13 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
         var listPointer = UnsafeMutableRawPointer(commandList).assumingMemoryBound(to: ID3D12CommandList.self)
         commandQueue.pointee.lpVtbl.pointee.ExecuteCommandLists(commandQueue, 1, &listPointer)
 
+        #if DEBUG
+        if let forcedReason = debugForcedDeviceRemovalReason {
+            debugForcedDeviceRemovalReason = nil
+            try recoverFromDeviceLoss(context: "IDXGISwapChain3.Present(forced)", reason: forcedReason)
+        }
+        #endif
+
         try checkHRESULT(swapChain.pointee.lpVtbl.pointee.Present(swapChain, 1, 0), "IDXGISwapChain3.Present")
 
         let currentFrame = Int(frameIndex)
@@ -372,8 +410,6 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
 
         frameIndex = swapChain.pointee.lpVtbl.pointee.GetCurrentBackBufferIndex(swapChain)
         try waitForFrameCompletion(Int(frameIndex))
-
-        frameActive = false
     }
 
     public func resize(width: Int, height: Int) throws {
@@ -420,7 +456,7 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
         try waitForFence(value: signalValue)
     }
 
-    public func createBuffer(bytes: UnsafeRawPointer?, length: Int, usage: BufferUsage) throws -> BufferHandle {
+    private func buildBufferResource(length: Int, usage: BufferUsage, initialData: Data?) throws -> BufferResource {
         guard length > 0 else {
             throw AgentError.invalidArgument("Buffer length must be positive")
         }
@@ -459,21 +495,45 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
             throw AgentError.internalError("Failed to allocate D3D12 buffer")
         }
 
-        if let bytes {
+        if let initialData, !initialData.isEmpty {
             var mappedMemory: UnsafeMutableRawPointer?
             try checkHRESULT(resource.pointee.lpVtbl.pointee.Map(resource, 0, nil, &mappedMemory), "ID3D12Resource.Map")
             if let mappedMemory {
-                memcpy(mappedMemory, bytes, length)
+                initialData.withUnsafeBytes { bytes in
+                    if let base = bytes.baseAddress {
+                        memcpy(mappedMemory, base, min(bytes.count, length))
+                    }
+                }
             }
             resource.pointee.lpVtbl.pointee.Unmap(resource, 0, nil)
         }
 
+        return BufferResource(
+            resource: resource,
+            length: length,
+            usage: usage,
+            state: D3D12_RESOURCE_STATE_GENERIC_READ,
+            shadowCopy: initialData
+        )
+    }
+
+    public func createBuffer(bytes: UnsafeRawPointer?, length: Int, usage: BufferUsage) throws -> BufferHandle {
+        guard length > 0 else {
+            throw AgentError.invalidArgument("Buffer length must be positive")
+        }
+        let shadowData: Data?
+        if let bytes {
+            shadowData = Data(bytes: bytes, count: length)
+        } else {
+            shadowData = nil
+        }
+        let resource = try buildBufferResource(length: length, usage: usage, initialData: shadowData)
         let handle = BufferHandle()
-        buffers[handle] = BufferResource(resource: resource, length: length, usage: usage, state: D3D12_RESOURCE_STATE_GENERIC_READ)
+        buffers[handle] = resource
         return handle
     }
 
-    public func createTexture(descriptor: TextureDescriptor, initialData: TextureInitialData?) throws -> TextureHandle {
+    private func buildTextureResource(descriptor: TextureDescriptor, initialData: TextureInitialData?) throws -> TextureResource {
         guard descriptor.width > 0, descriptor.height > 0 else {
             throw AgentError.invalidArgument("Texture dimensions must be positive")
         }
@@ -689,10 +749,10 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
             dsvDescriptorIndex = index
         }
 
-        let handle = TextureHandle()
-        let textureResource = TextureResource(
+        return TextureResource(
+            descriptor: descriptor,
+            shadowMipData: initialData?.mipLevelData ?? [],
             resource: resource,
-            usage: descriptor.usage,
             state: finalState,
             srvDescriptorIndex: srvDescriptorIndex,
             srvGPUHandle: srvGPUHandle,
@@ -703,11 +763,16 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
             uavDescriptorIndex: uavDescriptorIndex,
             uavGPUHandle: uavGPUHandle
         )
-        textures[handle] = textureResource
+    }
+
+    public func createTexture(descriptor: TextureDescriptor, initialData: TextureInitialData?) throws -> TextureHandle {
+        let resource = try buildTextureResource(descriptor: descriptor, initialData: initialData)
+        let handle = TextureHandle()
+        textures[handle] = resource
         return handle
     }
 
-    public func createSampler(descriptor: SamplerDescriptor) throws -> SamplerHandle {
+    private func buildSamplerResource(descriptor: SamplerDescriptor) throws -> SamplerResource {
         guard let device else {
             throw AgentError.internalError("D3D12 device unavailable for sampler creation")
         }
@@ -736,14 +801,19 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
 
         device.pointee.lpVtbl.pointee.CreateSampler(device, &samplerDesc, cpuHandle)
 
-        let handle = SamplerHandle()
-        samplers[handle] = SamplerResource(
+        return SamplerResource(
             descriptor: descriptor,
             nativeDesc: samplerDesc,
             descriptorIndex: descriptorIndex,
             cpuHandle: cpuHandle,
             gpuHandle: gpuHandle
         )
+    }
+
+    public func createSampler(descriptor: SamplerDescriptor) throws -> SamplerHandle {
+        let resource = try buildSamplerResource(descriptor: descriptor)
+        let handle = SamplerHandle()
+        samplers[handle] = resource
         SDLLogger.debug("SDLKit.Graphics.D3D12", "createSampler id=\(handle.rawValue) label=\(descriptor.label ?? "<nil>")")
         return handle
     }
@@ -1197,6 +1267,10 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
     }
 
 #if DEBUG
+    public func debugSimulateDeviceRemoval(reason: HRESULT = DXGI_ERROR_DEVICE_REMOVED) {
+        debugForcedDeviceRemovalReason = reason
+    }
+
     internal struct TextureDebugDescriptors {
         let hasShaderResourceView: Bool
         let hasRenderTargetView: Bool
@@ -2884,6 +2958,133 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
         }
     }
 
+    // MARK: - Device Loss Recovery
+
+    private func transitionResourceImmediately(_ resource: UnsafeMutablePointer<ID3D12Resource>,
+                                               from oldState: D3D12_RESOURCE_STATES,
+                                               to newState: D3D12_RESOURCE_STATES) throws {
+        guard oldState != newState else { return }
+        try performImmediateCommand { commandList in
+            var barrier = D3D12_RESOURCE_BARRIER()
+            barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION
+            barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE
+            barrier.Transition = D3D12_RESOURCE_TRANSITION_BARRIER(
+                pResource: resource,
+                Subresource: D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+                StateBefore: oldState,
+                StateAfter: newState
+            )
+            commandList.pointee.lpVtbl.pointee.ResourceBarrier(commandList, 1, &barrier)
+        }
+    }
+
+    private func recreateBuffers(from snapshots: [BufferHandle: BufferSnapshot]) throws {
+        buffers.removeAll(keepingCapacity: true)
+        for (handle, snapshot) in snapshots {
+            var resource = try buildBufferResource(length: snapshot.length, usage: snapshot.usage, initialData: snapshot.shadowCopy)
+            if snapshot.state != D3D12_RESOURCE_STATE_GENERIC_READ {
+                try transitionResourceImmediately(resource.resource,
+                                                  from: D3D12_RESOURCE_STATE_GENERIC_READ,
+                                                  to: snapshot.state)
+                resource.state = snapshot.state
+            }
+            buffers[handle] = resource
+        }
+    }
+
+    private func recreateTextures(from snapshots: [TextureHandle: TextureSnapshot]) throws {
+        textures.removeAll(keepingCapacity: true)
+        for (handle, snapshot) in snapshots {
+            let initialData = snapshot.shadowMipData.isEmpty ? nil : TextureInitialData(mipLevelData: snapshot.shadowMipData)
+            var resource = try buildTextureResource(descriptor: snapshot.descriptor, initialData: initialData)
+            if resource.state != snapshot.state {
+                try transitionResourceImmediately(resource.resource,
+                                                  from: resource.state,
+                                                  to: snapshot.state)
+                resource.state = snapshot.state
+            }
+            textures[handle] = resource
+        }
+    }
+
+    private func recreateSamplers(from snapshots: [SamplerHandle: SamplerSnapshot]) throws {
+        samplers.removeAll(keepingCapacity: true)
+        for (handle, snapshot) in snapshots {
+            let resource = try buildSamplerResource(descriptor: snapshot.descriptor)
+            samplers[handle] = resource
+        }
+    }
+
+    private func recoverFromDeviceLoss(context: String, reason: HRESULT) throws -> Never {
+        if recoveringDeviceLoss {
+            throw AgentError.deviceLost("D3D12 device lost during \(context)")
+        }
+        recoveringDeviceLoss = true
+        frameActive = false
+
+        let removalReason = device?.pointee.lpVtbl.pointee.GetDeviceRemovedReason(device) ?? reason
+        let formattedReason = formatHRESULT(removalReason)
+        let message = "\(context) failed due to device removal (reason=\(formattedReason))"
+        SDLLogger.error("SDLKit.Graphics.D3D12", message)
+
+        let bufferSnapshots = buffers.mapValues { resource in
+            BufferSnapshot(length: resource.length,
+                           usage: resource.usage,
+                           state: resource.state,
+                           shadowCopy: resource.shadowCopy)
+        }
+        let textureSnapshots = textures.mapValues { resource in
+            TextureSnapshot(descriptor: resource.descriptor,
+                            state: resource.state,
+                            shadowMipData: resource.shadowMipData)
+        }
+        let samplerSnapshots = samplers.mapValues { resource in
+            SamplerSnapshot(descriptor: resource.descriptor)
+        }
+        let meshSnapshot = meshes
+        let previousFallback = fallbackTextureHandle
+
+        deviceEventHandler?(.willReset(reason: message))
+
+        releaseResources()
+
+        buffers.removeAll(keepingCapacity: true)
+        textures.removeAll(keepingCapacity: true)
+        samplers.removeAll(keepingCapacity: true)
+        pipelines.removeAll(keepingCapacity: true)
+        computePipelines.removeAll(keepingCapacity: true)
+        meshes.removeAll(keepingCapacity: true)
+        fallbackTextureHandle = nil
+        builtinPipeline = nil
+
+        frames = Array(repeating: FrameResources(), count: Constants.frameCount)
+        fenceValues = Array(repeating: 0, count: Constants.frameCount)
+
+        do {
+            try initializeD3D()
+            try recreateBuffers(from: bufferSnapshots)
+            meshes = meshSnapshot
+            try recreateTextures(from: textureSnapshots)
+            try recreateSamplers(from: samplerSnapshots)
+            if let previousFallback, textures[previousFallback] != nil {
+                fallbackTextureHandle = previousFallback
+            }
+            deviceEventHandler?(.didReset)
+        } catch {
+            deviceEventHandler?(.resetFailed(reason: message))
+            recoveringDeviceLoss = false
+            throw AgentError.deviceLost(message)
+        }
+
+        recoveringDeviceLoss = false
+        throw AgentError.deviceLost(message)
+    }
+
+    private func formatHRESULT(_ hr: HRESULT) -> String {
+        let code = UInt32(bitPattern: hr)
+        return String(format: "0x%08X", code)
+    }
+
     // MARK: - Cleanup
 
     private func releaseResources() {
@@ -2967,6 +3168,9 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
     }
 
     private func checkHRESULT(_ hr: HRESULT, _ message: String) throws {
+        if hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET {
+            try recoverFromDeviceLoss(context: message, reason: hr)
+        }
         if hr < 0 {
             let code = UInt32(bitPattern: hr)
             let formatted = String(format: "0x%08X", code)

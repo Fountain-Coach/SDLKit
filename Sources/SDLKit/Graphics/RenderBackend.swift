@@ -54,6 +54,14 @@ public struct ComputePipelineHandle: Hashable, Codable, Sendable {
     public init(rawValue: UInt64) { self.rawValue = rawValue }
 }
 
+public enum RenderBackendDeviceEvent: Sendable {
+    case willReset(reason: String)
+    case didReset
+    case resetFailed(reason: String)
+}
+
+public typealias RenderBackendDeviceEventHandler = @Sendable (RenderBackendDeviceEvent) -> Void
+
 public struct MeshHandle: Hashable, Codable, Sendable {
     public let rawValue: UInt64
     public init() { self.init(rawValue: UInt64.random(in: UInt64.min...UInt64.max)) }
@@ -341,6 +349,8 @@ public protocol RenderBackend {
     func endFrame() throws
     func resize(width: Int, height: Int) throws
     func waitGPU() throws
+
+    var deviceEventHandler: RenderBackendDeviceEventHandler? { get set }
 
     func createBuffer(bytes: UnsafeRawPointer?, length: Int, usage: BufferUsage) throws -> BufferHandle
     func createTexture(descriptor: TextureDescriptor, initialData: TextureInitialData?) throws -> TextureHandle
