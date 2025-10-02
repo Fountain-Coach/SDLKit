@@ -20,9 +20,14 @@ public enum SDLLogLevel: Int, Comparable, Sendable {
     }
 }
 
+public struct SDLLogObserverToken: Hashable, Sendable {
+    fileprivate let id: UUID
+}
+
 @MainActor
 public enum SDLLogger {
     private static let level = SDLLogLevel.fromEnv()
+    private static var observers: [UUID: (SDLLogLevel, String, String) -> Void] = [:]
 
     public static func debug(_ component: String, _ msg: @autoclosure () -> String) {
         log(.debug, component, msg())
@@ -37,9 +42,23 @@ public enum SDLLogger {
         log(.error, component, msg())
     }
 
+    public static func addObserver(_ observer: @escaping (SDLLogLevel, String, String) -> Void) -> SDLLogObserverToken {
+        let id = UUID()
+        observers[id] = observer
+        return SDLLogObserverToken(id: id)
+    }
+
+    public static func removeObserver(_ token: SDLLogObserverToken) {
+        observers.removeValue(forKey: token.id)
+    }
+
     private static func log(_ lvl: SDLLogLevel, _ component: String, _ msg: @autoclosure () -> String) {
         guard lvl >= level else { return }
+        let resolved = msg()
+        for observer in observers.values {
+            observer(lvl, component, resolved)
+        }
         let ts = ISO8601DateFormatter().string(from: Date())
-        print("[\(ts)] [\(lvl)] \(component): \(msg())")
+        print("[\(ts)] [\(lvl)] \(component): \(resolved)")
     }
 }

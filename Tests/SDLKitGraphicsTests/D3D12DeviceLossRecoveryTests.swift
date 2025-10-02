@@ -16,6 +16,11 @@ final class D3D12DeviceLossRecoveryTests: XCTestCase {
                 events.append(event)
             }
 
+            #if DEBUG
+            let logCapture = SDLLogCapture()
+            defer { logCapture.stop() }
+            #endif
+
             let vertexModule = try ShaderLibrary.shared.module(for: ShaderID("unlit_triangle"))
             let vertexStride = vertexModule.vertexLayout.stride
             let vertexCount = 3
@@ -58,6 +63,10 @@ final class D3D12DeviceLossRecoveryTests: XCTestCase {
                                                           depthFormat: .depth32Float)
             _ = try backend.makePipeline(pipelineDesc)
 
+#if DEBUG
+            let baselineInventory = backend.debugResourceInventory()
+#endif
+
             try backend.beginFrame()
             backend.debugSimulateDeviceRemoval()
             XCTAssertThrowsError(try backend.endFrame()) { error in
@@ -69,13 +78,32 @@ final class D3D12DeviceLossRecoveryTests: XCTestCase {
 
             XCTAssertTrue(events.contains { if case .willReset = $0 { return true } else { return false } })
             XCTAssertTrue(events.contains { if case .didReset = $0 { return true } else { return false } })
-            XCTAssertNotNil(backend.debugTextureState(for: texture))
 #if DEBUG
+            XCTAssertFalse(events.contains { if case .resetFailed = $0 { return true } else { return false } })
+            XCTAssertNotNil(backend.debugTextureState(for: texture))
+            let recoveredInventory = backend.debugResourceInventory()
+            XCTAssertEqual(recoveredInventory, baselineInventory)
+            XCTAssertTrue(logCapture.entries.contains(where: { entry in
+                entry.component == "SDLKit.Graphics.D3D12" && entry.message.contains("device removal")
+            }))
+            XCTAssertTrue(logCapture.entries.contains(where: { entry in
+                entry.component == "SDLKit.Graphics.D3D12" && entry.message.contains("Device reset completed after loss")
+            }))
             XCTAssertNotNil(backend.debugSamplerDescriptor(for: sampler))
+#else
+            _ = texture
+            _ = sampler
 #endif
 
             try backend.beginFrame()
             try backend.endFrame()
+
+            try backend.resize(width: 196, height: 196)
+
+#if DEBUG
+            let postResizeInventory = backend.debugResourceInventory()
+            XCTAssertEqual(postResizeInventory, baselineInventory)
+#endif
 
             _ = try backend.registerMesh(vertexBuffer: vertexBuffer,
                                          vertexCount: vertexCount,
@@ -84,6 +112,9 @@ final class D3D12DeviceLossRecoveryTests: XCTestCase {
                                          indexFormat: .uint16)
             _ = try backend.makePipeline(pipelineDesc)
             _ = meshHandle
+
+            try backend.beginFrame()
+            try backend.endFrame()
         }
     }
 }

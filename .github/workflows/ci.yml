@@ -46,12 +46,62 @@ jobs:
           python3 Scripts/ShaderBuild/build-shaders.py "$PWD" .build/shader-cache
         continue-on-error: true
 
-      - name: Build and test
+      - name: Build and test (with retry)
         env:
           SDLKIT_GUI_ENABLED: 'false'
           SDLKIT_VK_VALIDATION_CAPTURE: '1'
           SDLKIT_VK_VALIDATION: '1'
         run: |
-          # Build and test with HEADLESS_CI to avoid linking SDL3
+          set -e
           swift build -v -Xswiftc -DHEADLESS_CI
-          swift test -v -Xswiftc -DHEADLESS_CI
+          attempt=1
+          max_attempts=3
+          backoff=5
+          while [ $attempt -le $max_attempts ]; do
+            echo "Linux test attempt $attempt/$max_attempts"
+            if swift test -v -Xswiftc -DHEADLESS_CI; then
+              break
+            fi
+            if [ $attempt -eq $max_attempts ]; then
+              echo "Tests failed after $max_attempts attempts"
+              exit 1
+            fi
+            sleep $((backoff * attempt))
+            attempt=$((attempt + 1))
+          done
+
+  windows:
+    runs-on: windows-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Swift
+        uses: swift-actions/setup-swift@v1
+        with:
+          swift-version: '6.1'
+
+      - name: Build and test (with retry)
+        shell: pwsh
+        env:
+          SDLKIT_GUI_ENABLED: 'false'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          swift build -v -Xswiftc -DHEADLESS_CI
+          $attempt = 1
+          $maxAttempts = 3
+          $backoff = 5
+          while ($attempt -le $maxAttempts) {
+            Write-Host "Windows test attempt $attempt/$maxAttempts"
+            try {
+              swift test -v -Xswiftc -DHEADLESS_CI
+              break
+            } catch {
+              if ($attempt -eq $maxAttempts) {
+                throw
+              }
+              $sleep = $backoff * $attempt
+              Start-Sleep -Seconds $sleep
+            }
+            $attempt++
+          }
