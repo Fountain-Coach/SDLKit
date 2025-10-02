@@ -23,8 +23,9 @@ final class BackendHarnessTests: XCTestCase {
             throw XCTSkip("Harness disabled; set SDLKIT_GOLDEN=1 to enable")
         }
 
+        let backends = backendMatrix
         try await MainActor.run {
-            for backend in backendMatrix {
+            for backend in backends {
                 do {
                     let results = try RenderBackendTestHarness.runFullSuite(backendOverride: backend)
                     XCTAssertEqual(results.count, RenderBackendTestHarness.Test.allCases.count,
