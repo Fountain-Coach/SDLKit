@@ -37,6 +37,11 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
         let indexFormat: IndexFormat
     }
 
+    private struct SamplerResource {
+        let descriptor: SamplerDescriptor
+        let state: MTLSamplerState
+    }
+
     private let window: SDLWindow
     private let surface: RenderSurface
     private let layer: CAMetalLayer
@@ -46,7 +51,7 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
 
     private var buffers: [BufferHandle: BufferResource] = [:]
     private var textures: [TextureHandle: MTLTexture] = [:]
-    private var samplers: [SamplerHandle: MTLSamplerState] = [:]
+    private var samplers: [SamplerHandle: SamplerResource] = [:]
     private var pipelines: [PipelineHandle: PipelineResource] = [:]
     private var computePipelines: [ComputePipelineHandle: ComputePipelineResource] = [:]
     private var meshes: [MeshHandle: MeshResource] = [:]
@@ -283,7 +288,8 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
         }
 
         let handle = SamplerHandle()
-        samplers[handle] = sampler
+        let resource = SamplerResource(descriptor: descriptor, state: sampler)
+        samplers[handle] = resource
         SDLLogger.debug("SDLKit.Graphics.Metal", "createSampler id=\(handle.rawValue) label=\(descriptor.label ?? "<nil>")")
         return handle
     }
@@ -456,8 +462,20 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
         }
         encoder.setVertexBuffer(vertexResource.buffer, offset: 0, index: 0)
 
-        try bindResources(pipelineResource.vertexBindings, stage: .vertex, encoder: encoder, bindings: bindings)
-        try bindResources(pipelineResource.fragmentBindings, stage: .fragment, encoder: encoder, bindings: bindings)
+        try bindResources(
+            pipelineResource.vertexBindings,
+            stage: .vertex,
+            shader: pipelineResource.descriptor.shader,
+            encoder: encoder,
+            bindings: bindings
+        )
+        try bindResources(
+            pipelineResource.fragmentBindings,
+            stage: .fragment,
+            shader: pipelineResource.descriptor.shader,
+            encoder: encoder,
+            bindings: bindings
+        )
 
         let vertexCount = meshResource.vertexCount > 0
             ? meshResource.vertexCount
@@ -564,12 +582,28 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
                     throw AgentError.invalidArgument("Buffer bound to texture slot \(slot.index) in compute dispatch")
                 }
             case .sampler:
-                guard let samplerHandle = bindings.sampler(at: slot.index),
-                      let sampler = samplers[samplerHandle] else {
+                encoder.setSamplerState(nil, index: slot.index)
+                guard let samplerHandle = bindings.sampler(at: slot.index) else {
+                    let error = samplerError(
+                        shader: resource.module.id,
+                        stage: .compute,
+                        slot: slot.index,
+                        reason: "is missing a sampler"
+                    )
                     encoder.endEncoding()
-                    throw AgentError.invalidArgument("Missing sampler binding for compute slot \(slot.index)")
+                    throw error
                 }
-                encoder.setSamplerState(sampler, index: slot.index)
+                guard let samplerResource = samplers[samplerHandle] else {
+                    let error = samplerError(
+                        shader: resource.module.id,
+                        stage: .compute,
+                        slot: slot.index,
+                        reason: "references unknown sampler handle \(samplerHandle.rawValue)"
+                    )
+                    encoder.endEncoding()
+                    throw error
+                }
+                encoder.setSamplerState(samplerResource.state, index: slot.index)
             }
         }
 
@@ -619,6 +653,7 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
 
     private func bindResources(_ slots: [BindingSlot],
                                stage: ShaderStage,
+                               shader: ShaderID,
                                encoder: MTLRenderCommandEncoder,
                                bindings: BindingSet) throws {
         guard !slots.isEmpty else { return }
@@ -685,15 +720,36 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
                     throw AgentError.invalidArgument("Buffer bound to texture slot \(slot.index) in draw call")
                 }
             case .sampler:
-                guard let samplerHandle = bindings.sampler(at: slot.index),
-                      let sampler = samplers[samplerHandle] else {
-                    throw AgentError.invalidArgument("Missing sampler binding for slot \(slot.index)")
-                }
+                let samplerHandle = bindings.sampler(at: slot.index)
                 switch stage {
                 case .vertex:
-                    encoder.setVertexSamplerState(sampler, index: slot.index)
+                    encoder.setVertexSamplerState(nil, index: slot.index)
                 case .fragment:
-                    encoder.setFragmentSamplerState(sampler, index: slot.index)
+                    encoder.setFragmentSamplerState(nil, index: slot.index)
+                default:
+                    continue
+                }
+
+                guard let samplerHandle else {
+                    let error = samplerError(shader: shader, stage: stage, slot: slot.index, reason: "is missing a sampler")
+                    throw error
+                }
+
+                guard let samplerResource = samplers[samplerHandle] else {
+                    let error = samplerError(
+                        shader: shader,
+                        stage: stage,
+                        slot: slot.index,
+                        reason: "references unknown sampler handle \(samplerHandle.rawValue)"
+                    )
+                    throw error
+                }
+
+                switch stage {
+                case .vertex:
+                    encoder.setVertexSamplerState(samplerResource.state, index: slot.index)
+                case .fragment:
+                    encoder.setFragmentSamplerState(samplerResource.state, index: slot.index)
                 default:
                     continue
                 }
@@ -707,6 +763,24 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
             return slot.index + 1
         default:
             return slot.index
+        }
+    }
+
+    private func samplerError(shader: ShaderID, stage: ShaderStage, slot: Int, reason: String) -> AgentError {
+        let stageName = stageDescription(stage)
+        let message = "Shader \(shader.rawValue) \(reason) for \(stageName) sampler slot \(slot)."
+        SDLLogger.error("SDLKit.Graphics.Metal", message)
+        return AgentError.invalidArgument(message)
+    }
+
+    private func stageDescription(_ stage: ShaderStage) -> String {
+        switch stage {
+        case .vertex:
+            return "vertex"
+        case .fragment:
+            return "fragment"
+        case .compute:
+            return "compute"
         }
     }
 
