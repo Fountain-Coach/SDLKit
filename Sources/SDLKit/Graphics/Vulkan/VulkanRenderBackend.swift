@@ -96,6 +96,19 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
     }
     private var computePipelines: [ComputePipelineHandle: ComputePipelineResource] = [:]
 
+    private struct PendingComputeDescriptor {
+        var pool: VkDescriptorPool?
+        var set: VkDescriptorSet?
+    }
+    private var pendingComputeDescriptorSets: [[PendingComputeDescriptor]] = []
+
+    private struct PendingComputeSubmission {
+        var fence: VkFence?
+        var commandBuffer: VkCommandBuffer?
+        var descriptor: PendingComputeDescriptor?
+    }
+    private var pendingOutOfFrameComputeSubmissions: [PendingComputeSubmission] = []
+
     private struct MeshResource {
         let vertexBuffer: BufferHandle
         let vertexCount: Int
@@ -222,6 +235,7 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
             throw AgentError.internalError("Vulkan device/swapchain not initialized")
         }
         try ensureCommandPoolAndSync()
+        drainPendingComputeSubmissions(waitAll: true)
 
         // Wait for the previous frame to finish
         if var fence = inFlightFences[currentFrame] {
@@ -230,6 +244,7 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
                 _ = vkResetFences(dev, 1, fptr)
             }
             resetDescriptorPoolsForFrame(currentFrame)
+            releasePendingComputeDescriptors(for: currentFrame)
         }
 
         // Acquire next image
@@ -413,6 +428,7 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
     }
     public func waitGPU() throws {
         #if canImport(CVulkan)
+        drainPendingComputeSubmissions(waitAll: true)
         if let dev = device { _ = vkDeviceWaitIdle(dev) }
         #else
         core.waitGPU()
@@ -1484,14 +1500,38 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
 
     public func dispatchCompute(_ pipeline: ComputePipelineHandle, groupsX: Int, groupsY: Int, groupsZ: Int, bindings: BindingSet) throws {
         #if canImport(CVulkan)
-        guard !frameActive else {
-            throw AgentError.invalidArgument("dispatchCompute cannot be called while a render frame is active on Vulkan")
-        }
-        guard let dev = device, let queue = graphicsQueue, let pool = commandPool else {
+        guard let dev = device else {
             throw AgentError.internalError("Vulkan compute resources not initialized")
         }
+        try ensureCommandPoolAndSync()
+        drainPendingComputeSubmissions(waitAll: false)
+
         guard let resource = computePipelines[pipeline] else {
             throw AgentError.internalError("Unknown Vulkan compute pipeline")
+        }
+
+        let isFrameDispatch = frameActive
+        if isFrameDispatch && commandBuffers.isEmpty {
+            throw AgentError.internalError("Vulkan command buffers unavailable for in-frame compute dispatch")
+        }
+        guard let pool = commandPool else {
+            throw AgentError.internalError("Vulkan command pool unavailable for compute dispatch")
+        }
+
+        struct BufferBindingRecord {
+            enum Role { case uniform, storage }
+            var buffer: VkBuffer
+            var role: Role
+        }
+
+        struct ImageBindingRecord {
+            enum Role { case sampled, storage }
+            var handle: TextureHandle
+            var image: VkImage
+            var aspectMask: UInt32
+            var mipLevels: Int
+            var layout: VkImageLayout
+            var role: Role
         }
 
         var descriptorSet: VkDescriptorSet? = nil
@@ -1500,6 +1540,17 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
         var bufferIndices: [Int?] = []
         var imageIndices: [Int?] = []
         var writes: [VkWriteDescriptorSet] = []
+        var bufferBindings: [BufferBindingRecord] = []
+        var imageBindings: [ImageBindingRecord] = []
+        var descriptorAllocation: PendingComputeDescriptor? = nil
+        var descriptorOwned = false
+
+        defer {
+            if descriptorOwned, let allocation = descriptorAllocation, var set = allocation.set, let pool = allocation.pool {
+                withUnsafePointer(to: &set) { ptr in _ = vkFreeDescriptorSets(dev, pool, 1, ptr) }
+            }
+        }
+
         if !resource.module.bindings.isEmpty {
             guard let layout = resource.descriptorSetLayout, let descriptorPool = resource.descriptorPool else {
                 throw AgentError.internalError("Descriptor resources missing for Vulkan compute pipeline")
@@ -1519,6 +1570,8 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
             guard let descriptorSetHandle = descriptorSet else {
                 throw AgentError.internalError("Descriptor set allocation returned nil handle")
             }
+            descriptorAllocation = PendingComputeDescriptor(pool: descriptorPool, set: descriptorSetHandle)
+            descriptorOwned = true
 
             for slot in resource.module.bindings {
                 let descriptorType = try descriptorType(for: slot.kind)
@@ -1551,6 +1604,8 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
                     bufferIndices.append(bufferInfos.count)
                     imageIndices.append(nil)
                     bufferInfos.append(info)
+                    let role: BufferBindingRecord.Role = slot.kind == .uniformBuffer ? .uniform : .storage
+                    bufferBindings.append(BufferBindingRecord(buffer: buffer, role: role))
                 case .sampledTexture:
                     guard let entry = bindings.resource(at: slot.index) else {
                         throw AgentError.invalidArgument("Missing texture binding for compute slot \(slot.index)")
@@ -1565,6 +1620,12 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
                     guard let texture = textures[textureHandle] else {
                         throw AgentError.invalidArgument("Unknown texture handle for compute slot \(slot.index)")
                     }
+                    guard let imageView = texture.view else {
+                        throw AgentError.invalidArgument("Texture view missing for compute slot \(slot.index)")
+                    }
+                    guard let image = texture.image else {
+                        throw AgentError.invalidArgument("Texture image missing for compute slot \(slot.index)")
+                    }
                     var info = VkDescriptorImageInfo()
                     if let samplerHandle = bindings.sampler(at: slot.index),
                        let samplerRes = samplers[samplerHandle],
@@ -1576,11 +1637,13 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
                     guard info.sampler != nil else {
                         throw AgentError.invalidArgument("Missing sampler for combined image slot \(slot.index) in Vulkan compute dispatch")
                     }
-                    info.imageView = texture.view
+                    info.imageView = imageView
                     info.imageLayout = texture.layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL : texture.layout
                     bufferIndices.append(nil)
                     imageIndices.append(imageInfos.count)
                     imageInfos.append(info)
+                    let mipLevels = max(1, texture.descriptor.mipLevels)
+                    imageBindings.append(ImageBindingRecord(handle: textureHandle, image: image, aspectMask: texture.aspectMask, mipLevels: mipLevels, layout: texture.layout, role: .sampled))
                 case .storageTexture:
                     guard let entry = bindings.resource(at: slot.index) else {
                         throw AgentError.invalidArgument("Missing storage texture binding for compute slot \(slot.index)")
@@ -1595,13 +1658,21 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
                     guard let texture = textures[textureHandle] else {
                         throw AgentError.invalidArgument("Unknown storage texture handle for compute slot \(slot.index)")
                     }
+                    guard let imageView = texture.view else {
+                        throw AgentError.invalidArgument("Storage texture view missing for compute slot \(slot.index)")
+                    }
+                    guard let image = texture.image else {
+                        throw AgentError.invalidArgument("Storage texture image missing for compute slot \(slot.index)")
+                    }
                     var info = VkDescriptorImageInfo()
                     info.sampler = nil
-                    info.imageView = texture.view
+                    info.imageView = imageView
                     info.imageLayout = texture.layout
                     bufferIndices.append(nil)
                     imageIndices.append(imageInfos.count)
                     imageInfos.append(info)
+                    let mipLevels = max(1, texture.descriptor.mipLevels)
+                    imageBindings.append(ImageBindingRecord(handle: textureHandle, image: image, aspectMask: texture.aspectMask, mipLevels: mipLevels, layout: texture.layout, role: .storage))
                 case .sampler:
                     guard let samplerHandle = bindings.sampler(at: slot.index),
                           let samplerRes = samplers[samplerHandle],
@@ -1637,46 +1708,168 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
             }
         }
 
-        var commandBuffer: VkCommandBuffer? = nil
-        var allocInfo = VkCommandBufferAllocateInfo()
-        allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO
-        allocInfo.commandPool = pool
-        allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY
-        allocInfo.commandBufferCount = 1
-        let allocRes = withUnsafePointer(to: allocInfo) { ptr in vkAllocateCommandBuffers(dev, ptr, &commandBuffer) }
-        if allocRes != VK_SUCCESS || commandBuffer == nil {
-            if var set = descriptorSet, let descriptorPool = resource.descriptorPool {
-                withUnsafePointer(to: &set) { ptr in _ = vkFreeDescriptorSets(dev, descriptorPool, 1, ptr) }
+        let commandBufferHandle: VkCommandBuffer
+        var submissionQueue: VkQueue? = nil
+        var allocatedCommandBuffer: VkCommandBuffer? = nil
+        var ownsAllocatedCommandBuffer = false
+
+        if isFrameDispatch {
+            guard let cmd = commandBuffers[currentFrame] else {
+                throw AgentError.internalError("Missing command buffer for active frame compute dispatch")
             }
-            throw AgentError.internalError("vkAllocateCommandBuffers(compute) failed (res=\(allocRes))")
+            commandBufferHandle = cmd
+        } else {
+            guard let queue = graphicsQueue else {
+                throw AgentError.internalError("Vulkan graphics queue unavailable for compute dispatch")
+            }
+            submissionQueue = queue
+            var allocInfo = VkCommandBufferAllocateInfo()
+            allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO
+            allocInfo.commandPool = pool
+            allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY
+            allocInfo.commandBufferCount = 1
+            var commandBuffer: VkCommandBuffer? = nil
+            let allocRes = withUnsafePointer(to: allocInfo) { ptr in vkAllocateCommandBuffers(dev, ptr, &commandBuffer) }
+            if allocRes != VK_SUCCESS || commandBuffer == nil {
+                throw AgentError.internalError("vkAllocateCommandBuffers(compute) failed (res=\(allocRes))")
+            }
+            guard let allocated = commandBuffer else {
+                throw AgentError.internalError("vkAllocateCommandBuffers returned nil handle for compute dispatch")
+            }
+            commandBufferHandle = allocated
+            allocatedCommandBuffer = allocated
+            ownsAllocatedCommandBuffer = true
+            var beginInfo = VkCommandBufferBeginInfo()
+            beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO
+            beginInfo.flags = UInt32(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT)
+            _ = withUnsafePointer(to: beginInfo) { ptr in vkBeginCommandBuffer(commandBufferHandle, ptr) }
         }
 
-        guard var commandBufferHandle = commandBuffer else {
-            throw AgentError.internalError("vkAllocateCommandBuffers returned nil command buffer")
+        defer {
+            if ownsAllocatedCommandBuffer, let cmd = allocatedCommandBuffer {
+                withUnsafePointer(to: &cmd) { ptr in vkFreeCommandBuffers(dev, pool, 1, ptr) }
+            }
         }
 
-        var beginInfo = VkCommandBufferBeginInfo()
-        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO
-        beginInfo.flags = UInt32(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT)
-        _ = withUnsafePointer(to: beginInfo) { ptr in vkBeginCommandBuffer(commandBufferHandle, ptr) }
+        var preMemoryBarriers: [VkMemoryBarrier] = []
+        if !isFrameDispatch {
+            var memoryBarrier = VkMemoryBarrier()
+            memoryBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER
+            memoryBarrier.srcAccessMask = UInt32(VK_ACCESS_HOST_WRITE_BIT)
+            memoryBarrier.dstAccessMask = UInt32(VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT)
+            preMemoryBarriers.append(memoryBarrier)
+        }
 
-        var memoryBarrier = VkMemoryBarrier()
-        memoryBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER
-        memoryBarrier.srcAccessMask = UInt32(VK_ACCESS_HOST_WRITE_BIT)
-        memoryBarrier.dstAccessMask = UInt32(VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT)
-        _ = withUnsafePointer(to: memoryBarrier) { barrierPtr in
-            vkCmdPipelineBarrier(
-                commandBufferHandle,
-                UInt32(VK_PIPELINE_STAGE_HOST_BIT),
-                UInt32(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT),
-                0,
-                1,
-                barrierPtr,
-                0,
-                nil,
-                0,
-                nil
-            )
+        var preBufferBarriers: [VkBufferMemoryBarrier] = []
+        var postBufferBarriers: [VkBufferMemoryBarrier] = []
+        preBufferBarriers.reserveCapacity(bufferBindings.count)
+
+        for binding in bufferBindings {
+            var barrier = VkBufferMemoryBarrier()
+            barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER
+            barrier.srcQueueFamilyIndex = UInt32(VK_QUEUE_FAMILY_IGNORED)
+            barrier.dstQueueFamilyIndex = UInt32(VK_QUEUE_FAMILY_IGNORED)
+            barrier.buffer = binding.buffer
+            barrier.offset = 0
+            barrier.size = VkDeviceSize.max
+            if isFrameDispatch {
+                barrier.srcAccessMask = UInt32(VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_UNIFORM_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_TRANSFER_READ_BIT)
+            } else {
+                barrier.srcAccessMask = UInt32(VK_ACCESS_HOST_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT)
+            }
+            switch binding.role {
+            case .uniform:
+                barrier.dstAccessMask = UInt32(VK_ACCESS_SHADER_READ_BIT)
+            case .storage:
+                barrier.dstAccessMask = UInt32(VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT)
+            }
+            preBufferBarriers.append(barrier)
+
+            if binding.role == .storage {
+                var post = VkBufferMemoryBarrier()
+                post.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER
+                post.srcQueueFamilyIndex = UInt32(VK_QUEUE_FAMILY_IGNORED)
+                post.dstQueueFamilyIndex = UInt32(VK_QUEUE_FAMILY_IGNORED)
+                post.buffer = binding.buffer
+                post.offset = 0
+                post.size = VkDeviceSize.max
+                post.srcAccessMask = UInt32(VK_ACCESS_SHADER_WRITE_BIT)
+                post.dstAccessMask = UInt32(VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_INDEX_READ_BIT | VK_ACCESS_UNIFORM_READ_BIT | VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_TRANSFER_READ_BIT)
+                postBufferBarriers.append(post)
+            }
+        }
+
+        var preImageBarriers: [VkImageMemoryBarrier] = []
+        var postImageBarriers: [VkImageMemoryBarrier] = []
+        var textureLayoutUpdates: [(TextureHandle, VkImageLayout)] = []
+
+        for binding in imageBindings {
+            var barrier = VkImageMemoryBarrier()
+            barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER
+            barrier.srcQueueFamilyIndex = UInt32(VK_QUEUE_FAMILY_IGNORED)
+            barrier.dstQueueFamilyIndex = UInt32(VK_QUEUE_FAMILY_IGNORED)
+            barrier.image = binding.image
+            barrier.subresourceRange = VkImageSubresourceRange(aspectMask: binding.aspectMask, baseMipLevel: 0, levelCount: UInt32(binding.mipLevels), baseArrayLayer: 0, layerCount: 1)
+            barrier.oldLayout = binding.layout
+            let desiredLayout: VkImageLayout
+            switch binding.role {
+            case .sampled:
+                desiredLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                barrier.dstAccessMask = UInt32(VK_ACCESS_SHADER_READ_BIT)
+            case .storage:
+                desiredLayout = VK_IMAGE_LAYOUT_GENERAL
+                barrier.dstAccessMask = UInt32(VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT)
+            }
+            barrier.newLayout = desiredLayout
+            if isFrameDispatch {
+                barrier.srcAccessMask = UInt32(VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT)
+            } else {
+                barrier.srcAccessMask = UInt32(VK_ACCESS_HOST_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT)
+            }
+            preImageBarriers.append(barrier)
+            textureLayoutUpdates.append((binding.handle, desiredLayout))
+
+            if binding.role == .storage {
+                var post = VkImageMemoryBarrier()
+                post.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER
+                post.srcQueueFamilyIndex = UInt32(VK_QUEUE_FAMILY_IGNORED)
+                post.dstQueueFamilyIndex = UInt32(VK_QUEUE_FAMILY_IGNORED)
+                post.image = binding.image
+                post.subresourceRange = barrier.subresourceRange
+                post.oldLayout = desiredLayout
+                post.newLayout = desiredLayout
+                post.srcAccessMask = UInt32(VK_ACCESS_SHADER_WRITE_BIT)
+                post.dstAccessMask = UInt32(VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT)
+                postImageBarriers.append(post)
+            }
+        }
+
+        let preSrcStage: UInt32 = isFrameDispatch ? UInt32(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT) : UInt32(VK_PIPELINE_STAGE_HOST_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT)
+        let preDstStage: UInt32 = UInt32(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT)
+        preMemoryBarriers.withUnsafeMutableBufferPointer { memPtr in
+            preBufferBarriers.withUnsafeMutableBufferPointer { bufPtr in
+                preImageBarriers.withUnsafeMutableBufferPointer { imgPtr in
+                    vkCmdPipelineBarrier(
+                        commandBufferHandle,
+                        preSrcStage,
+                        preDstStage,
+                        0,
+                        UInt32(memPtr.count),
+                        memPtr.baseAddress,
+                        UInt32(bufPtr.count),
+                        bufPtr.baseAddress,
+                        UInt32(imgPtr.count),
+                        imgPtr.baseAddress
+                    )
+                }
+            }
+        }
+
+        for (handle, layout) in textureLayoutUpdates {
+            if var texture = textures[handle] {
+                texture.layout = layout
+                textures[handle] = texture
+            }
         }
 
         let expectedComputePushConstantSize = resource.module.pushConstantSize
@@ -1717,59 +1910,79 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
 
         vkCmdDispatch(commandBufferHandle, UInt32(max(1, groupsX)), UInt32(max(1, groupsY)), UInt32(max(1, groupsZ)))
 
-        var postBarrier = VkMemoryBarrier()
-        postBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER
-        postBarrier.srcAccessMask = UInt32(VK_ACCESS_SHADER_WRITE_BIT)
-        postBarrier.dstAccessMask = UInt32(VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_SHADER_READ_BIT)
-        _ = withUnsafePointer(to: postBarrier) { barrierPtr in
-            vkCmdPipelineBarrier(
-                commandBufferHandle,
-                UInt32(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT),
-                UInt32(VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT),
-                0,
-                1,
-                barrierPtr,
-                0,
-                nil,
-                0,
-                nil
-            )
+        var postMemoryBarriers: [VkMemoryBarrier] = []
+        if !isFrameDispatch {
+            var memoryBarrier = VkMemoryBarrier()
+            memoryBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER
+            memoryBarrier.srcAccessMask = UInt32(VK_ACCESS_SHADER_WRITE_BIT)
+            memoryBarrier.dstAccessMask = UInt32(VK_ACCESS_HOST_READ_BIT | VK_ACCESS_TRANSFER_READ_BIT)
+            postMemoryBarriers.append(memoryBarrier)
         }
 
-        _ = vkEndCommandBuffer(commandBufferHandle)
-
-        var fenceInfo = VkFenceCreateInfo()
-        fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO
-        var fence: VkFence? = nil
-        _ = vkCreateFence(dev, &fenceInfo, nil, &fence)
-
-        var submitInfo = VkSubmitInfo()
-        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO
-        var cmdBuffers = [commandBufferHandle]
-        let submitResult = cmdBuffers.withUnsafeMutableBufferPointer { buf -> VkResult in
-            submitInfo.commandBufferCount = UInt32(buf.count)
-            submitInfo.pCommandBuffers = buf.baseAddress
-            return withUnsafePointer(to: submitInfo) { ptr in vkQueueSubmit(queue, 1, ptr, fence) }
-        }
-        if submitResult != VK_SUCCESS {
-            SDLLogger.error("SDLKit.Graphics.Vulkan", "vkQueueSubmit(compute) failed (res=\(submitResult))")
-        }
-        if var fenceHandle = fence {
-            withUnsafePointer(to: &fenceHandle) { ptr in _ = vkWaitForFences(dev, 1, ptr, VK_TRUE, UInt64.max) }
-            vkDestroyFence(dev, fenceHandle, nil)
+        let postSrcStage: UInt32 = UInt32(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT)
+        let postDstStage: UInt32 = isFrameDispatch ? UInt32(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT) : UInt32(VK_PIPELINE_STAGE_HOST_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT)
+        postMemoryBarriers.withUnsafeMutableBufferPointer { memPtr in
+            postBufferBarriers.withUnsafeMutableBufferPointer { bufPtr in
+                postImageBarriers.withUnsafeMutableBufferPointer { imgPtr in
+                    vkCmdPipelineBarrier(
+                        commandBufferHandle,
+                        postSrcStage,
+                        postDstStage,
+                        0,
+                        UInt32(memPtr.count),
+                        memPtr.baseAddress,
+                        UInt32(bufPtr.count),
+                        bufPtr.baseAddress,
+                        UInt32(imgPtr.count),
+                        imgPtr.baseAddress
+                    )
+                }
+            }
         }
 
-        withUnsafePointer(to: &commandBufferHandle) { ptr in vkFreeCommandBuffers(dev, pool, 1, ptr) }
+        if !isFrameDispatch {
+            _ = vkEndCommandBuffer(commandBufferHandle)
 
-        if var descriptorSet = descriptorSet, let descriptorPool = resource.descriptorPool {
-            withUnsafePointer(to: &descriptorSet) { ptr in _ = vkFreeDescriptorSets(dev, descriptorPool, 1, ptr) }
+            var fenceInfo = VkFenceCreateInfo()
+            fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO
+            var fence: VkFence? = nil
+            let fenceResult = vkCreateFence(dev, &fenceInfo, nil, &fence)
+            if fenceResult != VK_SUCCESS || fence == nil {
+                throw AgentError.internalError("vkCreateFence(compute) failed (res=\(fenceResult))")
+            }
+
+            guard let submitQueue = submissionQueue else {
+                vkDestroyFence(dev, fence, nil)
+                throw AgentError.internalError("Vulkan submission queue unavailable for compute dispatch")
+            }
+
+            var submitInfo = VkSubmitInfo()
+            submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO
+            var cmdBuffers = [commandBufferHandle]
+            let submitResult = cmdBuffers.withUnsafeMutableBufferPointer { buf -> VkResult in
+                submitInfo.commandBufferCount = UInt32(buf.count)
+                submitInfo.pCommandBuffers = buf.baseAddress
+                return withUnsafePointer(to: submitInfo) { ptr in vkQueueSubmit(submitQueue, 1, ptr, fence) }
+            }
+            if submitResult != VK_SUCCESS {
+                vkDestroyFence(dev, fence, nil)
+                throw AgentError.internalError("vkQueueSubmit(compute) failed (res=\(submitResult))")
+            }
+
+            pendingOutOfFrameComputeSubmissions.append(PendingComputeSubmission(fence: fence, commandBuffer: commandBufferHandle, descriptor: descriptorAllocation))
+            descriptorOwned = false
+            ownsAllocatedCommandBuffer = false
+        } else if let allocation = descriptorAllocation {
+            if currentFrame >= pendingComputeDescriptorSets.count {
+                pendingComputeDescriptorSets.append([])
+            }
+            pendingComputeDescriptorSets[currentFrame].append(allocation)
+            descriptorOwned = false
         }
-
         #else
         try core.dispatchCompute(pipeline, groupsX: groupsX, groupsY: groupsY, groupsZ: groupsZ, bindings: bindings)
         #endif
     }
-
     // MARK: - Vulkan init
     private func initializeVulkan() throws {
         // Query SDL-required instance extensions via the window’s native handles
@@ -2241,6 +2454,10 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
                 inFlightFences.append(f)
             }
         }
+
+        if pendingComputeDescriptorSets.count != maxFramesInFlight {
+            pendingComputeDescriptorSets = Array(repeating: [], count: maxFramesInFlight)
+        }
     }
 
     private func createBuiltinTriangleResources() throws {
@@ -2349,6 +2566,43 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
                 vkResetDescriptorPool(dev, pool, 0)
             }
         }
+    }
+
+    private func releasePendingComputeDescriptors(for frameIndex: Int) {
+        guard let dev = device else { return }
+        guard frameIndex < pendingComputeDescriptorSets.count else { return }
+        var descriptors = pendingComputeDescriptorSets[frameIndex]
+        for entry in descriptors {
+            guard var set = entry.set, let pool = entry.pool else { continue }
+            withUnsafePointer(to: &set) { ptr in _ = vkFreeDescriptorSets(dev, pool, 1, ptr) }
+        }
+        descriptors.removeAll()
+        pendingComputeDescriptorSets[frameIndex] = descriptors
+    }
+
+    private func drainPendingComputeSubmissions(waitAll: Bool) {
+        guard let dev = device else { return }
+        var remaining: [PendingComputeSubmission] = []
+        remaining.reserveCapacity(pendingOutOfFrameComputeSubmissions.count)
+        for var submission in pendingOutOfFrameComputeSubmissions {
+            guard var fence = submission.fence else { continue }
+            let status = vkGetFenceStatus(dev, fence)
+            if status == VK_SUCCESS || waitAll {
+                if status != VK_SUCCESS {
+                    withUnsafePointer(to: &fence) { ptr in _ = vkWaitForFences(dev, 1, ptr, VK_TRUE, UInt64.max) }
+                }
+                if let descriptor = submission.descriptor, var set = descriptor.set, let pool = descriptor.pool {
+                    withUnsafePointer(to: &set) { ptr in _ = vkFreeDescriptorSets(dev, pool, 1, ptr) }
+                }
+                if let pool = commandPool, let cmd = submission.commandBuffer {
+                    withUnsafePointer(to: &cmd) { ptr in vkFreeCommandBuffers(dev, pool, 1, ptr) }
+                }
+                vkDestroyFence(dev, fence, nil)
+            } else {
+                remaining.append(submission)
+            }
+        }
+        pendingOutOfFrameComputeSubmissions = remaining
     }
 
     private func convertTextureFormat(_ format: TextureFormat) throws -> VkFormat {
