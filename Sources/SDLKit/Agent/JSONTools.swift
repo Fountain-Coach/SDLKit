@@ -699,6 +699,7 @@ public struct SDLKitJSONAgent {
         case .notImplemented: return errorJSON(code: "not_implemented", details: nil)
         case .invalidArgument(let msg): return errorJSON(code: "invalid_argument", details: msg)
         case .internalError(let msg): return errorJSON(code: "internal_error", details: msg)
+        case .deviceLost(let details): return errorJSON(code: "device_lost", details: details)
         }
     }
 }
