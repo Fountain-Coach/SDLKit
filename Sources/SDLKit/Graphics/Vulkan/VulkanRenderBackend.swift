@@ -72,6 +72,7 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
     private var deviceResetState: DeviceResetState = .healthy
     #if DEBUG
     private var debugDeviceLossInProgress: Bool = false
+    private var debugSimulatedDeviceLossRequested: Bool = false
     #endif
     private var currentImageIndex: UInt32 = 0
 
@@ -145,6 +146,7 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
         var memory: VkDeviceMemory?
         var length: Int
         var usage: BufferUsage
+        var shadowCopy: Data?
     }
     private var buffers: [BufferHandle: BufferResource] = [:]
 
@@ -157,6 +159,7 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
         var layout: VkImageLayout
         var format: VkFormat
         var aspectMask: UInt32
+        var shadowMipData: [Data]
     }
     private var textures: [TextureHandle: TextureResource] = [:]
     private var fallbackWhiteTexture: TextureHandle? = nil
@@ -167,6 +170,24 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
         var sampler: VkSampler?
     }
     private var samplers: [SamplerHandle: SamplerResource] = [:]
+
+    private struct BufferSnapshot {
+        var length: Int
+        var usage: BufferUsage
+        var shadowCopy: Data?
+    }
+
+    private struct TextureSnapshot {
+        var descriptor: TextureDescriptor
+        var layout: VkImageLayout
+        var format: VkFormat
+        var aspectMask: UInt32
+        var shadowMipData: [Data]
+    }
+
+    private struct SamplerSnapshot {
+        var descriptor: SamplerDescriptor
+    }
 
     #endif
 
@@ -346,6 +367,12 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
         submit.signalSemaphoreCount = 1
         withUnsafePointer(to: &signalSemaphore) { sp in submit.pSignalSemaphores = sp }
 
+#if DEBUG
+        if debugSimulatedDeviceLossRequested && !debugDeviceLossInProgress {
+            debugSimulatedDeviceLossRequested = false
+            try handleDeviceLoss(context: "debugSimulateDeviceLoss(queueSubmit)", result: VK_ERROR_DEVICE_LOST)
+        }
+#endif
         let submitResult = withUnsafePointer(to: submit) { ptr in vkQueueSubmit(gq, 1, ptr, inFlightFences[currentFrame]) }
         if submitResult == VK_ERROR_DEVICE_LOST {
             try handleDeviceLoss(context: "vkQueueSubmit", result: submitResult)
@@ -364,6 +391,12 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
         withUnsafePointer(to: &scLocal) { scPtr in pi.pSwapchains = scPtr }
         var imageIndexCopy = currentImageIndex
         withUnsafePointer(to: &imageIndexCopy) { idxPtr in pi.pImageIndices = idxPtr }
+#if DEBUG
+        if debugSimulatedDeviceLossRequested && !debugDeviceLossInProgress {
+            debugSimulatedDeviceLossRequested = false
+            try handleDeviceLoss(context: "debugSimulateDeviceLoss(present)", result: VK_ERROR_DEVICE_LOST)
+        }
+#endif
         let presentRes = withUnsafePointer(to: pi) { ptr in vkQueuePresentKHR(pq, ptr) }
         if presentRes == VK_ERROR_OUT_OF_DATE_KHR || presentRes == VK_SUBOPTIMAL_KHR {
             try recreateSwapchain(width: surfaceExtent.width, height: surfaceExtent.height)
@@ -484,7 +517,11 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
         #if canImport(CVulkan)
         SDLLogger.warn("SDLKit.Graphics.Vulkan", "Attempting Vulkan device reset")
 
-        let preservedSamplers = samplers.mapValues { $0.descriptor }
+        let bufferSnapshots = buffers.mapValues { BufferSnapshot(length: $0.length, usage: $0.usage, shadowCopy: $0.shadowCopy) }
+        let textureSnapshots = textures.mapValues { TextureSnapshot(descriptor: $0.descriptor, layout: $0.layout, format: $0.format, aspectMask: $0.aspectMask, shadowMipData: $0.shadowMipData) }
+        let samplerSnapshots = samplers.mapValues { SamplerSnapshot(descriptor: $0.descriptor) }
+        let meshSnapshots = meshes
+        let previousFallback = fallbackWhiteTexture
 
         releaseVulkanDeviceResources()
 
@@ -523,11 +560,21 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
                 try recreateSwapchain(width: windowSize.0, height: windowSize.1)
             }
 
-            if !preservedSamplers.isEmpty {
-                for (handle, descriptor) in preservedSamplers {
-                    let sampler = try allocateSampler(descriptor: descriptor)
-                    samplers[handle] = SamplerResource(descriptor: descriptor, sampler: sampler)
-                }
+            if let freshFallback = fallbackWhiteTexture {
+                destroy(.texture(freshFallback))
+                fallbackWhiteTexture = nil
+            }
+
+            try recreateBuffers(from: bufferSnapshots)
+            meshes = meshSnapshots
+            try recreateTextures(from: textureSnapshots)
+            try recreateSamplers(from: samplerSnapshots)
+
+            if let previousFallback, textures[previousFallback] != nil {
+                fallbackWhiteTexture = previousFallback
+            } else {
+                fallbackWhiteTexture = nil
+                _ = try? ensureFallbackTextureHandle()
             }
         } catch {
             resetError = error
@@ -558,6 +605,9 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
             throw error
         }
 
+        #if DEBUG
+        debugSimulatedDeviceLossRequested = false
+        #endif
         SDLLogger.info("SDLKit.Graphics.Vulkan", "Vulkan device reset succeeded")
         #else
         throw AgentError.notImplemented("Vulkan reset unavailable on this platform")
@@ -568,24 +618,36 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
     public func createBuffer(bytes: UnsafeRawPointer?, length: Int, usage: BufferUsage) throws -> BufferHandle {
         #if canImport(CVulkan)
         guard length > 0 else { throw AgentError.invalidArgument("Buffer length must be > 0") }
+        let handle = BufferHandle()
+        let shadowCopy: Data? = bytes.map { Data(bytes: $0, count: length) }
+        let resource = try buildBufferResource(length: length, usage: usage, initialData: shadowCopy)
+        buffers[handle] = resource
+        return handle
+        #else
+        return try core.createBuffer(bytes: bytes, length: length, usage: usage)
+        #endif
+    }
+
+    #if canImport(CVulkan)
+    private func buildBufferResource(length: Int, usage: BufferUsage, initialData: Data?) throws -> BufferResource {
         guard let dev = device else { throw AgentError.internalError("Vulkan device not ready") }
 
-        let size = VkDeviceSize(length)
-        let handle = BufferHandle()
-
-        func buildUsageFlags(for usage: BufferUsage) -> UInt32 {
-            var flags: UInt32 = 0
+        func usageFlags(for usage: BufferUsage) -> UInt32 {
             switch usage {
-            case .vertex: flags |= UInt32(VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT)
-            case .index: flags |= UInt32(VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT)
-            case .uniform: flags |= UInt32(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT)
-            case .storage: flags |= UInt32(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT)
-            case .staging: flags |= UInt32(VK_BUFFER_USAGE_TRANSFER_SRC_BIT)
+            case .vertex:
+                return UInt32(VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT)
+            case .index:
+                return UInt32(VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT)
+            case .uniform:
+                return UInt32(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT)
+            case .storage:
+                return UInt32(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT)
+            case .staging:
+                return UInt32(VK_BUFFER_USAGE_TRANSFER_SRC_BIT)
             }
-            return flags
         }
 
-        func memProps(for usage: BufferUsage) -> UInt32 {
+        func memoryProperties(for usage: BufferUsage) -> UInt32 {
             switch usage {
             case .staging:
                 return UInt32(VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
@@ -594,38 +656,47 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
             }
         }
 
+        let size = VkDeviceSize(length)
         var buffer: VkBuffer? = nil
         var memory: VkDeviceMemory? = nil
-        let usageFlags = buildUsageFlags(for: usage)
-        let desiredProps = memProps(for: usage)
-        try createBuffer(size: size, usage: usageFlags, properties: desiredProps, bufferOut: &buffer, memoryOut: &memory)
+        let flags = usageFlags(for: usage)
+        let properties = memoryProperties(for: usage)
+        try createBuffer(size: size, usage: flags, properties: properties, bufferOut: &buffer, memoryOut: &memory)
 
-        if let bytes {
-            if (desiredProps & UInt32(VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)) != 0 {
+        if let initialData, initialData.count > 0 {
+            if (properties & UInt32(VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)) != 0 {
                 var mapped: UnsafeMutableRawPointer? = nil
                 _ = vkMapMemory(dev, memory, 0, size, 0, &mapped)
-                if let mapped { memcpy(mapped, bytes, length); vkUnmapMemory(dev, memory) }
+                if let mapped {
+                    initialData.withUnsafeBytes { bytes in
+                        memcpy(mapped, bytes.baseAddress, min(bytes.count, length))
+                    }
+                    vkUnmapMemory(dev, memory)
+                }
             } else {
-                // Create staging and copy
                 var stagingBuffer: VkBuffer? = nil
                 var stagingMemory: VkDeviceMemory? = nil
-                try createBuffer(size: size, usage: UInt32(VK_BUFFER_USAGE_TRANSFER_SRC_BIT), properties: UInt32(VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT), bufferOut: &stagingBuffer, memoryOut: &stagingMemory)
-                var mapped: UnsafeMutableRawPointer? = nil
-                _ = vkMapMemory(dev, stagingMemory, 0, size, 0, &mapped)
-                if let mapped { memcpy(mapped, bytes, length); vkUnmapMemory(dev, stagingMemory) }
+                let stagingProps = UInt32(VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
+                try createBuffer(size: size, usage: UInt32(VK_BUFFER_USAGE_TRANSFER_SRC_BIT), properties: stagingProps, bufferOut: &stagingBuffer, memoryOut: &stagingMemory)
+                if let stagingMemory {
+                    var mapped: UnsafeMutableRawPointer? = nil
+                    _ = vkMapMemory(dev, stagingMemory, 0, size, 0, &mapped)
+                    if let mapped {
+                        initialData.withUnsafeBytes { bytes in
+                            memcpy(mapped, bytes.baseAddress, min(bytes.count, length))
+                        }
+                        vkUnmapMemory(dev, stagingMemory)
+                    }
+                }
                 try copyBuffer(src: stagingBuffer, dst: buffer, size: size)
                 if let sb = stagingBuffer { vkDestroyBuffer(dev, sb, nil) }
                 if let sm = stagingMemory { vkFreeMemory(dev, sm, nil) }
             }
         }
 
-        let res = BufferResource(buffer: buffer, memory: memory, length: length, usage: usage)
-        buffers[handle] = res
-        return handle
-        #else
-        return try core.createBuffer(bytes: bytes, length: length, usage: usage)
-        #endif
+        return BufferResource(buffer: buffer, memory: memory, length: length, usage: usage, shadowCopy: initialData)
     }
+    #endif
 
     // MARK: - GoldenImageCapturable
     public func requestCapture() { captureRequested = true }
@@ -659,6 +730,18 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
         guard descriptor.width > 0, descriptor.height > 0 else {
             throw AgentError.invalidArgument("Texture dimensions must be greater than zero")
         }
+        let handle = TextureHandle()
+        let resource = try buildTextureResource(descriptor: descriptor, initialMipData: initialData?.mipLevelData ?? [])
+        textures[handle] = resource
+        SDLLogger.debug("SDLKit.Graphics.Vulkan", "createTexture id=\(handle.rawValue) size=\(descriptor.width)x\(descriptor.height) format=\(descriptor.format.rawValue)")
+        return handle
+        #else
+        return core.createTexture(descriptor: descriptor, initialData: initialData)
+        #endif
+    }
+
+#if canImport(CVulkan)
+    private func buildTextureResource(descriptor: TextureDescriptor, initialMipData: [Data]) throws -> TextureResource {
         guard let dev = device, let pd = physicalDevice else {
             throw AgentError.internalError("Vulkan device not ready")
         }
@@ -666,7 +749,8 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
 
         let vkFormat = try convertTextureFormat(descriptor.format)
         try validateTextureSupport(format: vkFormat, usage: descriptor.usage)
-        let (usageFlags, finalLayout) = try imageUsage(for: descriptor.usage, hasInitialData: initialData?.mipLevelData.isEmpty == false)
+        let hasInitialData = !initialMipData.isEmpty
+        let (usageFlags, finalLayout) = try imageUsage(for: descriptor.usage, hasInitialData: hasInitialData)
         let aspectMask = aspectMask(for: vkFormat)
 
         var imageInfo = VkImageCreateInfo()
@@ -710,9 +794,9 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
         vkBindImageMemory(dev, createdImage, memory, 0)
 
         let mipLevels = Int(max(1, descriptor.mipLevels))
-        if let data = initialData, !data.mipLevelData.isEmpty {
+        if hasInitialData {
             try transitionImageLayout(image: createdImage, aspectMask: aspectMask, mipLevels: mipLevels, oldLayout: VK_IMAGE_LAYOUT_UNDEFINED, newLayout: VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL)
-            for (level, mipData) in data.mipLevelData.enumerated() {
+            for (level, mipData) in initialMipData.enumerated() {
                 var stagingBuffer: VkBuffer? = nil
                 var stagingMemory: VkDeviceMemory? = nil
                 let levelSize = VkDeviceSize(mipData.count)
@@ -779,8 +863,7 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
             }
         }
 
-        let handle = TextureHandle()
-        let resource = TextureResource(
+        return TextureResource(
             descriptor: descriptor,
             image: createdImage,
             memory: memory,
@@ -788,15 +871,45 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
             sampler: sampler,
             layout: finalLayout,
             format: vkFormat,
-            aspectMask: aspectMask
+            aspectMask: aspectMask,
+            shadowMipData: initialMipData
         )
-        textures[handle] = resource
-        SDLLogger.debug("SDLKit.Graphics.Vulkan", "createTexture id=\(handle.rawValue) size=\(descriptor.width)x\(descriptor.height) format=\(descriptor.format.rawValue)")
-        return handle
-        #else
-        return core.createTexture(descriptor: descriptor, initialData: initialData)
-        #endif
     }
+
+    private func recreateBuffers(from snapshots: [BufferHandle: BufferSnapshot]) throws {
+        buffers.removeAll(keepingCapacity: true)
+        for (handle, snapshot) in snapshots {
+            let resource = try buildBufferResource(length: snapshot.length, usage: snapshot.usage, initialData: snapshot.shadowCopy)
+            buffers[handle] = resource
+        }
+    }
+
+    private func recreateTextures(from snapshots: [TextureHandle: TextureSnapshot]) throws {
+        var rebuilt: [TextureHandle: TextureResource] = [:]
+        for (handle, snapshot) in snapshots {
+            var resource = try buildTextureResource(descriptor: snapshot.descriptor, initialMipData: snapshot.shadowMipData)
+            if let image = resource.image, resource.layout != snapshot.layout {
+                let mipLevels = Int(max(1, snapshot.descriptor.mipLevels))
+                try transitionImageLayout(image: image, aspectMask: snapshot.aspectMask, mipLevels: mipLevels, oldLayout: resource.layout, newLayout: snapshot.layout)
+                resource.layout = snapshot.layout
+            } else {
+                resource.layout = snapshot.layout
+            }
+            resource.format = snapshot.format
+            resource.aspectMask = snapshot.aspectMask
+            rebuilt[handle] = resource
+        }
+        textures = rebuilt
+    }
+
+    private func recreateSamplers(from snapshots: [SamplerHandle: SamplerSnapshot]) throws {
+        samplers.removeAll(keepingCapacity: true)
+        for (handle, snapshot) in snapshots {
+            let sampler = try allocateSampler(descriptor: snapshot.descriptor)
+            samplers[handle] = SamplerResource(descriptor: snapshot.descriptor, sampler: sampler)
+        }
+    }
+#endif
 
     public func createSampler(descriptor: SamplerDescriptor) throws -> SamplerHandle {
         #if canImport(CVulkan)
@@ -808,6 +921,39 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
         return try core.createSampler(descriptor: descriptor)
         #endif
     }
+
+#if DEBUG
+    public func debugSimulateDeviceLoss() {
+        #if canImport(CVulkan)
+        guard !debugDeviceLossInProgress else { return }
+        debugSimulatedDeviceLossRequested = true
+        #endif
+    }
+
+    internal func debugTextureDescriptor(for handle: TextureHandle) -> TextureDescriptor? {
+        #if canImport(CVulkan)
+        return textures[handle]?.descriptor
+        #else
+        return nil
+        #endif
+    }
+
+    internal func debugBufferLength(for handle: BufferHandle) -> Int? {
+        #if canImport(CVulkan)
+        return buffers[handle]?.length
+        #else
+        return nil
+        #endif
+    }
+
+    internal func debugTextureCount() -> Int {
+        #if canImport(CVulkan)
+        return textures.count
+        #else
+        return 0
+        #endif
+    }
+#endif
 
     public func registerMesh(vertexBuffer: BufferHandle,
                              vertexCount: Int,
@@ -2092,9 +2238,18 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
             let submitResult = cmdBuffers.withUnsafeMutableBufferPointer { buf -> VkResult in
                 submitInfo.commandBufferCount = UInt32(buf.count)
                 submitInfo.pCommandBuffers = buf.baseAddress
+#if DEBUG
+                if debugSimulatedDeviceLossRequested && !debugDeviceLossInProgress {
+                    debugSimulatedDeviceLossRequested = false
+                    return VK_ERROR_DEVICE_LOST
+                }
+#endif
                 return withUnsafePointer(to: submitInfo) { ptr in vkQueueSubmit(submitQueue, 1, ptr, fence) }
             }
-            if submitResult != VK_SUCCESS {
+            if submitResult == VK_ERROR_DEVICE_LOST {
+                vkDestroyFence(dev, fence, nil)
+                try handleDeviceLoss(context: "vkQueueSubmit(compute)", result: submitResult)
+            } else if submitResult != VK_SUCCESS {
                 vkDestroyFence(dev, fence, nil)
                 throw AgentError.internalError("vkQueueSubmit(compute) failed (res=\(submitResult))")
             }
