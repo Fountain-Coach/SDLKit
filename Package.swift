@@ -94,46 +94,50 @@ let package = Package(
             )
         }
 
-        if hasSDL3Image {
-            targets.append(
-                .systemLibrary(
-                    name: "CSDL3IMAGE",
-                    pkgConfig: "sdl3-image",
-                    providers: [
-                        .brew(["sdl3_image"]),
-                        .apt(["libsdl3-image-dev"])
-                    ]
+        if guiEnabled {
+            if hasSDL3Image {
+                targets.append(
+                    .systemLibrary(
+                        name: "CSDL3IMAGE",
+                        pkgConfig: "sdl3-image",
+                        providers: [
+                            .brew(["sdl3_image"]),
+                            .apt(["libsdl3-image-dev"])
+                        ]
+                    )
                 )
-            )
-        } else {
-            targets.append(
-                .target(
-                    name: "CSDL3IMAGE",
-                    path: "Sources/CSDL3ImageStub",
-                    publicHeadersPath: "include"
+            } else {
+                targets.append(
+                    .target(
+                        name: "CSDL3IMAGE",
+                        path: "Sources/CSDL3ImageStub",
+                        publicHeadersPath: "include"
+                    )
                 )
-            )
+            }
         }
 
-        if hasSDL3TTF {
-            targets.append(
-                .systemLibrary(
-                    name: "CSDL3TTF",
-                    pkgConfig: "sdl3-ttf",
-                    providers: [
-                        .brew(["sdl3_ttf"]),
-                        .apt(["libsdl3-ttf-dev"])
-                    ]
+        if guiEnabled {
+            if hasSDL3TTF {
+                targets.append(
+                    .systemLibrary(
+                        name: "CSDL3TTF",
+                        pkgConfig: "sdl3-ttf",
+                        providers: [
+                            .brew(["sdl3_ttf"]),
+                            .apt(["libsdl3-ttf-dev"])
+                        ]
+                    )
                 )
-            )
-        } else {
-            targets.append(
-                .target(
-                    name: "CSDL3TTF",
-                    path: "Sources/CSDL3TTFStub",
-                    publicHeadersPath: "include"
+            } else {
+                targets.append(
+                    .target(
+                        name: "CSDL3TTF",
+                        path: "Sources/CSDL3TTFStub",
+                        publicHeadersPath: "include"
+                    )
                 )
-            )
+            }
         }
 
         targets.append(
@@ -202,13 +206,15 @@ let package = Package(
             )
         }
 
-        targets.append(
-            .target(
-                name: "SDLKitTTF",
-                dependencies: ["SDLKit", "CSDL3TTF"],
-                path: "Sources/SDLKitTTF"
+        if guiEnabled {
+            targets.append(
+                .target(
+                    name: "SDLKitTTF",
+                    dependencies: ["SDLKit", "CSDL3TTF"],
+                    path: "Sources/SDLKitTTF"
+                )
             )
-        )
+        }
 
         targets.append(
             .testTarget(
