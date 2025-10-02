@@ -20,6 +20,8 @@ private final class RecordingRenderBackend: RenderBackend {
     private var pipelines: [PipelineHandle: GraphicsPipelineDescriptor] = [:]
     private var frameActive = false
 
+    var deviceEventHandler: RenderBackendDeviceEventHandler?
+
     var drawCallCount = 0
     var lastBindings: BindingSet?
     var lastPushConstants: [Float]?

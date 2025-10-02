@@ -182,11 +182,14 @@ public enum SceneGraphRenderer {
         depthFormat: TextureFormat? = .depth32Float,
         beforeRender: (() throws -> Void)? = nil
     ) throws {
+        var backend = backend
         if backend.deviceEventHandler == nil {
             backend.deviceEventHandler = { event in
                 switch event {
                 case .willReset, .resetFailed:
-                    resetPipelineCache()
+                    Task { @MainActor in
+                        Self.resetPipelineCache()
+                    }
                 case .didReset:
                     break
                 }

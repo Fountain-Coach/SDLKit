@@ -64,6 +64,15 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
     private var maxFramesInFlight: Int = 2
     private var currentFrame: Int = 0
     private var frameActive: Bool = false
+    private enum DeviceResetState {
+        case healthy
+        case recovering(reason: String)
+        case failed(reason: String)
+    }
+    private var deviceResetState: DeviceResetState = .healthy
+    #if DEBUG
+    private var debugDeviceLossInProgress: Bool = false
+    #endif
     private var currentImageIndex: UInt32 = 0
 
     // Pipeline and geometry
@@ -235,6 +244,12 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
         guard let dev = device, let sc = swapchain, let gq = graphicsQueue else {
             throw AgentError.internalError("Vulkan device/swapchain not initialized")
         }
+        switch deviceResetState {
+        case .healthy:
+            break
+        case .recovering(let reason), .failed(let reason):
+            throw AgentError.deviceLost(reason)
+        }
         try ensureCommandPoolAndSync()
         drainPendingComputeSubmissions(waitAll: true)
 
@@ -306,6 +321,7 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
         guard frameActive, let dev = device, let gq = graphicsQueue, let pq = presentQueue else {
             throw AgentError.internalError("endFrame called without active frame")
         }
+        defer { frameActive = false }
         guard let cmd = commandBuffers[currentFrame] else { throw AgentError.internalError("Missing command buffer") }
         vkCmdEndRenderPass(cmd)
 
@@ -377,7 +393,12 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
         submit.signalSemaphoreCount = 1
         withUnsafePointer(to: &signalSemaphore) { sp in submit.pSignalSemaphores = sp }
 
-        _ = withUnsafePointer(to: submit) { ptr in vkQueueSubmit(gq, 1, ptr, inFlightFences[currentFrame]) }
+        let submitResult = withUnsafePointer(to: submit) { ptr in vkQueueSubmit(gq, 1, ptr, inFlightFences[currentFrame]) }
+        if submitResult == VK_ERROR_DEVICE_LOST {
+            try handleDeviceLoss(context: "vkQueueSubmit", result: submitResult)
+        } else if submitResult != VK_SUCCESS {
+            throw AgentError.internalError("vkQueueSubmit failed (res=\(submitResult))")
+        }
 
         // Present
         var pi = VkPresentInfoKHR()
@@ -393,13 +414,20 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
         let presentRes = withUnsafePointer(to: pi) { ptr in vkQueuePresentKHR(pq, ptr) }
         if presentRes == VK_ERROR_OUT_OF_DATE_KHR || presentRes == VK_SUBOPTIMAL_KHR {
             try recreateSwapchain(width: surfaceExtent.width, height: surfaceExtent.height)
+        } else if presentRes == VK_ERROR_DEVICE_LOST {
+            try handleDeviceLoss(context: "vkQueuePresentKHR", result: presentRes)
         } else if presentRes != VK_SUCCESS {
             throw AgentError.internalError("vkQueuePresentKHR failed (res=\(presentRes))")
         }
 
         if captureRequested {
             // Wait for GPU to finish so buffer is ready, then map and hash
-            _ = vkQueueWaitIdle(gq)
+            let waitResult = vkQueueWaitIdle(gq)
+            if waitResult == VK_ERROR_DEVICE_LOST {
+                try handleDeviceLoss(context: "vkQueueWaitIdle (capture)", result: waitResult)
+            } else if waitResult != VK_SUCCESS {
+                throw AgentError.internalError("vkQueueWaitIdle failed (res=\(waitResult))")
+            }
             if let mem = captureMemory {
                 var mapped: UnsafeMutableRawPointer? = nil
                 _ = vkMapMemory(dev, mem, 0, captureBufferSize, 0, &mapped)
@@ -414,7 +442,6 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
         }
 
         currentFrame = (currentFrame + 1) % maxFramesInFlight
-        frameActive = false
         #else
         try core.endFrame()
         #endif
@@ -429,12 +456,69 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
     }
     public func waitGPU() throws {
         #if canImport(CVulkan)
+        switch deviceResetState {
+        case .healthy:
+            break
+        case .recovering(let reason), .failed(let reason):
+            throw AgentError.deviceLost(reason)
+        }
         drainPendingComputeSubmissions(waitAll: true)
-        if let dev = device { _ = vkDeviceWaitIdle(dev) }
+        if let dev = device {
+            let waitResult = vkDeviceWaitIdle(dev)
+            if waitResult == VK_ERROR_DEVICE_LOST {
+                try handleDeviceLoss(context: "vkDeviceWaitIdle", result: waitResult)
+            } else if waitResult != VK_SUCCESS {
+                throw AgentError.internalError("vkDeviceWaitIdle failed (res=\(waitResult))")
+            }
+        }
         #else
         core.waitGPU()
         #endif
     }
+
+    #if canImport(CVulkan)
+    private func handleDeviceLoss(context: String, result: VkResult) throws -> Never {
+        #if DEBUG
+        debugDeviceLossInProgress = true
+        #endif
+        frameActive = false
+        let baseReason = "\(context) failed with VkResult \(result)"
+        SDLLogger.error("SDLKit.Graphics.Vulkan", baseReason)
+
+        if case .healthy = deviceResetState {
+            var finalReason = baseReason
+            var nextState: DeviceResetState = .recovering(reason: finalReason)
+
+            if let dev = device {
+                let idleResult = vkDeviceWaitIdle(dev)
+                if idleResult != VK_SUCCESS && idleResult != VK_ERROR_DEVICE_LOST {
+                    let waitMessage = "vkDeviceWaitIdle failed during device loss handling (res=\(idleResult))"
+                    SDLLogger.error("SDLKit.Graphics.Vulkan", waitMessage)
+                    finalReason += "; \(waitMessage)"
+                    nextState = .failed(reason: finalReason)
+                }
+            } else {
+                let waitMessage = "Vulkan device unavailable during device loss handling"
+                SDLLogger.error("SDLKit.Graphics.Vulkan", waitMessage)
+                finalReason += "; \(waitMessage)"
+                nextState = .failed(reason: finalReason)
+            }
+
+            deviceResetState = nextState
+            deviceEventHandler?(.willReset(reason: finalReason))
+            throw AgentError.deviceLost(finalReason)
+        }
+
+        let reason: String
+        switch deviceResetState {
+        case .recovering(let value), .failed(let value):
+            reason = value
+        case .healthy:
+            reason = baseReason
+        }
+        throw AgentError.deviceLost(reason)
+    }
+    #endif
 
     public func createBuffer(bytes: UnsafeRawPointer?, length: Int, usage: BufferUsage) throws -> BufferHandle {
         #if canImport(CVulkan)
@@ -2229,6 +2313,11 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
         } catch {
             SDLLogger.warn("SDLKit.Graphics.Vulkan", "Failed to create fallback texture: \(error)")
         }
+
+        deviceResetState = .healthy
+        #if DEBUG
+        debugDeviceLossInProgress = false
+        #endif
     }
 
     private func recreateSwapchain(width: UInt32, height: UInt32) throws {

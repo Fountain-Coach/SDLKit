@@ -10,6 +10,8 @@ private final class EnforcingBackend: RenderBackend {
     private var pipelineRequirements: [PipelineHandle: Int] = [:]
     private var computeRequirements: [ComputePipelineHandle: Int] = [:]
 
+    var deviceEventHandler: RenderBackendDeviceEventHandler?
+
     private init(baseWindow: SDLWindow, override: Int?) {
         self.window = baseWindow
         self.computeOverride = override

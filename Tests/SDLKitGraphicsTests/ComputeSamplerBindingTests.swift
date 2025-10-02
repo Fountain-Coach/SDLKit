@@ -11,6 +11,8 @@ private final class SamplerTrackingBackend: RenderBackend {
     private var computeRequirements: [ComputePipelineHandle: Set<Int>] = [:]
     private(set) var lastBoundSamplers: [Int: SamplerDescriptor] = [:]
 
+    var deviceEventHandler: RenderBackendDeviceEventHandler?
+
     private init(baseWindow: SDLWindow, requiredSlots: Set<Int>) {
         self.window = baseWindow
         self.requiredSamplerSlots = requiredSlots
