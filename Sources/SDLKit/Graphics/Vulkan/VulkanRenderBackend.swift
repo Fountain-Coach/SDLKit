@@ -182,60 +182,13 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
     }
 
     deinit {
-        // Ensure GPU idle-equivalent and destroy Vulkan objects
         #if canImport(CVulkan)
-        if let dev = device {
-            _ = vkDeviceWaitIdle(dev)
-            destroySwapchainResources()
-            // Destroy sync objects
-            for s in imageAvailableSemaphores { if let sem = s { vkDestroySemaphore(dev, sem, nil) } }
-            for s in renderFinishedSemaphores { if let sem = s { vkDestroySemaphore(dev, sem, nil) } }
-            for f in inFlightFences { if let ff = f { vkDestroyFence(dev, ff, nil) } }
-            imageAvailableSemaphores.removeAll(); renderFinishedSemaphores.removeAll(); inFlightFences.removeAll()
-            // Destroy builtin buffer
-            if let vb = builtinVertexBuffer { vkDestroyBuffer(dev, vb, nil) }
-            if let vm = builtinVertexMemory { vkFreeMemory(dev, vm, nil) }
-            builtinVertexBuffer = nil; builtinVertexMemory = nil
-            // Destroy pipelines
-            for (_, p) in pipelines {
-                if let pl = p.pipeline { vkDestroyPipeline(dev, pl, nil) }
-                if let layout = p.pipelineLayout { vkDestroyPipelineLayout(dev, layout, nil) }
-                if let setLayout = p.descriptorSetLayout { vkDestroyDescriptorSetLayout(dev, setLayout, nil) }
-                for pool in p.descriptorPools { if let pool { vkDestroyDescriptorPool(dev, pool, nil) } }
-            }
-            pipelines.removeAll(); builtinPipeline = nil
-            for (_, p) in computePipelines {
-                if let pipeline = p.pipeline { vkDestroyPipeline(dev, pipeline, nil) }
-                if let layout = p.pipelineLayout { vkDestroyPipelineLayout(dev, layout, nil) }
-                if let setLayout = p.descriptorSetLayout { vkDestroyDescriptorSetLayout(dev, setLayout, nil) }
-                if let pool = p.descriptorPool { vkDestroyDescriptorPool(dev, pool, nil) }
-            }
-            computePipelines.removeAll()
-            for (_, texture) in textures {
-                destroySampler(texture.sampler, device: dev)
-                if let view = texture.view { vkDestroyImageView(dev, view, nil) }
-                if let image = texture.image { vkDestroyImage(dev, image, nil) }
-                if let memory = texture.memory { vkFreeMemory(dev, memory, nil) }
-            }
-            textures.removeAll()
-            // Destroy command pool
-            if let pool = commandPool { vkDestroyCommandPool(dev, pool, nil) }
-            commandPool = nil
-            vkDestroyDevice(dev, nil)
-        }
-        if let inst = vkInstance.handle {
-            if let surf = vkSurface {
-                vkDestroySurfaceKHR(inst, surf, nil)
-                vkSurface = nil
-            }
-            if let messenger = debugMessenger {
-                destroyDebugMessenger(instance: inst, messenger: messenger)
-                debugMessenger = nil
-            }
-        }
+        releaseVulkanDeviceResources()
+        destroyInstanceSurface()
+        #else
+        destroyInstanceSurface()
         #endif
         try? waitGPU()
-        VulkanMinimalDestroyInstance(&vkInstance)
     }
 
     // MARK: - RenderBackend
@@ -487,26 +440,34 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
 
         if case .healthy = deviceResetState {
             var finalReason = baseReason
-            var nextState: DeviceResetState = .recovering(reason: finalReason)
-
             if let dev = device {
                 let idleResult = vkDeviceWaitIdle(dev)
                 if idleResult != VK_SUCCESS && idleResult != VK_ERROR_DEVICE_LOST {
                     let waitMessage = "vkDeviceWaitIdle failed during device loss handling (res=\(idleResult))"
                     SDLLogger.error("SDLKit.Graphics.Vulkan", waitMessage)
                     finalReason += "; \(waitMessage)"
-                    nextState = .failed(reason: finalReason)
                 }
             } else {
                 let waitMessage = "Vulkan device unavailable during device loss handling"
                 SDLLogger.error("SDLKit.Graphics.Vulkan", waitMessage)
                 finalReason += "; \(waitMessage)"
-                nextState = .failed(reason: finalReason)
             }
 
-            deviceResetState = nextState
+            deviceResetState = .recovering(reason: finalReason)
             deviceEventHandler?(.willReset(reason: finalReason))
-            throw AgentError.deviceLost(finalReason)
+
+            do {
+                try resetVulkanDevice()
+                deviceEventHandler?(.didReset)
+                SDLLogger.info("SDLKit.Graphics.Vulkan", "Device reset completed after loss: \(finalReason)")
+                throw AgentError.deviceLost(finalReason)
+            } catch {
+                let failureReason = "\(finalReason); reset failed: \(error)"
+                deviceResetState = .failed(reason: failureReason)
+                deviceEventHandler?(.resetFailed(reason: failureReason))
+                SDLLogger.error("SDLKit.Graphics.Vulkan", failureReason)
+                throw AgentError.deviceLost(failureReason)
+            }
         }
 
         let reason: String
@@ -517,6 +478,90 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
             reason = baseReason
         }
         throw AgentError.deviceLost(reason)
+    }
+    
+    private func resetVulkanDevice() throws {
+        #if canImport(CVulkan)
+        SDLLogger.warn("SDLKit.Graphics.Vulkan", "Attempting Vulkan device reset")
+
+        let preservedSamplers = samplers.mapValues { $0.descriptor }
+
+        releaseVulkanDeviceResources()
+
+        buffers.removeAll()
+        textures.removeAll()
+        samplers.removeAll()
+        pipelines.removeAll()
+        computePipelines.removeAll()
+        meshes.removeAll()
+        pendingComputeDescriptorSets.removeAll()
+        pendingOutOfFrameComputeSubmissions.removeAll()
+        builtinPipeline = nil
+        fallbackWhiteTexture = nil
+        captureRequested = false
+        captureBuffer = nil
+        captureMemory = nil
+        captureBufferSize = 0
+        lastCaptureHash = nil
+        currentFrame = 0
+        currentImageIndex = 0
+        frameActive = false
+        supportsStorageImages = false
+
+        var resetError: Error?
+        do {
+            try initializeDeviceAndQueues()
+            try ensureCommandPoolAndSync()
+
+            let windowSize: (UInt32, UInt32)
+            if let info = try? window.info() {
+                windowSize = (UInt32(max(1, info.width)), UInt32(max(1, info.height)))
+            } else {
+                windowSize = (UInt32(max(1, window.config.width)), UInt32(max(1, window.config.height)))
+            }
+            if windowSize.0 != surfaceExtent.width || windowSize.1 != surfaceExtent.height {
+                try recreateSwapchain(width: windowSize.0, height: windowSize.1)
+            }
+
+            if !preservedSamplers.isEmpty {
+                for (handle, descriptor) in preservedSamplers {
+                    let sampler = try allocateSampler(descriptor: descriptor)
+                    samplers[handle] = SamplerResource(descriptor: descriptor, sampler: sampler)
+                }
+            }
+        } catch {
+            resetError = error
+        }
+
+        if let error = resetError {
+            releaseVulkanDeviceResources()
+            buffers.removeAll()
+            textures.removeAll()
+            samplers.removeAll()
+            pipelines.removeAll()
+            computePipelines.removeAll()
+            meshes.removeAll()
+            pendingComputeDescriptorSets.removeAll()
+            pendingOutOfFrameComputeSubmissions.removeAll()
+            builtinPipeline = nil
+            renderPass = nil
+            fallbackWhiteTexture = nil
+            captureRequested = false
+            captureBuffer = nil
+            captureMemory = nil
+            captureBufferSize = 0
+            lastCaptureHash = nil
+            supportsStorageImages = false
+            currentFrame = 0
+            currentImageIndex = 0
+            frameActive = false
+            throw error
+        }
+
+        SDLLogger.info("SDLKit.Graphics.Vulkan", "Vulkan device reset succeeded")
+        #else
+        throw AgentError.notImplemented("Vulkan reset unavailable on this platform")
+        #endif
     }
     #endif
 
@@ -2550,6 +2595,146 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
         }
     }
 
+    private func releaseVulkanDeviceResources() {
+        #if canImport(CVulkan)
+        frameActive = false
+
+        if let dev = device {
+            let waitResult = vkDeviceWaitIdle(dev)
+            if waitResult != VK_SUCCESS && waitResult != VK_ERROR_DEVICE_LOST {
+                SDLLogger.warn("SDLKit.Graphics.Vulkan", "vkDeviceWaitIdle during release returned \(waitResult)")
+            }
+        }
+
+        drainPendingComputeSubmissions(waitAll: true)
+
+        for frame in 0..<pendingComputeDescriptorSets.count {
+            releasePendingComputeDescriptors(for: frame)
+        }
+        pendingComputeDescriptorSets.removeAll()
+
+        if let dev = device {
+            for submission in pendingOutOfFrameComputeSubmissions {
+                if let descriptor = submission.descriptor, var set = descriptor.set, let pool = descriptor.pool {
+                    withUnsafePointer(to: &set) { ptr in _ = vkFreeDescriptorSets(dev, pool, 1, ptr) }
+                }
+                if let fence = submission.fence { vkDestroyFence(dev, fence, nil) }
+                if let pool = commandPool, let cmd = submission.commandBuffer {
+                    withUnsafePointer(to: &cmd) { ptr in vkFreeCommandBuffers(dev, pool, 1, ptr) }
+                }
+            }
+        }
+        pendingOutOfFrameComputeSubmissions.removeAll()
+
+        destroySwapchainResources()
+
+        if let dev = device {
+            for semaphore in imageAvailableSemaphores { if let semaphore { vkDestroySemaphore(dev, semaphore, nil) } }
+            for semaphore in renderFinishedSemaphores { if let semaphore { vkDestroySemaphore(dev, semaphore, nil) } }
+            for fence in inFlightFences { if let fence { vkDestroyFence(dev, fence, nil) } }
+        }
+        imageAvailableSemaphores.removeAll()
+        renderFinishedSemaphores.removeAll()
+        inFlightFences.removeAll()
+
+        if let dev = device {
+            if !commandBuffers.isEmpty, let pool = commandPool {
+                vkFreeCommandBuffers(dev, pool, UInt32(commandBuffers.count), commandBuffers)
+            }
+            if let pool = commandPool { vkDestroyCommandPool(dev, pool, nil) }
+        }
+        commandPool = nil
+        commandBuffers.removeAll()
+
+        if let dev = device {
+            if let vb = builtinVertexBuffer { vkDestroyBuffer(dev, vb, nil) }
+            if let vm = builtinVertexMemory { vkFreeMemory(dev, vm, nil) }
+        }
+        builtinVertexBuffer = nil
+        builtinVertexMemory = nil
+        builtinVertexCount = 0
+
+        if let dev = device {
+            for (_, resource) in pipelines {
+                if let pipeline = resource.pipeline { vkDestroyPipeline(dev, pipeline, nil) }
+                if let layout = resource.pipelineLayout { vkDestroyPipelineLayout(dev, layout, nil) }
+                if let setLayout = resource.descriptorSetLayout { vkDestroyDescriptorSetLayout(dev, setLayout, nil) }
+                for pool in resource.descriptorPools { if let pool { vkDestroyDescriptorPool(dev, pool, nil) } }
+            }
+            for (_, resource) in computePipelines {
+                if let pipeline = resource.pipeline { vkDestroyPipeline(dev, pipeline, nil) }
+                if let layout = resource.pipelineLayout { vkDestroyPipelineLayout(dev, layout, nil) }
+                if let setLayout = resource.descriptorSetLayout { vkDestroyDescriptorSetLayout(dev, setLayout, nil) }
+                if let pool = resource.descriptorPool { vkDestroyDescriptorPool(dev, pool, nil) }
+            }
+            if let rp = renderPass {
+                vkDestroyRenderPass(dev, rp, nil)
+            }
+            for (_, resource) in textures {
+                destroySampler(resource.sampler, device: dev)
+                if let view = resource.view { vkDestroyImageView(dev, view, nil) }
+                if let image = resource.image { vkDestroyImage(dev, image, nil) }
+                if let memory = resource.memory { vkFreeMemory(dev, memory, nil) }
+            }
+            for (_, resource) in samplers {
+                destroySampler(resource.sampler, device: dev)
+            }
+            for (_, resource) in buffers {
+                if let buffer = resource.buffer { vkDestroyBuffer(dev, buffer, nil) }
+                if let memory = resource.memory { vkFreeMemory(dev, memory, nil) }
+            }
+            if let buffer = captureBuffer { vkDestroyBuffer(dev, buffer, nil) }
+            if let memory = captureMemory { vkFreeMemory(dev, memory, nil) }
+        }
+
+        pipelines.removeAll()
+        computePipelines.removeAll()
+        textures.removeAll()
+        samplers.removeAll()
+        buffers.removeAll()
+        meshes.removeAll()
+        builtinPipeline = nil
+        renderPass = nil
+        fallbackWhiteTexture = nil
+        captureBuffer = nil
+        captureMemory = nil
+        captureBufferSize = 0
+        captureRequested = false
+        lastCaptureHash = nil
+        supportsStorageImages = false
+        currentFrame = 0
+        currentImageIndex = 0
+
+        if let dev = device {
+            vkDestroyDevice(dev, nil)
+        }
+        device = nil
+        physicalDevice = nil
+        graphicsQueue = nil
+        presentQueue = nil
+        #else
+        _ = ()
+        #endif
+    }
+
+    private func destroyInstanceSurface() {
+        #if canImport(CVulkan)
+        if let inst = vkInstance.handle {
+            if let surf = vkSurface {
+                vkDestroySurfaceKHR(inst, surf, nil)
+                vkSurface = nil
+            }
+            if let messenger = debugMessenger {
+                destroyDebugMessenger(instance: inst, messenger: messenger)
+                debugMessenger = nil
+            }
+        }
+        #endif
+        VulkanMinimalDestroyInstance(&vkInstance)
+        vkInstance = VulkanMinimalInstance()
+        vkSurface = nil
+    }
+
     private func createBuiltinTriangleResources() throws {
         guard let dev = device else { throw AgentError.internalError("Device not ready for triangle") }
         // Vertex data: 3 vertices, pos.xyz + color.xyz
@@ -3269,6 +3454,7 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
         if let di = depthImage { vkDestroyImage(dev, di, nil); depthImage = nil }
         if let dm = depthMemory { vkFreeMemory(dev, dm, nil); depthMemory = nil }
         if let sc = swapchain { vkDestroySwapchainKHR(dev, sc, nil); swapchain = nil }
+        swapchainImages.removeAll()
     }
     #endif
 }
