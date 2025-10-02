@@ -55,10 +55,15 @@ let package = Package(
     platforms: [
         .macOS(.v13)
     ],
-    products: [
-        .library(name: "SDLKit", targets: ["SDLKit"]),
-        .executable(name: "SDLKitDemo", targets: ["SDLKitDemo"])
-    ],
+    products: {
+        var prods: [Product] = [
+            .library(name: "SDLKit", targets: ["SDLKit"]) 
+        ]
+        if guiEnabled {
+            prods.append(.executable(name: "SDLKitDemo", targets: ["SDLKitDemo"]))
+        }
+        return prods
+    }(),
     dependencies: {
         var deps: [Package.Dependency] = []
         if useYams {
