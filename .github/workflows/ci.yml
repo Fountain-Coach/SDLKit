@@ -131,7 +131,7 @@ jobs:
       - name: Set up Swift
         uses: swift-actions/setup-swift@v1
         with:
-          swift-version: '6.0.2'
+          swift-version: '6.1'
 
       - name: Prepare regression artifact directory
         shell: pwsh
