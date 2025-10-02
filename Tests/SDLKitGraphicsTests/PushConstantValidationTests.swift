@@ -49,6 +49,11 @@ private final class EnforcingBackend: RenderBackend {
         return TextureHandle()
     }
 
+    func createSampler(descriptor: SamplerDescriptor) throws -> SamplerHandle {
+        _ = descriptor
+        return SamplerHandle()
+    }
+
     func destroy(_ handle: ResourceHandle) {
         _ = handle
     }

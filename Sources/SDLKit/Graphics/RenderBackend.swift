@@ -36,6 +36,12 @@ public struct TextureHandle: Hashable, Codable, Sendable {
     public init(rawValue: UInt64) { self.rawValue = rawValue }
 }
 
+public struct SamplerHandle: Hashable, Codable, Sendable {
+    public let rawValue: UInt64
+    public init() { self.init(rawValue: UInt64.random(in: UInt64.min...UInt64.max)) }
+    public init(rawValue: UInt64) { self.rawValue = rawValue }
+}
+
 public struct PipelineHandle: Hashable, Codable, Sendable {
     public let rawValue: UInt64
     public init() { self.init(rawValue: UInt64.random(in: UInt64.min...UInt64.max)) }
@@ -86,6 +92,58 @@ public struct TextureDescriptor: Sendable {
 public struct TextureInitialData: Sendable {
     public var mipLevelData: [Data]
     public init(mipLevelData: [Data] = []) { self.mipLevelData = mipLevelData }
+}
+
+public enum SamplerMinMagFilter: String, Codable, Sendable {
+    case nearest
+    case linear
+}
+
+public enum SamplerMipFilter: String, Codable, Sendable {
+    case notMipmapped
+    case nearest
+    case linear
+}
+
+public enum SamplerAddressMode: String, Codable, Sendable {
+    case clampToEdge
+    case repeatTexture
+    case mirrorRepeat
+}
+
+public struct SamplerDescriptor: Sendable {
+    public var label: String?
+    public var minFilter: SamplerMinMagFilter
+    public var magFilter: SamplerMinMagFilter
+    public var mipFilter: SamplerMipFilter
+    public var addressModeU: SamplerAddressMode
+    public var addressModeV: SamplerAddressMode
+    public var addressModeW: SamplerAddressMode
+    public var lodMinClamp: Float
+    public var lodMaxClamp: Float
+    public var maxAnisotropy: Int
+
+    public init(label: String? = nil,
+                minFilter: SamplerMinMagFilter = .linear,
+                magFilter: SamplerMinMagFilter = .linear,
+                mipFilter: SamplerMipFilter = .linear,
+                addressModeU: SamplerAddressMode = .repeatTexture,
+                addressModeV: SamplerAddressMode = .repeatTexture,
+                addressModeW: SamplerAddressMode = .repeatTexture,
+                lodMinClamp: Float = 0,
+                lodMaxClamp: Float = Float.greatestFiniteMagnitude,
+                maxAnisotropy: Int = 1) {
+        self.label = label
+        self.minFilter = minFilter
+        self.magFilter = magFilter
+        self.mipFilter = mipFilter
+        self.addressModeU = addressModeU
+        self.addressModeV = addressModeV
+        self.addressModeW = addressModeW
+        self.lodMinClamp = lodMinClamp
+        self.lodMaxClamp = lodMaxClamp
+        self.maxAnisotropy = max(1, maxAnisotropy)
+    }
 }
 
 public struct VertexLayout: Equatable, Sendable {
@@ -164,14 +222,46 @@ public struct BindingSet {
         }
     }
 
-    public var slots: [Int: Any]
+    public enum Resource: Sendable {
+        case buffer(BufferHandle)
+        case texture(TextureHandle)
+    }
+
+    public private(set) var resources: [Int: Resource]
+    public private(set) var samplers: [Int: SamplerHandle]
     public var materialConstants: MaterialConstants?
-    public init(slots: [Int: Any] = [:], materialConstants: MaterialConstants? = nil) {
-        self.slots = slots
+    public init(resources: [Int: Resource] = [:],
+                samplers: [Int: SamplerHandle] = [:],
+                materialConstants: MaterialConstants? = nil) {
+        self.resources = resources
+        self.samplers = samplers
         self.materialConstants = materialConstants
     }
-    public mutating func setValue(_ value: Any, for index: Int) { slots[index] = value }
-    public func value<T>(for index: Int, as type: T.Type) -> T? { slots[index] as? T }
+    public mutating func setBuffer(_ handle: BufferHandle, at index: Int) {
+        resources[index] = .buffer(handle)
+    }
+    public mutating func setTexture(_ handle: TextureHandle, at index: Int) {
+        resources[index] = .texture(handle)
+    }
+    public mutating func setSampler(_ handle: SamplerHandle, at index: Int) {
+        samplers[index] = handle
+    }
+    public mutating func removeResource(at index: Int) {
+        resources.removeValue(forKey: index)
+    }
+    public mutating func removeSampler(at index: Int) {
+        samplers.removeValue(forKey: index)
+    }
+    public func resource(at index: Int) -> Resource? { resources[index] }
+    public func buffer(at index: Int) -> BufferHandle? {
+        if case let .buffer(handle) = resources[index] { return handle }
+        return nil
+    }
+    public func texture(at index: Int) -> TextureHandle? {
+        if case let .texture(handle) = resources[index] { return handle }
+        return nil
+    }
+    public func sampler(at index: Int) -> SamplerHandle? { samplers[index] }
 }
 
 public enum TextureUsage: Sendable {
@@ -215,6 +305,7 @@ public struct ComputePipelineDescriptor {
 public enum ResourceHandle: Hashable {
     case buffer(BufferHandle)
     case texture(TextureHandle)
+    case sampler(SamplerHandle)
     case pipeline(PipelineHandle)
     case computePipeline(ComputePipelineHandle)
     case mesh(MeshHandle)
@@ -252,6 +343,7 @@ public protocol RenderBackend {
 
     func createBuffer(bytes: UnsafeRawPointer?, length: Int, usage: BufferUsage) throws -> BufferHandle
     func createTexture(descriptor: TextureDescriptor, initialData: TextureInitialData?) throws -> TextureHandle
+    func createSampler(descriptor: SamplerDescriptor) throws -> SamplerHandle
     func destroy(_ handle: ResourceHandle)
 
     func registerMesh(vertexBuffer: BufferHandle,

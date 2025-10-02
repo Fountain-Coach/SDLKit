@@ -76,9 +76,9 @@ public enum SceneGraphComputeInterop {
 
     public static func dispatchCompute(backend: RenderBackend, resources: Resources) throws {
         var bindings = BindingSet()
-        bindings.setValue(resources.stateBuffer, for: 0)
-        bindings.setValue(resources.configBuffer, for: 1)
-        bindings.setValue(resources.vertexBuffer, for: 2)
+        bindings.setBuffer(resources.stateBuffer, at: 0)
+        bindings.setBuffer(resources.configBuffer, at: 1)
+        bindings.setBuffer(resources.vertexBuffer, at: 2)
         try backend.dispatchCompute(
             resources.computePipeline,
             groupsX: resources.vertexCount,

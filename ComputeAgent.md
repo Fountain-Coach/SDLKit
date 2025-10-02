@@ -42,6 +42,11 @@ public protocol ComputeScheduler {
 }
 ```
 
+### Samplers in Compute Workflows
+- Compute shaders that sample textures must request sampler handles from the graphics backend (`RenderBackend.createSampler`).
+- Bind sampler handles explicitly via `BindingSet.setSampler(_, at:)` to ensure filtering and addressing state is consistent across platforms.
+- `BindingSet` validation rejects mismatched resource types at dispatch time, surfacing incorrect bindings early in development.
+
 **Inputs**
 - Compiled compute shader binaries from **ShaderAgent**.
 - Resource handles (buffers/textures) from **GraphicsAgent**.

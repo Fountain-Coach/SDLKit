@@ -76,6 +76,17 @@ func updateAndRender(scene: Scene, backend: RenderBackend) {
 }
 ```
 
+### Sampler Bindings
+
+- Materials that sample textures should request explicit sampler state objects from `RenderBackend.createSampler` during material setup.
+- Populate both the texture and sampler slots when filling a `BindingSet`:
+  ```swift
+  var bindings = BindingSet()
+  bindings.setTexture(albedoTextureHandle, at: 10)
+  bindings.setSampler(linearWrapSampler, at: 10) // same slot as texture sampler declared in shader
+  ```
+- This explicit pairing ensures shaders receive the correct filtering and addressing modes across Metal, D3D12, and Vulkan.
+
 ---
 
 ## Inputs

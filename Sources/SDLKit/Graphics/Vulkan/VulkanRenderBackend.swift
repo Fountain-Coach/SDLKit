@@ -138,6 +138,12 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
     private var textures: [TextureHandle: TextureResource] = [:]
     private var fallbackWhiteTexture: TextureHandle? = nil
 
+    private struct SamplerResource {
+        var descriptor: SamplerDescriptor
+        var sampler: VkSampler?
+    }
+    private var samplers: [SamplerHandle: SamplerResource] = [:]
+
     #endif
 
     public required init(window: SDLWindow) throws {
@@ -646,6 +652,49 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
         #endif
     }
 
+    public func createSampler(descriptor: SamplerDescriptor) throws -> SamplerHandle {
+        #if canImport(CVulkan)
+        guard let dev = device else {
+            throw AgentError.internalError("Vulkan device not ready")
+        }
+        var info = VkSamplerCreateInfo()
+        info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO
+        info.magFilter = convertSamplerFilter(descriptor.magFilter)
+        info.minFilter = convertSamplerFilter(descriptor.minFilter)
+        info.mipmapMode = convertSamplerMipFilter(descriptor.mipFilter)
+        info.addressModeU = convertSamplerAddressMode(descriptor.addressModeU)
+        info.addressModeV = convertSamplerAddressMode(descriptor.addressModeV)
+        info.addressModeW = convertSamplerAddressMode(descriptor.addressModeW)
+        info.mipLodBias = 0
+        info.minLod = descriptor.lodMinClamp
+        info.maxLod = descriptor.mipFilter == .notMipmapped ? descriptor.lodMinClamp : descriptor.lodMaxClamp
+        let anisotropy = Float(max(1, descriptor.maxAnisotropy))
+        if anisotropy > 1 {
+            info.anisotropyEnable = VK_TRUE
+            info.maxAnisotropy = anisotropy
+        } else {
+            info.anisotropyEnable = VK_FALSE
+            info.maxAnisotropy = 1
+        }
+        info.compareEnable = VK_FALSE
+        info.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK
+        info.unnormalizedCoordinates = VK_FALSE
+
+        var sampler: VkSampler? = nil
+        let result = withUnsafePointer(to: info) { ptr in vkCreateSampler(dev, ptr, nil, &sampler) }
+        if result != VK_SUCCESS || sampler == nil {
+            if let sampler { vkDestroySampler(dev, sampler, nil) }
+            throw AgentError.internalError("vkCreateSampler failed (res=\(result))")
+        }
+
+        let handle = SamplerHandle()
+        samplers[handle] = SamplerResource(descriptor: descriptor, sampler: sampler)
+        return handle
+        #else
+        return try core.createSampler(descriptor: descriptor)
+        #endif
+    }
+
     public func registerMesh(vertexBuffer: BufferHandle,
                              vertexCount: Int,
                              indexBuffer: BufferHandle?,
@@ -706,6 +755,10 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
                 if let view = res.view { vkDestroyImageView(dev, view, nil) }
                 if let image = res.image { vkDestroyImage(dev, image, nil) }
                 if let memory = res.memory { vkFreeMemory(dev, memory, nil) }
+            }
+        case .sampler(let handle):
+            if let res = samplers.removeValue(forKey: handle), let dev = device {
+                if let sampler = res.sampler { vkDestroySampler(dev, sampler, nil) }
             }
         case .mesh(let h):
             meshes.removeValue(forKey: h)
@@ -1147,10 +1200,18 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
 
                 switch binding.kind {
                 case .uniformBuffer, .storageBuffer:
-                    guard let handle: BufferHandle = bindings.value(for: binding.index, as: BufferHandle.self),
-                          let bufferRes = buffers[handle],
-                          let buffer = bufferRes.buffer else {
+                    guard let entry = bindings.resource(at: binding.index) else {
                         throw AgentError.invalidArgument("Missing buffer binding for slot \(binding.index)")
+                    }
+                    let handle: BufferHandle
+                    switch entry {
+                    case .buffer(let bufferHandle):
+                        handle = bufferHandle
+                    case .texture:
+                        throw AgentError.invalidArgument("Texture bound to buffer slot \(binding.index) for Vulkan draw")
+                    }
+                    guard let bufferRes = buffers[handle], let buffer = bufferRes.buffer else {
+                        throw AgentError.invalidArgument("Unknown buffer handle for slot \(binding.index)")
                     }
                     var info = VkDescriptorBufferInfo()
                     info.buffer = buffer
@@ -1161,8 +1222,13 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
                     bufferInfos.append(info)
                 case .sampledTexture:
                     let textureHandle: TextureHandle
-                    if let provided: TextureHandle = bindings.value(for: binding.index, as: TextureHandle.self) {
-                        textureHandle = provided
+                    if let entry = bindings.resource(at: binding.index) {
+                        switch entry {
+                        case .texture(let handle):
+                            textureHandle = handle
+                        case .buffer:
+                            throw AgentError.invalidArgument("Buffer bound to texture slot \(binding.index) for Vulkan draw")
+                        }
                     } else {
                         textureHandle = try ensureFallbackTextureHandle()
                     }
@@ -1170,15 +1236,30 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
                         throw AgentError.invalidArgument("Missing texture binding for slot \(binding.index)")
                     }
                     var info = VkDescriptorImageInfo()
-                    info.sampler = texture.sampler
+                    if let samplerHandle = bindings.sampler(at: binding.index),
+                       let samplerRes = samplers[samplerHandle],
+                       let sampler = samplerRes.sampler {
+                        info.sampler = sampler
+                    } else {
+                        info.sampler = texture.sampler
+                    }
                     info.imageView = texture.view
                     info.imageLayout = texture.layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL : texture.layout
                     bufferIndices.append(nil)
                     imageIndices.append(imageInfos.count)
                     imageInfos.append(info)
                 case .storageTexture:
-                    guard let handle: TextureHandle = bindings.value(for: binding.index, as: TextureHandle.self),
-                          let texture = textures[handle] else {
+                    guard let entry = bindings.resource(at: binding.index) else {
+                        throw AgentError.invalidArgument("Missing storage texture binding for slot \(binding.index)")
+                    }
+                    let textureHandle: TextureHandle
+                    switch entry {
+                    case .texture(let handle):
+                        textureHandle = handle
+                    case .buffer:
+                        throw AgentError.invalidArgument("Buffer bound to storage texture slot \(binding.index)")
+                    }
+                    guard let texture = textures[textureHandle] else {
                         throw AgentError.invalidArgument("Missing storage texture binding for slot \(binding.index)")
                     }
                     var info = VkDescriptorImageInfo()
@@ -1189,7 +1270,18 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
                     imageIndices.append(imageInfos.count)
                     imageInfos.append(info)
                 case .sampler:
-                    throw AgentError.notImplemented("Standalone sampler bindings are not yet supported on Vulkan")
+                    guard let samplerHandle = bindings.sampler(at: binding.index),
+                          let samplerRes = samplers[samplerHandle],
+                          let sampler = samplerRes.sampler else {
+                        throw AgentError.invalidArgument("Missing sampler binding for slot \(binding.index)")
+                    }
+                    var info = VkDescriptorImageInfo()
+                    info.sampler = sampler
+                    info.imageView = nil
+                    info.imageLayout = VK_IMAGE_LAYOUT_UNDEFINED
+                    bufferIndices.append(nil)
+                    imageIndices.append(imageInfos.count)
+                    imageInfos.append(info)
                 }
 
                 writes.append(write)
@@ -1473,10 +1565,18 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
                 case .sampledTexture, .storageTexture, .sampler:
                     throw AgentError.notImplemented("Vulkan compute textures and samplers are not yet supported")
                 }
-                guard let handle: BufferHandle = bindings.value(for: slot.index, as: BufferHandle.self),
-                      let bufferRes = buffers[handle],
-                      let buffer = bufferRes.buffer else {
+                guard let entry = bindings.resource(at: slot.index) else {
                     throw AgentError.invalidArgument("Missing buffer binding for compute slot \(slot.index)")
+                }
+                let handle: BufferHandle
+                switch entry {
+                case .buffer(let bufferHandle):
+                    handle = bufferHandle
+                case .texture:
+                    throw AgentError.invalidArgument("Texture bound to buffer slot \(slot.index) in Vulkan compute dispatch")
+                }
+                guard let bufferRes = buffers[handle], let buffer = bufferRes.buffer else {
+                    throw AgentError.invalidArgument("Unknown buffer handle for compute slot \(slot.index)")
                 }
                 var info = VkDescriptorBufferInfo()
                 info.buffer = buffer
@@ -2211,6 +2311,33 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
         }
     }
 
+    private func convertSamplerFilter(_ filter: SamplerMinMagFilter) -> VkFilter {
+        switch filter {
+        case .nearest: return VK_FILTER_NEAREST
+        case .linear: return VK_FILTER_LINEAR
+        }
+    }
+
+    private func convertSamplerMipFilter(_ filter: SamplerMipFilter) -> VkSamplerMipmapMode {
+        switch filter {
+        case .notMipmapped, .nearest:
+            return VK_SAMPLER_MIPMAP_MODE_NEAREST
+        case .linear:
+            return VK_SAMPLER_MIPMAP_MODE_LINEAR
+        }
+    }
+
+    private func convertSamplerAddressMode(_ mode: SamplerAddressMode) -> VkSamplerAddressMode {
+        switch mode {
+        case .clampToEdge:
+            return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE
+        case .repeatTexture:
+            return VK_SAMPLER_ADDRESS_MODE_REPEAT
+        case .mirrorRepeat:
+            return VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT
+        }
+    }
+
     private func imageUsage(for usage: TextureUsage, hasInitialData: Bool) throws -> (UInt32, VkImageLayout) {
         var flags: UInt32 = 0
         var layout: VkImageLayout
@@ -2346,7 +2473,7 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
         case .storageTexture:
             return VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
         case .sampler:
-            throw AgentError.notImplemented("Standalone sampler bindings are not yet supported on Vulkan")
+            return VK_DESCRIPTOR_TYPE_SAMPLER
         }
     }
 
