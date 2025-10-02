@@ -742,17 +742,14 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
 
     private func encodeBlitTextureBarriers(on commandBuffer: MTLCommandBuffer,
                                            textures: [MTLTexture]) -> Bool {
+        // MTLBlitCommandEncoder does not support memoryBarrier APIs. Rely on
+        // command-encoder boundaries and implicit hazard tracking. We still
+        // create a no-op blit encoder to ensure any pending blits are ordered.
         guard !textures.isEmpty else { return true }
         guard let blitEncoder = commandBuffer.makeBlitCommandEncoder() else { return false }
-        blitEncoder.label = "SDLKit.TextureBarrierBlit"
-        defer { blitEncoder.endEncoding() }
-        if #available(macOS 10.14, iOS 12.0, tvOS 12.0, *) {
-            blitEncoder.memoryBarrier(resources: textures)
-            return true
-        } else {
-            blitEncoder.memoryBarrier(scope: [.textures])
-            return true
-        }
+        blitEncoder.label = "SDLKit.TextureBarrierBlitNoOp"
+        blitEncoder.endEncoding()
+        return true
     }
 
     private func bindResources(_ slots: [BindingSlot],
@@ -903,11 +900,12 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
             let height = currentDrawable?.texture.height ?? Int(drawableSize.height * layerScale)
             ensureDepthTexture(width: width, height: height)
             if let depthTexture {
-                let depthAttachment = descriptor.depthAttachment
-                depthAttachment.texture = depthTexture
-                depthAttachment.loadAction = .clear
-                depthAttachment.storeAction = .dontCare
-                depthAttachment.clearDepth = 1.0
+                if let depthAttachment = descriptor.depthAttachment {
+                    depthAttachment.texture = depthTexture
+                    depthAttachment.loadAction = .clear
+                    depthAttachment.storeAction = .dontCare
+                    depthAttachment.clearDepth = 1.0
+                }
             }
         }
 
@@ -930,11 +928,12 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
 
     private func makeRenderPassDescriptor(for drawable: CAMetalDrawable) -> MTLRenderPassDescriptor {
         let descriptor = MTLRenderPassDescriptor()
-        let colorAttachment = descriptor.colorAttachments[0]
-        colorAttachment.texture = drawable.texture
-        colorAttachment.loadAction = .clear
-        colorAttachment.storeAction = .store
-        colorAttachment.clearColor = MTLClearColor(red: 0.05, green: 0.05, blue: 0.08, alpha: 1.0)
+        if let colorAttachment = descriptor.colorAttachments[0] {
+            colorAttachment.texture = drawable.texture
+            colorAttachment.loadAction = .clear
+            colorAttachment.storeAction = .store
+            colorAttachment.clearColor = MTLClearColor(red: 0.05, green: 0.05, blue: 0.08, alpha: 1.0)
+        }
         return descriptor
     }
 
@@ -967,16 +966,19 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
 
     private func makeVertexDescriptor(from layout: VertexLayout) throws -> MTLVertexDescriptor {
         let descriptor = MTLVertexDescriptor()
-        descriptor.layouts[0].stride = layout.stride
-        descriptor.layouts[0].stepFunction = .perVertex
+        if let layout0 = descriptor.layouts[0] {
+            layout0.stride = layout.stride
+            layout0.stepFunction = .perVertex
+        }
         for attribute in layout.attributes {
             guard let format = convertVertexFormat(attribute.format) else {
                 throw AgentError.invalidArgument("Unsupported vertex format: \(attribute.format)")
             }
-            let attr = descriptor.attributes[attribute.index]
-            attr.bufferIndex = 0
-            attr.offset = attribute.offset
-            attr.format = format
+            if let attr = descriptor.attributes[attribute.index] {
+                attr.bufferIndex = 0
+                attr.offset = attribute.offset
+                attr.format = format
+            }
         }
         return descriptor
     }
