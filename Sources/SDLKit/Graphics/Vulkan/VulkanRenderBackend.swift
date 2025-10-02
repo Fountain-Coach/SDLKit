@@ -137,6 +137,7 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
     }
     private var textures: [TextureHandle: TextureResource] = [:]
     private var fallbackWhiteTexture: TextureHandle? = nil
+    private var supportsStorageImages: Bool = false
 
     private struct SamplerResource {
         var descriptor: SamplerDescriptor
@@ -518,6 +519,7 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
         try ensureCommandPoolAndSync()
 
         let vkFormat = try convertTextureFormat(descriptor.format)
+        try validateTextureSupport(format: vkFormat, usage: descriptor.usage)
         let (usageFlags, finalLayout) = try imageUsage(for: descriptor.usage, hasInitialData: initialData?.mipLevelData.isEmpty == false)
         let aspectMask = aspectMask(for: vkFormat)
 
@@ -1936,7 +1938,21 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
         }
         var prioritiesStorage = Array<Float>(repeating: 1.0, count: uniqueFamilies.count)
 
+        var availableFeatures = VkPhysicalDeviceFeatures()
+        vkGetPhysicalDeviceFeatures(physicalDevice, &availableFeatures)
+
+        supportsStorageImages = availableFeatures.shaderStorageImageWriteWithoutFormat != 0
+
         var deviceFeatures = VkPhysicalDeviceFeatures()
+        if availableFeatures.shaderStorageImageWriteWithoutFormat != 0 {
+            deviceFeatures.shaderStorageImageWriteWithoutFormat = VK_TRUE
+        }
+        if availableFeatures.shaderStorageImageReadWithoutFormat != 0 {
+            deviceFeatures.shaderStorageImageReadWithoutFormat = VK_TRUE
+        }
+        if availableFeatures.shaderStorageImageExtendedFormats != 0 {
+            deviceFeatures.shaderStorageImageExtendedFormats = VK_TRUE
+        }
         var dci = VkDeviceCreateInfo()
         dci.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO
         withUnsafePointer(to: &deviceFeatures) { feats in
@@ -2434,7 +2450,7 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
             flags = UInt32(VK_IMAGE_USAGE_SAMPLED_BIT)
             layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
         case .shaderWrite:
-            flags = UInt32(VK_IMAGE_USAGE_STORAGE_BIT)
+            flags = UInt32(VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT)
             layout = VK_IMAGE_LAYOUT_GENERAL
         case .renderTarget:
             flags = UInt32(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT)
@@ -2447,6 +2463,36 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
             flags |= UInt32(VK_IMAGE_USAGE_TRANSFER_DST_BIT)
         }
         return (flags, layout)
+    }
+
+    private func validateTextureSupport(format: VkFormat, usage: TextureUsage) throws {
+        guard let pd = physicalDevice else {
+            throw AgentError.internalError("Vulkan physical device not ready")
+        }
+
+        var properties = VkFormatProperties()
+        vkGetPhysicalDeviceFormatProperties(pd, format, &properties)
+        let features = properties.optimalTilingFeatures
+
+        let requiredFeatures: UInt32
+        switch usage {
+        case .shaderRead:
+            requiredFeatures = UInt32(VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT)
+        case .shaderWrite:
+            requiredFeatures = UInt32(VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT)
+        case .renderTarget:
+            requiredFeatures = UInt32(VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT)
+        case .depthStencil:
+            requiredFeatures = UInt32(VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT)
+        }
+
+        if (features & requiredFeatures) != requiredFeatures {
+            throw AgentError.invalidArgument("Vulkan format \(format) does not support usage \(usage)")
+        }
+
+        if usage == .shaderWrite && !supportsStorageImages {
+            throw AgentError.invalidArgument("Vulkan device does not enable storage image writes")
+        }
     }
 
     private func aspectMask(for format: VkFormat) -> UInt32 {
@@ -2508,8 +2554,12 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
             return (UInt32(VK_PIPELINE_STAGE_TRANSFER_BIT), UInt32(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT), UInt32(VK_ACCESS_TRANSFER_WRITE_BIT), UInt32(VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT))
         case (VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL):
             return (UInt32(VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT), UInt32(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT), 0, UInt32(VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT))
+        case (VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL):
+            return (UInt32(VK_PIPELINE_STAGE_TRANSFER_BIT), UInt32(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT), UInt32(VK_ACCESS_TRANSFER_WRITE_BIT), UInt32(VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT))
         case (VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL):
             return (UInt32(VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT), UInt32(VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT), 0, UInt32(VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT))
+        case (VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL):
+            return (UInt32(VK_PIPELINE_STAGE_TRANSFER_BIT), UInt32(VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT), UInt32(VK_ACCESS_TRANSFER_WRITE_BIT), UInt32(VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT))
         default:
             throw AgentError.notImplemented("Unsupported Vulkan image layout transition (\(oldLayout) -> \(newLayout))")
         }

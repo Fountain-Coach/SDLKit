@@ -241,24 +241,39 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
             height: descriptor.height,
             mipmapped: descriptor.mipLevels > 1
         )
-        textureDescriptor.usage = convertTextureUsage(descriptor.usage)
-        textureDescriptor.storageMode = .shared
+        let usage = convertTextureUsage(descriptor.usage)
+        textureDescriptor.usage = usage
+        textureDescriptor.storageMode = .private
         textureDescriptor.mipmapLevelCount = descriptor.mipLevels
+
+        if usage.contains(.shaderWrite) {
+            guard device.readWriteTextureSupport != .tierNone else {
+                throw AgentError.invalidArgument("Metal device does not support read/write textures")
+            }
+        }
 
         guard let texture = device.makeTexture(descriptor: textureDescriptor) else {
             throw AgentError.internalError("Failed to create Metal texture")
         }
 
         if let initialData, !initialData.mipLevelData.isEmpty {
-            for (level, data) in initialData.mipLevelData.enumerated() {
-                let levelWidth = max(1, descriptor.width >> level)
-                let levelHeight = max(1, descriptor.height >> level)
-                let bytesPerPixel = MetalRenderBackend.bytesPerPixel(for: pixelFormat)
-                let bytesPerRow = levelWidth * bytesPerPixel
-                data.withUnsafeBytes { buffer in
-                    if let base = buffer.baseAddress {
-                        let region = MTLRegionMake2D(0, 0, levelWidth, levelHeight)
-                        texture.replace(region: region, mipmapLevel: level, withBytes: base, bytesPerRow: bytesPerRow)
+            if textureDescriptor.storageMode == .private {
+                try uploadInitialTextureData(initialData,
+                                             to: texture,
+                                             pixelFormat: pixelFormat,
+                                             width: descriptor.width,
+                                             height: descriptor.height)
+            } else {
+                for (level, data) in initialData.mipLevelData.enumerated() {
+                    let levelWidth = max(1, descriptor.width >> level)
+                    let levelHeight = max(1, descriptor.height >> level)
+                    let bytesPerPixel = MetalRenderBackend.bytesPerPixel(for: pixelFormat)
+                    let bytesPerRow = levelWidth * bytesPerPixel
+                    data.withUnsafeBytes { buffer in
+                        if let base = buffer.baseAddress {
+                            let region = MTLRegionMake2D(0, 0, levelWidth, levelHeight)
+                            texture.replace(region: region, mipmapLevel: level, withBytes: base, bytesPerRow: bytesPerRow)
+                        }
                     }
                 }
             }
@@ -964,10 +979,72 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
         case .shaderWrite:
             return [.shaderRead, .shaderWrite]
         case .renderTarget:
-            return [.renderTarget]
+            return [.renderTarget, .shaderRead]
         case .depthStencil:
             return [.renderTarget]
         }
+    }
+
+    private func uploadInitialTextureData(_ data: TextureInitialData,
+                                          to texture: MTLTexture,
+                                          pixelFormat: MTLPixelFormat,
+                                          width: Int,
+                                          height: Int) throws {
+        let mipCount = max(1, texture.mipmapLevelCount)
+        let stagingDescriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: pixelFormat,
+            width: width,
+            height: height,
+            mipmapped: mipCount > 1
+        )
+        stagingDescriptor.storageMode = .shared
+        stagingDescriptor.usage = [.shaderRead, .shaderWrite]
+        stagingDescriptor.mipmapLevelCount = mipCount
+
+        guard let stagingTexture = device.makeTexture(descriptor: stagingDescriptor) else {
+            throw AgentError.internalError("Failed to create Metal staging texture")
+        }
+
+        for (level, levelData) in data.mipLevelData.enumerated() {
+            if level >= mipCount { break }
+            let levelWidth = max(1, width >> level)
+            let levelHeight = max(1, height >> level)
+            let bytesPerPixel = MetalRenderBackend.bytesPerPixel(for: pixelFormat)
+            let bytesPerRow = levelWidth * bytesPerPixel
+            levelData.withUnsafeBytes { buffer in
+                if let base = buffer.baseAddress {
+                    let region = MTLRegionMake2D(0, 0, levelWidth, levelHeight)
+                    stagingTexture.replace(region: region,
+                                           mipmapLevel: level,
+                                           withBytes: base,
+                                           bytesPerRow: bytesPerRow)
+                }
+            }
+        }
+
+        guard let commandBuffer = commandQueue.makeCommandBuffer() else {
+            throw AgentError.internalError("Failed to allocate Metal blit command buffer")
+        }
+        commandBuffer.label = "SDLKit.TextureUpload"
+
+        guard let blitEncoder = commandBuffer.makeBlitCommandEncoder() else {
+            throw AgentError.internalError("Failed to create Metal blit encoder")
+        }
+
+        for level in 0..<min(data.mipLevelData.count, mipCount) {
+            blitEncoder.copy(from: stagingTexture,
+                             sourceSlice: 0,
+                             sourceLevel: level,
+                             to: texture,
+                             destinationSlice: 0,
+                             destinationLevel: level,
+                             sliceCount: 1,
+                             levelCount: 1)
+        }
+        blitEncoder.endEncoding()
+
+        commandBuffer.commit()
+        commandBuffer.waitUntilCompleted()
     }
 
     private func convertFilter(_ filter: SamplerMinMagFilter) -> MTLSamplerMinMagFilter {
