@@ -4,6 +4,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import Optional
 
 MODULES = [
     {
@@ -58,7 +59,7 @@ COMPUTE_MODULES = [
 ]
 
 
-def resolve_tool(env_key: str, executable: str, package_root: Path) -> str | None:
+def resolve_tool(env_key: str, executable: str, package_root: Path) -> Optional[str]:
     if env_key and env_key in os.environ and os.environ[env_key]:
         return os.environ[env_key]
 

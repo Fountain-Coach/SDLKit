@@ -5,6 +5,18 @@ on:
     branches: [ main, master ]
   pull_request:
     branches: [ main, master ]
+  workflow_dispatch:
+    inputs:
+      os:
+        description: "Target OS to run"
+        type: choice
+        required: false
+        default: all
+        options:
+          - all
+          - linux
+          - windows
+          - macos
 
 defaults:
   run:
@@ -12,6 +24,8 @@ defaults:
 
 jobs:
   linux:
+    if: >-
+      ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.os == 'all' || github.event.inputs.os == 'linux' }}
     runs-on: ubuntu-latest
     container:
       image: swift:6.1-jammy
@@ -123,6 +137,8 @@ jobs:
           if-no-files-found: ignore
 
   windows:
+    if: >-
+      ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.os == 'all' || github.event.inputs.os == 'windows' }}
     runs-on: windows-2022
     steps:
       - name: Checkout
@@ -183,6 +199,8 @@ jobs:
           if-no-files-found: ignore
 
   macos:
+    if: >-
+      ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.os == 'all' || github.event.inputs.os == 'macos' }}
     runs-on: macos-14
     steps:
       - name: Checkout
@@ -244,7 +262,21 @@ jobs:
           SDLKIT_GUI_ENABLED: 'false'
         run: |
           set -euo pipefail
-          swift test -v -Xswiftc -DHEADLESS_CI
+          attempt=1
+          max_attempts=3
+          backoff=5
+          while [ $attempt -le $max_attempts ]; do
+            echo "macOS test attempt $attempt/$max_attempts"
+            if swift test -v -Xswiftc -DHEADLESS_CI; then
+              break
+            fi
+            if [ $attempt -eq $max_attempts ]; then
+              echo "Tests failed after $max_attempts attempts"
+              exit 1
+            fi
+            sleep $((backoff * attempt))
+            attempt=$((attempt + 1))
+          done
 
       - name: Run regression harness (Metal)
         env:

@@ -197,10 +197,8 @@ public enum SceneGraphRenderer {
         }
 
         scene.root.updateWorldTransform(parent: .identity)
-        var frameStarted = false
         try propagateDeviceLoss {
             try backend.beginFrame()
-            frameStarted = true
         }
         if let beforeRender {
             try propagateDeviceLoss { try beforeRender() }
@@ -221,7 +219,6 @@ public enum SceneGraphRenderer {
         }
         try propagateDeviceLoss {
             try backend.endFrame()
-            frameStarted = false
         }
     }
 

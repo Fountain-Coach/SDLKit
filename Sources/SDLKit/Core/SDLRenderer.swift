@@ -11,7 +11,7 @@ public final class SDLRenderer {
     public let width: Int
     public let height: Int
     internal private(set) var didShutdown = false
-    #if canImport(CSDL3)
+    #if canImport(CSDL3) && !HEADLESS_CI
     internal var handle: UnsafeMutablePointer<SDL_Renderer>?
     internal var textures: [String: UnsafeMutablePointer<SDL_Texture>] = [:]
     #endif
@@ -30,7 +30,7 @@ public final class SDLRenderer {
         self.width = testingWidth
         self.height = testingHeight
         self.didShutdown = false
-        #if canImport(CSDL3)
+        #if canImport(CSDL3) && !HEADLESS_CI
         handle = nil
         textures = [:]
         #endif
@@ -38,7 +38,7 @@ public final class SDLRenderer {
 
     public func shutdown() {
         if didShutdown { return }
-        #if canImport(CSDL3)
+        #if canImport(CSDL3) && !HEADLESS_CI
         for texture in textures.values {
             SDLKit_DestroyTexture(texture)
         }
