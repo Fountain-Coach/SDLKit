@@ -163,9 +163,23 @@ public final class ShaderLibrary {
     }
 
     private static func loadModules(root: URL) -> [ShaderID: ShaderModule] {
+        var modules: [ShaderID: ShaderModule] = [:]
+
         let unlit = makeUnlitTriangleModule(root: root)
+        modules[unlit.id] = unlit
+
         let lit = makeBasicLitModule(root: root)
-        return [unlit.id: unlit, lit.id: lit]
+        modules[lit.id] = lit
+
+        if let directional = makeDirectionalLitModule(root: root) {
+            modules[directional.id] = directional
+        }
+
+        if let pbr = makePBRForwardModule(root: root) {
+            modules[pbr.id] = pbr
+        }
+
+        return modules
     }
 
     private static func loadComputeModules(root: URL) -> [ShaderID: ComputeShaderModule] {
@@ -175,6 +189,12 @@ public final class ShaderLibrary {
         }
         if let vectorAdd = makeVectorAddComputeModule(root: root) {
             result[vectorAdd.id] = vectorAdd
+        }
+        if let prefilter = makeIBLPrefilterEnvComputeModule(root: root) {
+            result[prefilter.id] = prefilter
+        }
+        if let brdf = makeIBLBRDFLUTComputeModule(root: root) {
+            result[brdf.id] = brdf
         }
         return result
     }
@@ -258,6 +278,109 @@ public final class ShaderLibrary {
         )
     }
 
+    private static func makeDirectionalLitModule(root: URL) -> ShaderModule? {
+        let id = ShaderID("directional_lit")
+        let dxilRoot = root.appendingPathComponent("dxil", isDirectory: true)
+        let spirvRoot = root.appendingPathComponent("spirv", isDirectory: true)
+        let metalRoot = root.appendingPathComponent("metal", isDirectory: true)
+        let artifacts = ShaderModuleArtifacts(
+            dxilVertex: ShaderLibrary.existingFile(dxilRoot.appendingPathComponent("directional_lit_vs.dxil")),
+            dxilFragment: ShaderLibrary.existingFile(dxilRoot.appendingPathComponent("directional_lit_ps.dxil")),
+            spirvVertex: ShaderLibrary.existingFile(spirvRoot.appendingPathComponent("directional_lit.vert.spv")),
+            spirvFragment: ShaderLibrary.existingFile(spirvRoot.appendingPathComponent("directional_lit.frag.spv")),
+            metalLibrary: ShaderLibrary.existingFile(metalRoot.appendingPathComponent("directional_lit.metallib"))
+        )
+
+        if artifacts.dxilVertex == nil && artifacts.spirvVertex == nil && artifacts.metalLibrary == nil {
+            return nil
+        }
+
+        let layout = VertexLayout(
+            stride: MemoryLayout<Float>.size * 8,
+            attributes: [
+                .init(index: 0, semantic: "POSITION", format: .float3, offset: 0),
+                .init(index: 1, semantic: "NORMAL", format: .float3, offset: MemoryLayout<Float>.size * 3),
+                .init(index: 2, semantic: "TEXCOORD0", format: .float2, offset: MemoryLayout<Float>.size * 6)
+            ]
+        )
+
+        let pushConstantSize = MemoryLayout<Float>.size * 60
+
+        return ShaderModule(
+            id: id,
+            vertexEntryPoint: "directional_lit_vs",
+            fragmentEntryPoint: "directional_lit_ps",
+            vertexLayout: layout,
+            bindings: [
+                .vertex: [BindingSlot(index: 0, kind: .uniformBuffer)],
+                .fragment: [
+                    BindingSlot(index: 10, kind: .sampledTexture),
+                    BindingSlot(index: 10, kind: .sampler),
+                    BindingSlot(index: 20, kind: .sampledTexture),
+                    BindingSlot(index: 20, kind: .sampler)
+                ]
+            ],
+            pushConstantSize: pushConstantSize,
+            artifacts: artifacts
+        )
+    }
+
+    private static func makePBRForwardModule(root: URL) -> ShaderModule? {
+        let id = ShaderID("pbr_forward")
+        let dxilRoot = root.appendingPathComponent("dxil", isDirectory: true)
+        let spirvRoot = root.appendingPathComponent("spirv", isDirectory: true)
+        let metalRoot = root.appendingPathComponent("metal", isDirectory: true)
+        let artifacts = ShaderModuleArtifacts(
+            dxilVertex: ShaderLibrary.existingFile(dxilRoot.appendingPathComponent("pbr_forward_vs.dxil")),
+            dxilFragment: ShaderLibrary.existingFile(dxilRoot.appendingPathComponent("pbr_forward_ps.dxil")),
+            spirvVertex: ShaderLibrary.existingFile(spirvRoot.appendingPathComponent("pbr_forward.vert.spv")),
+            spirvFragment: ShaderLibrary.existingFile(spirvRoot.appendingPathComponent("pbr_forward.frag.spv")),
+            metalLibrary: ShaderLibrary.existingFile(metalRoot.appendingPathComponent("pbr_forward.metallib"))
+        )
+
+        if artifacts.dxilVertex == nil && artifacts.spirvVertex == nil && artifacts.metalLibrary == nil {
+            return nil
+        }
+
+        let layout = VertexLayout(
+            stride: MemoryLayout<Float>.size * 11,
+            attributes: [
+                .init(index: 0, semantic: "POSITION", format: .float3, offset: 0),
+                .init(index: 1, semantic: "NORMAL", format: .float3, offset: MemoryLayout<Float>.size * 3),
+                .init(index: 2, semantic: "TANGENT", format: .float3, offset: MemoryLayout<Float>.size * 6),
+                .init(index: 3, semantic: "TEXCOORD0", format: .float2, offset: MemoryLayout<Float>.size * 9)
+            ]
+        )
+
+        let pushConstantSize = MemoryLayout<Float>.size * 60
+
+        return ShaderModule(
+            id: id,
+            vertexEntryPoint: "pbr_forward_vs",
+            fragmentEntryPoint: "pbr_forward_ps",
+            vertexLayout: layout,
+            bindings: [
+                .vertex: [BindingSlot(index: 0, kind: .uniformBuffer)],
+                .fragment: [
+                    BindingSlot(index: 1, kind: .uniformBuffer),
+                    BindingSlot(index: 10, kind: .sampledTexture),
+                    BindingSlot(index: 10, kind: .sampler),
+                    BindingSlot(index: 11, kind: .sampledTexture),
+                    BindingSlot(index: 12, kind: .sampledTexture),
+                    BindingSlot(index: 13, kind: .sampledTexture),
+                    BindingSlot(index: 14, kind: .sampledTexture),
+                    BindingSlot(index: 20, kind: .sampledTexture),
+                    BindingSlot(index: 21, kind: .sampledTexture),
+                    BindingSlot(index: 21, kind: .sampler),
+                    BindingSlot(index: 22, kind: .sampledTexture),
+                    BindingSlot(index: 22, kind: .sampler)
+                ]
+            ],
+            pushConstantSize: pushConstantSize,
+            artifacts: artifacts
+        )
+    }
+
     private static func makeVectorAddComputeModule(root: URL) -> ComputeShaderModule? {
         let id = ShaderID("vector_add")
         let dxilRoot = root.appendingPathComponent("dxil", isDirectory: true)
@@ -284,7 +407,7 @@ public final class ShaderLibrary {
             id: id,
             entryPoint: "vector_add_cs",
             threadgroupSize: (64, 1, 1),
-            pushConstantSize: 0,
+            pushConstantSize: MemoryLayout<Float>.size * 4,
             bindings: bindings,
             artifacts: artifacts
         )
@@ -317,6 +440,68 @@ public final class ShaderLibrary {
             entryPoint: "main",
             threadgroupSize: (1, 1, 1),
             pushConstantSize: 0,
+            bindings: bindings,
+            artifacts: artifacts
+        )
+    }
+
+    private static func makeIBLPrefilterEnvComputeModule(root: URL) -> ComputeShaderModule? {
+        let id = ShaderID("ibl_prefilter_env")
+        let dxilRoot = root.appendingPathComponent("dxil", isDirectory: true)
+        let spirvRoot = root.appendingPathComponent("spirv", isDirectory: true)
+        let metalRoot = root.appendingPathComponent("metal", isDirectory: true)
+
+        let artifacts = ComputeShaderModuleArtifacts(
+            dxil: ShaderLibrary.existingFile(dxilRoot.appendingPathComponent("ibl_prefilter_env_cs.dxil")),
+            spirv: ShaderLibrary.existingFile(spirvRoot.appendingPathComponent("ibl_prefilter_env.comp.spv")),
+            metalLibrary: ShaderLibrary.existingFile(metalRoot.appendingPathComponent("ibl_prefilter_env.metallib"))
+        )
+
+        if artifacts.dxil == nil && artifacts.spirv == nil && artifacts.metalLibrary == nil {
+            return nil
+        }
+
+        let bindings: [BindingSlot] = [
+            BindingSlot(index: 0, kind: .sampledTexture),
+            BindingSlot(index: 0, kind: .sampler),
+            BindingSlot(index: 1, kind: .storageTexture)
+        ]
+
+        return ComputeShaderModule(
+            id: id,
+            entryPoint: "ibl_prefilter_env_cs",
+            threadgroupSize: (8, 8, 1),
+            pushConstantSize: MemoryLayout<Float>.size * 4,
+            bindings: bindings,
+            artifacts: artifacts
+        )
+    }
+
+    private static func makeIBLBRDFLUTComputeModule(root: URL) -> ComputeShaderModule? {
+        let id = ShaderID("ibl_brdf_lut")
+        let dxilRoot = root.appendingPathComponent("dxil", isDirectory: true)
+        let spirvRoot = root.appendingPathComponent("spirv", isDirectory: true)
+        let metalRoot = root.appendingPathComponent("metal", isDirectory: true)
+
+        let artifacts = ComputeShaderModuleArtifacts(
+            dxil: ShaderLibrary.existingFile(dxilRoot.appendingPathComponent("ibl_brdf_lut_cs.dxil")),
+            spirv: ShaderLibrary.existingFile(spirvRoot.appendingPathComponent("ibl_brdf_lut.comp.spv")),
+            metalLibrary: ShaderLibrary.existingFile(metalRoot.appendingPathComponent("ibl_brdf_lut.metallib"))
+        )
+
+        if artifacts.dxil == nil && artifacts.spirv == nil && artifacts.metalLibrary == nil {
+            return nil
+        }
+
+        let bindings: [BindingSlot] = [
+            BindingSlot(index: 0, kind: .storageTexture)
+        ]
+
+        return ComputeShaderModule(
+            id: id,
+            entryPoint: "ibl_brdf_lut_cs",
+            threadgroupSize: (16, 16, 1),
+            pushConstantSize: MemoryLayout<Float>.size * 4,
             bindings: bindings,
             artifacts: artifacts
         )
