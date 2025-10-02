@@ -257,7 +257,7 @@ jobs:
           set -euo pipefail
           # Clean brew-injected flags to avoid SwiftPM "prohibited flag(s)" warnings
           unset CFLAGS CPPFLAGS LDFLAGS LIBRARY_PATH CPATH PKG_CONFIG_PATH || true
-          swift build -Xswiftc -DHEADLESS_CI 2> >(grep -v "warning: prohibited flag(s)" >&2)
+          swift build --build-tests -Xswiftc -DHEADLESS_CI 2> >(grep -v "warning: prohibited flag(s)" >&2)
 
       - name: Run tests (core suite)
         env:
@@ -273,7 +273,7 @@ jobs:
           while [ $attempt -le $max_attempts ]; do
             echo "macOS test attempt $attempt/$max_attempts"
             # Run fast, headless-friendly tests; GPU harness runs in next step
-            if swift test --skip-build --filter SDLKitTests -Xswiftc -DHEADLESS_CI 2> >(grep -v "warning: prohibited flag(s)" >&2) | tee -a "$test_log"; then
+            if swift test --skip-build --filter SDLKitTests -Xswiftc -DHEADLESS_CI 2> >(grep -v "warning: prohibited flag(s)" >&2) | grep -v "warning: prohibited flag(s)" | tee -a "$test_log"; then
               break
             fi
             if [ $attempt -eq $max_attempts ]; then
