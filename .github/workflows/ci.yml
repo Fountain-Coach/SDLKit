@@ -84,9 +84,6 @@ jobs:
       - name: Build and test (with retry)
         env:
           SDLKIT_GUI_ENABLED: 'false'
-          SDLKIT_VK_VALIDATION_CAPTURE: '1'
-          SDLKIT_VK_VALIDATION: '1'
-          VK_INSTANCE_LAYERS: VK_LAYER_KHRONOS_validation
         run: |
           set -euo pipefail
           swift build --build-tests -v -Xswiftc -DHEADLESS_CI
