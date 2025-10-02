@@ -5,6 +5,7 @@
 #pragma once
 #include <stdint.h>
 #include <stdbool.h>
+#include <string.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -62,9 +63,9 @@ typedef struct SDLKit_Event {
   static inline void SDLKit_MaximizeWindow(SDL_Window *window) { SDL_MaximizeWindow(window); }
   static inline void SDLKit_MinimizeWindow(SDL_Window *window) { SDL_MinimizeWindow(window); }
   static inline void SDLKit_RestoreWindow(SDL_Window *window) { SDL_RestoreWindow(window); }
-  static inline int SDLKit_SetWindowFullscreen(SDL_Window *window, int enabled) { return SDL_SetWindowFullscreen(window, enabled != 0); }
-  static inline int SDLKit_SetWindowOpacity(SDL_Window *window, float opacity) { return SDL_SetWindowOpacity(window, opacity); }
-  static inline int SDLKit_SetWindowAlwaysOnTop(SDL_Window *window, int enabled) { return SDL_SetWindowAlwaysOnTop(window, enabled != 0); }
+  static inline int SDLKit_SetWindowFullscreen(SDL_Window *window, int enabled) { return SDL_SetWindowFullscreen(window, enabled != 0) ? 0 : -1; }
+  static inline int SDLKit_SetWindowOpacity(SDL_Window *window, float opacity) { return SDL_SetWindowOpacity(window, opacity) ? 0 : -1; }
+  static inline int SDLKit_SetWindowAlwaysOnTop(SDL_Window *window, int enabled) { return SDL_SetWindowAlwaysOnTop(window, enabled != 0) ? 0 : -1; }
   static inline void SDLKit_CenterWindow(SDL_Window *window) { SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED); }
 
   // Clipboard
@@ -74,7 +75,10 @@ typedef struct SDLKit_Event {
 
   // Input state
   static inline void SDLKit_GetMouseState(int *x, int *y, unsigned int *buttons) {
-    Uint32 b = SDL_GetMouseState(x, y);
+    float fx = 0.0f, fy = 0.0f;
+    Uint32 b = SDL_GetMouseState(&fx, &fy);
+    if (x) *x = (int)fx;
+    if (y) *y = (int)fy;
     if (buttons) *buttons = (unsigned int)b;
   }
   static inline int SDLKit_GetModMask(void) {
@@ -82,10 +86,30 @@ typedef struct SDLKit_Event {
   }
 
   // Displays (best-effort wrappers; API may evolve across SDL3 releases)
-  static inline int SDLKit_GetNumVideoDisplays(void) { return SDL_GetNumVideoDisplays(); }
-  static inline const char *SDLKit_GetDisplayName(int index) { return SDL_GetDisplayName(index); }
+  static inline int SDLKit_GetNumVideoDisplays(void) {
+    int count = 0;
+    SDL_DisplayID *ids = SDL_GetDisplays(&count);
+    if (ids) { SDL_free(ids); }
+    return count;
+  }
+  static inline const char *SDLKit_GetDisplayName(int index) {
+    int count = 0;
+    SDL_DisplayID *ids = SDL_GetDisplays(&count);
+    if (!ids || index < 0 || index >= count) { if (ids) SDL_free(ids); return NULL; }
+    SDL_DisplayID id = ids[index];
+    const char *name = SDL_GetDisplayName(id);
+    SDL_free(ids);
+    return name;
+  }
   static inline int SDLKit_GetDisplayBounds(int index, int *x, int *y, int *w, int *h) {
-    SDL_Rect r; if (SDL_GetDisplayBounds(index, &r) != 0) return -1; if (x) *x = r.x; if (y) *y = r.y; if (w) *w = r.w; if (h) *h = r.h; return 0;
+    int count = 0;
+    SDL_DisplayID *ids = SDL_GetDisplays(&count);
+    if (!ids || index < 0 || index >= count) { if (ids) SDL_free(ids); return -1; }
+    SDL_DisplayID id = ids[index];
+    SDL_Rect r; int rc = SDL_GetDisplayBounds(id, &r) ? 0 : -1;
+    if (rc == 0) { if (x) *x = r.x; if (y) *y = r.y; if (w) *w = r.w; if (h) *h = r.h; }
+    SDL_free(ids);
+    return rc;
   }
   // Renderer creation API evolves; accept a flags arg but ignore when not needed.
   static inline SDL_Renderer *SDLKit_CreateRenderer(SDL_Window *window, uint32_t flags) {
@@ -94,34 +118,34 @@ typedef struct SDLKit_Event {
     return SDL_CreateRenderer(window, NULL);
   }
   static inline int SDLKit_SetRenderDrawColor(SDL_Renderer *renderer, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
-    return SDL_SetRenderDrawColor(renderer, r, g, b, a);
+    return SDL_SetRenderDrawColor(renderer, r, g, b, a) ? 0 : -1;
   }
-  static inline int SDLKit_RenderClear(SDL_Renderer *renderer) { return SDL_RenderClear(renderer); }
+  static inline int SDLKit_RenderClear(SDL_Renderer *renderer) { return SDL_RenderClear(renderer) ? 0 : -1; }
   static inline int SDLKit_RenderFillRect(SDL_Renderer *renderer, const struct SDL_FRect *rect) {
-    return SDL_RenderFillRect(renderer, rect);
+    return SDL_RenderFillRect(renderer, rect) ? 0 : -1;
   }
   static inline int SDLKit_RenderFillRects(SDL_Renderer *renderer, const struct SDL_FRect *rects, int count) {
-    return SDL_RenderFillRects(renderer, rects, count);
+    return SDL_RenderFillRects(renderer, rects, count) ? 0 : -1;
   }
   static inline int SDLKit_RenderRects(SDL_Renderer *renderer, const struct SDL_FRect *rects, int count) {
-    return SDL_RenderRects(renderer, rects, count);
+    return SDL_RenderRects(renderer, rects, count) ? 0 : -1;
   }
   static inline int SDLKit_RenderPoints(SDL_Renderer *renderer, const struct SDL_FPoint *points, int count) {
-    return SDL_RenderPoints(renderer, points, count);
+    return SDL_RenderPoints(renderer, points, count) ? 0 : -1;
   }
   static inline int SDLKit_RenderLine(SDL_Renderer *renderer, float x1, float y1, float x2, float y2) {
-    return SDL_RenderLine(renderer, x1, y1, x2, y2);
+    return SDL_RenderLine(renderer, x1, y1, x2, y2) ? 0 : -1;
   }
   static inline void SDLKit_RenderPresent(SDL_Renderer *renderer) { SDL_RenderPresent(renderer); }
   // Render state helpers
   static inline void SDLKit_GetRenderOutputSize(SDL_Renderer *renderer, int *w, int *h) { SDL_GetRenderOutputSize(renderer, w, h); }
   static inline void SDLKit_GetRenderScale(SDL_Renderer *renderer, float *sx, float *sy) { SDL_GetRenderScale(renderer, sx, sy); }
-  static inline int SDLKit_SetRenderScale(SDL_Renderer *renderer, float sx, float sy) { return SDL_SetRenderScale(renderer, sx, sy); }
+  static inline int SDLKit_SetRenderScale(SDL_Renderer *renderer, float sx, float sy) { return SDL_SetRenderScale(renderer, sx, sy) ? 0 : -1; }
   static inline void SDLKit_GetRenderDrawColor(SDL_Renderer *renderer, uint8_t *r, uint8_t *g, uint8_t *b, uint8_t *a) { SDL_GetRenderDrawColor(renderer, r, g, b, a); }
-  static inline int SDLKit_SetRenderViewport(SDL_Renderer *renderer, int x, int y, int w, int h) { SDL_Rect r = { x, y, w, h }; return SDL_SetRenderViewport(renderer, &r); }
+  static inline int SDLKit_SetRenderViewport(SDL_Renderer *renderer, int x, int y, int w, int h) { SDL_Rect r = { x, y, w, h }; return SDL_SetRenderViewport(renderer, &r) ? 0 : -1; }
   static inline void SDLKit_GetRenderViewport(SDL_Renderer *renderer, int *x, int *y, int *w, int *h) { SDL_Rect r; SDL_GetRenderViewport(renderer, &r); if (x) *x = r.x; if (y) *y = r.y; if (w) *w = r.w; if (h) *h = r.h; }
-  static inline int SDLKit_SetRenderClipRect(SDL_Renderer *renderer, int x, int y, int w, int h) { SDL_Rect r = { x, y, w, h }; return SDL_SetRenderClipRect(renderer, &r); }
-  static inline int SDLKit_DisableRenderClipRect(SDL_Renderer *renderer) { return SDL_SetRenderClipRect(renderer, NULL); }
+  static inline int SDLKit_SetRenderClipRect(SDL_Renderer *renderer, int x, int y, int w, int h) { SDL_Rect r = { x, y, w, h }; return SDL_SetRenderClipRect(renderer, &r) ? 0 : -1; }
+  static inline int SDLKit_DisableRenderClipRect(SDL_Renderer *renderer) { return SDL_SetRenderClipRect(renderer, NULL) ? 0 : -1; }
   static inline void SDLKit_GetRenderClipRect(SDL_Renderer *renderer, int *x, int *y, int *w, int *h) { SDL_Rect r; SDL_GetRenderClipRect(renderer, &r); if (x) *x = r.x; if (y) *y = r.y; if (w) *w = r.w; if (h) *h = r.h; }
 
   static inline void *SDLKit_MetalLayerForWindow(SDL_Window *window) {
@@ -164,7 +188,12 @@ typedef struct SDLKit_Event {
   // *names to an array of const char* owned by SDL. Callers should not free or modify.
   static inline int SDLKit_Vulkan_GetInstanceExtensions(SDL_Window *window, unsigned int *pCount, const char *const **names) {
     #if __has_include(<SDL3/SDL_vulkan.h>)
-      return SDL_Vulkan_GetInstanceExtensions(window, pCount, names);
+      (void)window;
+      Uint32 cnt = 0;
+      const char * const *exts = SDL_Vulkan_GetInstanceExtensions(&cnt);
+      if (pCount) { *pCount = (unsigned int)cnt; }
+      if (names) { *names = exts; }
+      return exts != NULL ? 1 : 0;
     #else
       if (pCount) { *pCount = 0; }
       if (names) { *names = NULL; }
@@ -183,24 +212,28 @@ typedef struct SDLKit_Event {
         out->type = SDLKIT_EVENT_WINDOW_CLOSED; break;
       case SDL_EVENT_KEY_DOWN:
         out->type = SDLKIT_EVENT_KEY_DOWN;
-        out->keycode = (int32_t)ev->key.keysym.sym; break;
+        out->keycode = (int32_t)ev->key.key; break;
       case SDL_EVENT_KEY_UP:
         out->type = SDLKIT_EVENT_KEY_UP;
-        out->keycode = (int32_t)ev->key.keysym.sym; break;
+        out->keycode = (int32_t)ev->key.key; break;
       case SDL_EVENT_MOUSE_MOTION:
         out->type = SDLKIT_EVENT_MOUSE_MOVE;
         out->x = (int32_t)ev->motion.x;
         out->y = (int32_t)ev->motion.y; break;
       case SDL_EVENT_MOUSE_BUTTON_DOWN:
         out->type = SDLKIT_EVENT_MOUSE_DOWN;
-        out->x = (int32_t)ev->button.x;
-        out->y = (int32_t)ev->button.y;
-        out->button = (int32_t)ev->button.button; break;
+        {
+          float fx = 0.0f, fy = 0.0f; SDL_GetMouseState(&fx, &fy);
+          out->x = (int32_t)fx; out->y = (int32_t)fy;
+          out->button = (int32_t)ev->button.button; break;
+        }
       case SDL_EVENT_MOUSE_BUTTON_UP:
         out->type = SDLKIT_EVENT_MOUSE_UP;
-        out->x = (int32_t)ev->button.x;
-        out->y = (int32_t)ev->button.y;
-        out->button = (int32_t)ev->button.button; break;
+        {
+          float fx = 0.0f, fy = 0.0f; SDL_GetMouseState(&fx, &fy);
+          out->x = (int32_t)fx; out->y = (int32_t)fy;
+          out->button = (int32_t)ev->button.button; break;
+        }
       default:
         break;
     }
@@ -232,23 +265,44 @@ typedef struct SDLKit_Event {
     }
     static inline void SDLKit_DestroySurface(SDL_Surface *surface) { SDL_DestroySurface(surface); }
     static inline void SDLKit_DestroyTexture(SDL_Texture *tex) { SDL_DestroyTexture(tex); }
-    static inline void SDLKit_GetTextureSize(SDL_Texture *tex, int *w, int *h) { SDL_GetTextureSize(tex, w, h); }
+    static inline void SDLKit_GetTextureSize(SDL_Texture *tex, int *w, int *h) {
+      float fw = 0.0f, fh = 0.0f; SDL_GetTextureSize(tex, &fw, &fh); if (w) *w = (int)fw; if (h) *h = (int)fh;
+    }
   static inline int SDLKit_RenderTexture(SDL_Renderer *renderer, SDL_Texture *tex, const SDL_FRect *src, const SDL_FRect *dst) {
-    return SDL_RenderTexture(renderer, tex, src, dst);
+    return SDL_RenderTexture(renderer, tex, src, dst) ? 0 : -1;
   }
   static inline int SDLKit_RenderTextureRotated(SDL_Renderer *renderer, SDL_Texture *tex, const SDL_FRect *src, const SDL_FRect *dst, double angle, int hasCenter, float cx, float cy) {
     SDL_FPoint center = { cx, cy };
-    return SDL_RenderTextureRotated(renderer, tex, src, dst, angle, hasCenter ? &center : NULL);
+    return SDL_RenderTextureRotated(renderer, tex, src, dst, angle, hasCenter ? &center : NULL, SDL_FLIP_NONE) ? 0 : -1;
   }
   static inline SDL_Surface *SDLKit_LoadBMP(const char *path) { return SDL_LoadBMP(path); }
   static inline SDL_Surface *SDLKit_CreateSurfaceFrom(int width, int height, unsigned int format, void *pixels, int pitch) {
     return SDL_CreateSurfaceFrom(width, height, format, pixels, pitch);
   }
-  static inline SDL_RWops *SDLKit_RWFromFile(const char *file, const char *mode) { return SDL_RWFromFile(file, mode); }
+  static inline SDL_IOStream *SDLKit_RWFromFile(const char *file, const char *mode) { return SDL_IOFromFile(file, mode); }
   static inline unsigned int SDLKit_PixelFormat_ABGR8888(void) { return SDL_PIXELFORMAT_ABGR8888; }
   static inline int SDLKit_RenderReadPixels(SDL_Renderer *renderer, int x, int y, int w, int h, void *pixels, int pitch) {
     SDL_Rect r = { x, y, w, h };
-    return SDL_RenderReadPixels(renderer, &r, SDL_PIXELFORMAT_ABGR8888, pixels, pitch);
+    SDL_Surface *surf = SDL_RenderReadPixels(renderer, &r);
+    if (!surf) { return -1; }
+    SDL_Surface *conv = NULL;
+    if (surf->format != SDL_PIXELFORMAT_ABGR8888) {
+      conv = SDL_ConvertSurface(surf, SDL_PIXELFORMAT_ABGR8888);
+      if (!conv) { SDL_DestroySurface(surf); return -1; }
+    }
+    SDL_Surface *src = conv ? conv : surf;
+    // Copy row-by-row into destination buffer
+    const int src_pitch = src->pitch;
+    const unsigned char *src_pixels = (const unsigned char *)src->pixels;
+    unsigned char *dst = (unsigned char *)pixels;
+    for (int row = 0; row < h; ++row) {
+      const unsigned char *srow = src_pixels + row * src_pitch;
+      unsigned char *drow = dst + row * pitch;
+      memcpy(drow, srow, (size_t)(w * 4));
+    }
+    if (conv) SDL_DestroySurface(conv);
+    SDL_DestroySurface(surf);
+    return 0;
   }
   #else
     static inline int SDLKit_TTF_Available(void) { return 0; }
@@ -340,8 +394,8 @@ typedef struct SDLKit_Event {
   int SDLKit_RenderTextureRotated(struct SDL_Renderer *renderer, struct SDL_Texture *tex, const struct SDL_FRect *src, const struct SDL_FRect *dst, double angle, int hasCenter, float cx, float cy);
   struct SDL_Surface *SDLKit_LoadBMP(const char *path);
   struct SDL_Surface *SDLKit_CreateSurfaceFrom(int width, int height, unsigned int format, void *pixels, int pitch);
-  struct SDL_RWops;
-  struct SDL_RWops *SDLKit_RWFromFile(const char *file, const char *mode);
+  struct SDL_IOStream;
+  struct SDL_IOStream *SDLKit_RWFromFile(const char *file, const char *mode);
   unsigned int SDLKit_PixelFormat_ABGR8888(void);
   int SDLKit_RenderReadPixels(struct SDL_Renderer *renderer, int x, int y, int w, int h, void *pixels, int pitch);
   void *SDLKit_MetalLayerForWindow(SDL_Window *window);

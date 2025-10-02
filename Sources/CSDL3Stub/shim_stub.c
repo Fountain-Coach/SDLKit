@@ -316,7 +316,7 @@ struct SDL_Surface *SDLKit_CreateSurfaceFrom(int width, int height, unsigned int
     return NULL;
 }
 
-struct SDL_RWops *SDLKit_RWFromFile(const char *file, const char *mode) {
+struct SDL_IOStream *SDLKit_RWFromFile(const char *file, const char *mode) {
     (void)file; (void)mode;
     return NULL;
 }
