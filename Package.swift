@@ -10,6 +10,10 @@ let isLinux = false
 
 let env = ProcessInfo.processInfo.environment
 let useYams = (env["SDLKIT_NO_YAMS"] ?? "0") != "1"
+let guiEnabled: Bool = {
+    let raw = (env["SDLKIT_GUI_ENABLED"] ?? "true").lowercased()
+    return !(raw == "0" || raw == "false")
+}()
 
 func pkgConfigExists(_ package: String) -> Bool {
     let process = Process()
@@ -136,10 +140,11 @@ let package = Package(
             .target(
                 name: "SDLKit",
                 dependencies: {
-                    var deps: [Target.Dependency] = [
-                        "CSDL3",
-                        .target(name: "CSDL3IMAGE", condition: .when(platforms: [.macOS, .linux]))
-                    ]
+                    var deps: [Target.Dependency] = [ "CSDL3" ]
+                    // Only include SDL_image shims when GUI is enabled
+                    if guiEnabled {
+                        deps.append(.target(name: "CSDL3IMAGE", condition: .when(platforms: [.macOS, .linux])))
+                    }
                     if isLinux {
                         deps.append(.target(name: "CVulkan", condition: .when(platforms: [.linux])))
                     }
@@ -159,9 +164,6 @@ let package = Package(
                     if let inc = env["SDL3_INCLUDE_DIR"], !inc.isEmpty {
                         flags.append(.unsafeFlags(["-I\(inc)"]))
                     }
-                    // Fallback common include roots
-                    flags.append(.unsafeFlags(["-I/usr/local/include"]))
-                    flags.append(.unsafeFlags(["-I/usr/include"]))
                     return flags
                 }(),
                 swiftSettings: useYams ? [ .define("OPENAPI_USE_YAMS") ] : [],
@@ -170,8 +172,6 @@ let package = Package(
                     if let lib = env["SDL3_LIB_DIR"], !lib.isEmpty {
                         flags.append(.unsafeFlags(["-L\(lib)"]))
                     }
-                    // Fallback common lib roots
-                    flags.append(.unsafeFlags(["-L/usr/local/lib"]))
                     return flags
                 }(),
                 plugins: [

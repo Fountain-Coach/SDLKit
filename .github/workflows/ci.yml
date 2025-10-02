@@ -255,6 +255,8 @@ jobs:
           SDLKIT_GUI_ENABLED: 'false'
         run: |
           set -euo pipefail
+          # Clean brew-injected flags to avoid SwiftPM "prohibited flag(s)" warnings
+          unset CFLAGS CPPFLAGS LDFLAGS LIBRARY_PATH CPATH PKG_CONFIG_PATH || true
           swift build -v -Xswiftc -DHEADLESS_CI
 
       - name: Run tests (core suite)
@@ -262,6 +264,7 @@ jobs:
           SDLKIT_GUI_ENABLED: 'false'
         run: |
           set -euo pipefail
+          unset CFLAGS CPPFLAGS LDFLAGS LIBRARY_PATH CPATH PKG_CONFIG_PATH || true
           attempt=1
           max_attempts=3
           backoff=5
