@@ -244,10 +244,10 @@ let package = Package(
             .executableTarget(
                 name: "SDLKitDemo",
                 dependencies: {
-                    var deps: [Target.Dependency] = [
-                        "SDLKit",
-                        .target(name: "SDLKitTTF", condition: .when(platforms: [.macOS, .linux]))
-                    ]
+                    var deps: [Target.Dependency] = [ "SDLKit" ]
+                    if guiEnabled {
+                        deps.append(.target(name: "SDLKitTTF", condition: .when(platforms: [.macOS, .linux])))
+                    }
                     if isLinux {
                         deps.append(.target(name: "VulkanMinimal", condition: .when(platforms: [.linux])))
                     }
