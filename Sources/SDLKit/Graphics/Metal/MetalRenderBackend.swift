@@ -46,6 +46,7 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
 
     private var buffers: [BufferHandle: BufferResource] = [:]
     private var textures: [TextureHandle: MTLTexture] = [:]
+    private var samplers: [SamplerHandle: MTLSamplerState] = [:]
     private var pipelines: [PipelineHandle: PipelineResource] = [:]
     private var computePipelines: [ComputePipelineHandle: ComputePipelineResource] = [:]
     private var meshes: [MeshHandle: MeshResource] = [:]
@@ -264,12 +265,37 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
         return handle
     }
 
+    public func createSampler(descriptor: SamplerDescriptor) throws -> SamplerHandle {
+        let samplerDescriptor = MTLSamplerDescriptor()
+        samplerDescriptor.label = descriptor.label
+        samplerDescriptor.minFilter = convertFilter(descriptor.minFilter)
+        samplerDescriptor.magFilter = convertFilter(descriptor.magFilter)
+        samplerDescriptor.mipFilter = convertMipFilter(descriptor.mipFilter)
+        samplerDescriptor.maxAnisotropy = descriptor.maxAnisotropy
+        samplerDescriptor.lodMinClamp = descriptor.lodMinClamp
+        samplerDescriptor.lodMaxClamp = descriptor.lodMaxClamp
+        samplerDescriptor.sAddressMode = convertAddressMode(descriptor.addressModeU)
+        samplerDescriptor.tAddressMode = convertAddressMode(descriptor.addressModeV)
+        samplerDescriptor.rAddressMode = convertAddressMode(descriptor.addressModeW)
+
+        guard let sampler = device.makeSamplerState(descriptor: samplerDescriptor) else {
+            throw AgentError.internalError("Failed to create Metal sampler state")
+        }
+
+        let handle = SamplerHandle()
+        samplers[handle] = sampler
+        SDLLogger.debug("SDLKit.Graphics.Metal", "createSampler id=\(handle.rawValue) label=\(descriptor.label ?? "<nil>")")
+        return handle
+    }
+
     public func destroy(_ handle: ResourceHandle) {
         switch handle {
         case .buffer(let h):
             buffers.removeValue(forKey: h)
         case .texture(let h):
             textures.removeValue(forKey: h)
+        case .sampler(let h):
+            samplers.removeValue(forKey: h)
         case .pipeline(let h):
             pipelines.removeValue(forKey: h)
         case .computePipeline(let h):
@@ -506,22 +532,44 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
         for slot in resource.module.bindings {
             switch slot.kind {
             case .uniformBuffer, .storageBuffer:
-                guard let handle: BufferHandle = bindings.value(for: slot.index, as: BufferHandle.self),
-                      let bufferResource = buffers[handle] else {
+                guard let entry = bindings.resource(at: slot.index) else {
                     encoder.endEncoding()
                     throw AgentError.invalidArgument("Missing buffer binding for compute slot \(slot.index)")
                 }
-                encoder.setBuffer(bufferResource.buffer, offset: 0, index: slot.index)
+                switch entry {
+                case .buffer(let handle):
+                    guard let bufferResource = buffers[handle] else {
+                        encoder.endEncoding()
+                        throw AgentError.invalidArgument("Unknown buffer handle for compute slot \(slot.index)")
+                    }
+                    encoder.setBuffer(bufferResource.buffer, offset: 0, index: slot.index)
+                case .texture:
+                    encoder.endEncoding()
+                    throw AgentError.invalidArgument("Texture bound to buffer slot \(slot.index) in compute dispatch")
+                }
             case .sampledTexture, .storageTexture:
-                guard let handle: TextureHandle = bindings.value(for: slot.index, as: TextureHandle.self),
-                      let texture = textures[handle] else {
+                guard let entry = bindings.resource(at: slot.index) else {
                     encoder.endEncoding()
                     throw AgentError.invalidArgument("Missing texture binding for compute slot \(slot.index)")
                 }
-                encoder.setTexture(texture, index: slot.index)
+                switch entry {
+                case .texture(let handle):
+                    guard let texture = textures[handle] else {
+                        encoder.endEncoding()
+                        throw AgentError.invalidArgument("Unknown texture handle for compute slot \(slot.index)")
+                    }
+                    encoder.setTexture(texture, index: slot.index)
+                case .buffer:
+                    encoder.endEncoding()
+                    throw AgentError.invalidArgument("Buffer bound to texture slot \(slot.index) in compute dispatch")
+                }
             case .sampler:
-                // Samplers are not yet modeled as resources in SDLKit; ignore silently for now.
-                break
+                guard let samplerHandle = bindings.sampler(at: slot.index),
+                      let sampler = samplers[samplerHandle] else {
+                    encoder.endEncoding()
+                    throw AgentError.invalidArgument("Missing sampler binding for compute slot \(slot.index)")
+                }
+                encoder.setSamplerState(sampler, index: slot.index)
             }
         }
 
@@ -577,48 +625,68 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
         for slot in slots {
             switch slot.kind {
             case .uniformBuffer:
-                guard let handle: BufferHandle = bindings.value(for: slot.index, as: BufferHandle.self) else { continue }
-                guard let bufferResource = buffers[handle] else {
-                    throw AgentError.invalidArgument("Missing buffer resource for slot \(slot.index)")
-                }
-                let index = metalBufferIndex(for: slot)
-                switch stage {
-                case .vertex:
-                    encoder.setVertexBuffer(bufferResource.buffer, offset: 0, index: index)
-                case .fragment:
-                    encoder.setFragmentBuffer(bufferResource.buffer, offset: 0, index: index)
-                default:
-                    continue
+                guard let entry = bindings.resource(at: slot.index) else { continue }
+                switch entry {
+                case .buffer(let handle):
+                    guard let bufferResource = buffers[handle] else {
+                        throw AgentError.invalidArgument("Missing buffer resource for slot \(slot.index)")
+                    }
+                    let index = metalBufferIndex(for: slot)
+                    switch stage {
+                    case .vertex:
+                        encoder.setVertexBuffer(bufferResource.buffer, offset: 0, index: index)
+                    case .fragment:
+                        encoder.setFragmentBuffer(bufferResource.buffer, offset: 0, index: index)
+                    default:
+                        continue
+                    }
+                case .texture:
+                    throw AgentError.invalidArgument("Texture bound to buffer slot \(slot.index) in draw call")
                 }
             case .storageBuffer:
-                guard let handle: BufferHandle = bindings.value(for: slot.index, as: BufferHandle.self),
-                      let bufferResource = buffers[handle] else {
+                guard let entry = bindings.resource(at: slot.index) else {
                     throw AgentError.invalidArgument("Missing buffer binding for slot \(slot.index)")
                 }
-                let index = metalBufferIndex(for: slot)
-                switch stage {
-                case .vertex:
-                    encoder.setVertexBuffer(bufferResource.buffer, offset: 0, index: index)
-                case .fragment:
-                    encoder.setFragmentBuffer(bufferResource.buffer, offset: 0, index: index)
-                default:
-                    continue
+                switch entry {
+                case .buffer(let handle):
+                    guard let bufferResource = buffers[handle] else {
+                        throw AgentError.invalidArgument("Unknown buffer handle for slot \(slot.index)")
+                    }
+                    let index = metalBufferIndex(for: slot)
+                    switch stage {
+                    case .vertex:
+                        encoder.setVertexBuffer(bufferResource.buffer, offset: 0, index: index)
+                    case .fragment:
+                        encoder.setFragmentBuffer(bufferResource.buffer, offset: 0, index: index)
+                    default:
+                        continue
+                    }
+                case .texture:
+                    throw AgentError.invalidArgument("Texture bound to buffer slot \(slot.index) in draw call")
                 }
             case .sampledTexture, .storageTexture:
-                guard let handle: TextureHandle = bindings.value(for: slot.index, as: TextureHandle.self),
-                      let texture = textures[handle] else {
+                guard let entry = bindings.resource(at: slot.index) else {
                     throw AgentError.invalidArgument("Missing texture binding for slot \(slot.index)")
                 }
-                switch stage {
-                case .vertex:
-                    encoder.setVertexTexture(texture, index: slot.index)
-                case .fragment:
-                    encoder.setFragmentTexture(texture, index: slot.index)
-                default:
-                    continue
+                switch entry {
+                case .texture(let handle):
+                    guard let texture = textures[handle] else {
+                        throw AgentError.invalidArgument("Unknown texture handle for slot \(slot.index)")
+                    }
+                    switch stage {
+                    case .vertex:
+                        encoder.setVertexTexture(texture, index: slot.index)
+                    case .fragment:
+                        encoder.setFragmentTexture(texture, index: slot.index)
+                    default:
+                        continue
+                    }
+                case .buffer:
+                    throw AgentError.invalidArgument("Buffer bound to texture slot \(slot.index) in draw call")
                 }
             case .sampler:
-                guard let sampler = bindings.value(for: slot.index, as: MTLSamplerState.self) else {
+                guard let samplerHandle = bindings.sampler(at: slot.index),
+                      let sampler = samplers[samplerHandle] else {
                     throw AgentError.invalidArgument("Missing sampler binding for slot \(slot.index)")
                 }
                 switch stage {
@@ -825,6 +893,37 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
             return [.renderTarget]
         case .depthStencil:
             return [.renderTarget]
+        }
+    }
+
+    private func convertFilter(_ filter: SamplerMinMagFilter) -> MTLSamplerMinMagFilter {
+        switch filter {
+        case .nearest:
+            return .nearest
+        case .linear:
+            return .linear
+        }
+    }
+
+    private func convertMipFilter(_ filter: SamplerMipFilter) -> MTLSamplerMipFilter {
+        switch filter {
+        case .notMipmapped:
+            return .notMipmapped
+        case .nearest:
+            return .nearest
+        case .linear:
+            return .linear
+        }
+    }
+
+    private func convertAddressMode(_ mode: SamplerAddressMode) -> MTLSamplerAddressMode {
+        switch mode {
+        case .clampToEdge:
+            return .clampToEdge
+        case .repeatTexture:
+            return .repeat
+        case .mirrorRepeat:
+            return .mirrorRepeat
         }
     }
 

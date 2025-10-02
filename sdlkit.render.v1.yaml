@@ -704,6 +704,13 @@ components:
           type: string
           pattern: '^0x[0-9A-Fa-f]{1,16}$'
       required: [id]
+    SamplerHandle:
+      type: object
+      properties:
+        id:
+          type: string
+          pattern: '^0x[0-9A-Fa-f]{1,16}$'
+      required: [id]
     PipelineHandle:
       type: object
       properties:
@@ -800,6 +807,7 @@ components:
           oneOf:
             - $ref: '#/components/schemas/BufferHandle'
             - $ref: '#/components/schemas/TextureHandle'
+            - $ref: '#/components/schemas/SamplerHandle'
         array_index: { type: integer, minimum: 0, default: 0 }
       required: [slot, kind, handle]
     BindingSet:
@@ -810,13 +818,13 @@ components:
           items: { $ref: '#/components/schemas/BindingResource' }
         samplers:
           type: array
-          description: Optional sampler descriptors referenced by binding slots.
+          description: Sampler handles associated with specific binding slots.
           items:
             type: object
             properties:
               slot: { type: integer, minimum: 0 }
-              descriptor: { type: object }
-            required: [slot, descriptor]
+              handle: { $ref: '#/components/schemas/SamplerHandle' }
+            required: [slot, handle]
       required: [resources]
     GraphicsPipelineDescriptor:
       type: object

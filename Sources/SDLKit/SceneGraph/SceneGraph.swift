@@ -195,7 +195,7 @@ public enum SceneGraphRenderer {
             node.mesh = mesh
             var bindings = BindingSet()
             if let textureHandle = material.params.texture {
-                bindings.setValue(textureHandle, for: 10) // fragment texture slot 0
+                bindings.setTexture(textureHandle, at: 10) // fragment texture slot 0
             }
             let mvp = node.worldTransform * vp
             // Determine light direction preference: material overrides scene

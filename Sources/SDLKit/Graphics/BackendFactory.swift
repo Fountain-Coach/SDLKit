@@ -59,6 +59,7 @@ final class StubRenderBackendCore {
     private(set) var currentSize: (width: Int, height: Int)
     private var buffers: [BufferHandle: BufferResource] = [:]
     private var textures: [TextureHandle: TextureResource] = [:]
+    private var samplers: [SamplerHandle: SamplerDescriptor] = [:]
     private var pipelines: [PipelineHandle: PipelineResource] = [:]
     private var computePipelines: [ComputePipelineHandle: ComputePipelineResource] = [:]
     private var meshes: [MeshHandle: MeshResource] = [:]
@@ -161,12 +162,21 @@ final class StubRenderBackendCore {
         return handle
     }
 
+    func createSampler(descriptor: SamplerDescriptor) -> SamplerHandle {
+        let handle = SamplerHandle()
+        samplers[handle] = descriptor
+        SDLLogger.debug("SDLKit.Graphics", "createSampler id=\(handle.rawValue) label=\(descriptor.label ?? "<nil>")")
+        return handle
+    }
+
     func destroy(_ handle: ResourceHandle) {
         switch handle {
         case .buffer(let h):
             buffers.removeValue(forKey: h)
         case .texture(let h):
             textures.removeValue(forKey: h)
+        case .sampler(let h):
+            samplers.removeValue(forKey: h)
         case .pipeline(let h):
             pipelines.removeValue(forKey: h)
         case .computePipeline(let h):
@@ -244,6 +254,7 @@ public class StubRenderBackend: RenderBackend {
     public func waitGPU() throws { core.waitGPU() }
     public func createBuffer(bytes: UnsafeRawPointer?, length: Int, usage: BufferUsage) throws -> BufferHandle { core.createBuffer(bytes: bytes, length: length, usage: usage) }
     public func createTexture(descriptor: TextureDescriptor, initialData: TextureInitialData?) throws -> TextureHandle { core.createTexture(descriptor: descriptor, initialData: initialData) }
+    public func createSampler(descriptor: SamplerDescriptor) throws -> SamplerHandle { core.createSampler(descriptor: descriptor) }
     public func destroy(_ handle: ResourceHandle) { core.destroy(handle) }
     public func makePipeline(_ desc: GraphicsPipelineDescriptor) throws -> PipelineHandle { core.makePipeline(desc) }
     public func draw(mesh: MeshHandle, pipeline: PipelineHandle, bindings: BindingSet, transform: float4x4) throws { try core.draw(mesh: mesh, pipeline: pipeline, bindings: bindings, transform: transform) }

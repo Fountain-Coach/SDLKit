@@ -46,6 +46,7 @@ public protocol RenderBackend {
     // Resources
     func createBuffer(bytes: UnsafeRawPointer?, length: Int, usage: BufferUsage) throws -> BufferHandle
     func createTexture(descriptor: TextureDescriptor, initialData: TextureInitialData?) throws -> TextureHandle
+    func createSampler(descriptor: SamplerDescriptor) throws -> SamplerHandle
     func destroy(_ handle: ResourceHandle)
 
     // Pipelines (graphics)

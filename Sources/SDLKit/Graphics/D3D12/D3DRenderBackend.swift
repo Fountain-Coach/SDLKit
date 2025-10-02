@@ -27,6 +27,7 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
         let pipelineState: UnsafeMutablePointer<ID3D12PipelineState>
         let vertexStride: Int
         let fragmentTextureParameterIndices: [Int: Int]
+        let samplerParameterIndices: [Int: Int]
     }
 
     private struct MeshResource {
@@ -53,6 +54,13 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
         let cpuHandle: D3D12_CPU_DESCRIPTOR_HANDLE
         let gpuHandle: D3D12_GPU_DESCRIPTOR_HANDLE
         var state: D3D12_RESOURCE_STATES
+    }
+
+    private struct SamplerResource {
+        let descriptor: SamplerDescriptor
+        let descriptorIndex: UINT
+        let cpuHandle: D3D12_CPU_DESCRIPTOR_HANDLE
+        let gpuHandle: D3D12_GPU_DESCRIPTOR_HANDLE
     }
 
     private struct FrameResources {
@@ -98,6 +106,7 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
     private var computePipelines: [ComputePipelineHandle: ComputePipelineResource] = [:]
     private var meshes: [MeshHandle: MeshResource] = [:]
     private var textures: [TextureHandle: TextureResource] = [:]
+    private var samplers: [SamplerHandle: SamplerResource] = [:]
 
     private var builtinPipeline: PipelineHandle?
     private var builtinVertexBuffer: BufferHandle?
@@ -110,6 +119,11 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
     private var nextSrvDescriptorIndex: UINT = 0
     private var fallbackTextureHandle: TextureHandle?
     private let maxSrvDescriptors: UINT = 256
+    private var samplerHeap: UnsafeMutablePointer<ID3D12DescriptorHeap>?
+    private var samplerDescriptorSize: UINT = 0
+    private var nextSamplerDescriptorIndex: UINT = 0
+    private var freeSamplerDescriptorIndices: [UINT] = []
+    private let maxSamplerDescriptors: UINT = 64
 
     // Capture state
     private var captureRequested: Bool = false
@@ -514,6 +528,46 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
         return handle
     }
 
+    public func createSampler(descriptor: SamplerDescriptor) throws -> SamplerHandle {
+        guard let device else {
+            throw AgentError.internalError("D3D12 device unavailable for sampler creation")
+        }
+        try ensureSamplerHeap()
+        guard let samplerHeap else {
+            throw AgentError.internalError("D3D12 sampler descriptor heap unavailable")
+        }
+
+        let descriptorIndex = try allocateSamplerDescriptorIndex()
+        var cpuHandle = samplerHeap.pointee.lpVtbl.pointee.GetCPUDescriptorHandleForHeapStart(samplerHeap)
+        var gpuHandle = samplerHeap.pointee.lpVtbl.pointee.GetGPUDescriptorHandleForHeapStart(samplerHeap)
+        cpuHandle.ptr += UINT64(descriptorIndex) * UINT64(samplerDescriptorSize)
+        gpuHandle.ptr += UINT64(descriptorIndex) * UINT64(samplerDescriptorSize)
+
+        var samplerDesc = D3D12_SAMPLER_DESC()
+        samplerDesc.Filter = convertSamplerFilter(descriptor: descriptor)
+        samplerDesc.AddressU = convertSamplerAddressMode(descriptor.addressModeU)
+        samplerDesc.AddressV = convertSamplerAddressMode(descriptor.addressModeV)
+        samplerDesc.AddressW = convertSamplerAddressMode(descriptor.addressModeW)
+        samplerDesc.MipLODBias = 0
+        samplerDesc.MaxAnisotropy = UINT(max(1, descriptor.maxAnisotropy))
+        samplerDesc.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER
+        samplerDesc.BorderColor = D3D12_STATIC_BORDER_COLOR_TRANSPARENT_BLACK
+        samplerDesc.MinLOD = descriptor.lodMinClamp
+        samplerDesc.MaxLOD = descriptor.mipFilter == .notMipmapped ? descriptor.lodMinClamp : descriptor.lodMaxClamp
+
+        device.pointee.lpVtbl.pointee.CreateSampler(device, &samplerDesc, cpuHandle)
+
+        let handle = SamplerHandle()
+        samplers[handle] = SamplerResource(
+            descriptor: descriptor,
+            descriptorIndex: descriptorIndex,
+            cpuHandle: cpuHandle,
+            gpuHandle: gpuHandle
+        )
+        SDLLogger.debug("SDLKit.Graphics.D3D12", "createSampler id=\(handle.rawValue) label=\(descriptor.label ?? "<nil>")")
+        return handle
+    }
+
     private func ensureSrvHeap() throws {
         if srvHeap != nil { return }
         guard let device else {
@@ -665,6 +719,44 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
         }
     }
 
+    private func convertSamplerFilter(descriptor: SamplerDescriptor) -> D3D12_FILTER {
+        if descriptor.maxAnisotropy > 1 {
+            return D3D12_FILTER_ANISOTROPIC
+        }
+        let minLinear = descriptor.minFilter == .linear
+        let magLinear = descriptor.magFilter == .linear
+        let mipMode: SamplerMipFilter = descriptor.mipFilter == .notMipmapped ? .nearest : descriptor.mipFilter
+        switch (minLinear, magLinear, mipMode) {
+        case (false, false, .nearest):
+            return D3D12_FILTER_MIN_MAG_MIP_POINT
+        case (false, false, .linear):
+            return D3D12_FILTER_MIN_MAG_POINT_MIP_LINEAR
+        case (false, true, .nearest):
+            return D3D12_FILTER_MIN_POINT_MAG_LINEAR_MIP_POINT
+        case (false, true, .linear):
+            return D3D12_FILTER_MIN_POINT_MAG_LINEAR_MIP_LINEAR
+        case (true, false, .nearest):
+            return D3D12_FILTER_MIN_LINEAR_MAG_POINT_MIP_POINT
+        case (true, false, .linear):
+            return D3D12_FILTER_MIN_LINEAR_MAG_POINT_MIP_LINEAR
+        case (true, true, .nearest):
+            return D3D12_FILTER_MIN_MAG_LINEAR_MIP_POINT
+        case (true, true, .linear):
+            return D3D12_FILTER_MIN_MAG_MIP_LINEAR
+        }
+    }
+
+    private func convertSamplerAddressMode(_ mode: SamplerAddressMode) -> D3D12_TEXTURE_ADDRESS_MODE {
+        switch mode {
+        case .clampToEdge:
+            return D3D12_TEXTURE_ADDRESS_MODE_CLAMP
+        case .repeatTexture:
+            return D3D12_TEXTURE_ADDRESS_MODE_WRAP
+        case .mirrorRepeat:
+            return D3D12_TEXTURE_ADDRESS_MODE_MIRROR
+        }
+    }
+
     private func performImmediateCommand(_ encode: (UnsafeMutablePointer<ID3D12GraphicsCommandList>) throws -> Void) throws {
         guard let device, let commandQueue else {
             throw AgentError.internalError("D3D12 device or command queue unavailable for immediate work")
@@ -748,6 +840,37 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
         return handle
     }
 
+    private func ensureSamplerHeap() throws {
+        if samplerHeap != nil { return }
+        guard let device else {
+            throw AgentError.internalError("D3D12 device unavailable for sampler heap creation")
+        }
+        var desc = D3D12_DESCRIPTOR_HEAP_DESC(
+            Type: D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER,
+            NumDescriptors: maxSamplerDescriptors,
+            Flags: D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE,
+            NodeMask: 0
+        )
+        try withDescriptorHeap(desc: &desc) { heap in
+            samplerHeap = heap
+        }
+        samplerDescriptorSize = device.pointee.lpVtbl.pointee.GetDescriptorHandleIncrementSize(device, D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER)
+        nextSamplerDescriptorIndex = 0
+        freeSamplerDescriptorIndices.removeAll(keepingCapacity: true)
+    }
+
+    private func allocateSamplerDescriptorIndex() throws -> UINT {
+        if let reused = freeSamplerDescriptorIndices.popLast() {
+            return reused
+        }
+        let index = nextSamplerDescriptorIndex
+        if index >= maxSamplerDescriptors {
+            throw AgentError.internalError("Exceeded D3D12 sampler descriptor heap capacity")
+        }
+        nextSamplerDescriptorIndex += 1
+        return index
+    }
+
     private func transitionBuffer(_ handle: BufferHandle, to newState: D3D12_RESOURCE_STATES) {
         guard let commandList else { return }
         guard var resource = buffers[handle] else { return }
@@ -824,6 +947,10 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
             if fallbackTextureHandle == textureHandle {
                 fallbackTextureHandle = nil
             }
+        case .sampler(let samplerHandle):
+            if let resource = samplers.removeValue(forKey: samplerHandle) {
+                freeSamplerDescriptorIndices.append(resource.descriptorIndex)
+            }
         case .pipeline(let pipelineHandle):
             if let resource = pipelines.removeValue(forKey: pipelineHandle) {
                 var state: UnsafeMutablePointer<ID3D12PipelineState>? = resource.pipelineState
@@ -869,7 +996,7 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
         var descriptorRanges: [[D3D12_DESCRIPTOR_RANGE]] = []
         var descriptorParameterIndices: [Int] = []
         var textureParameterIndices: [Int: Int] = [:]
-        var staticSamplers: [D3D12_STATIC_SAMPLER_DESC] = []
+        var samplerParameterIndices: [Int: Int] = [:]
 
         var cbv = D3D12_ROOT_PARAMETER()
         cbv.ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV
@@ -877,40 +1004,51 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
         cbv.Anonymous.Descriptor = D3D12_ROOT_DESCRIPTOR(ShaderRegister: 0, RegisterSpace: 0)
         rootParameters.append(cbv)
 
-        let fragmentTextureBindings = (module.bindings[.fragment] ?? []).filter { $0.kind == .sampledTexture }
-        if !fragmentTextureBindings.isEmpty {
-            for binding in fragmentTextureBindings.sorted(by: { $0.index < $1.index }) {
-                var range = D3D12_DESCRIPTOR_RANGE(
-                    RangeType: D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
-                    NumDescriptors: 1,
-                    BaseShaderRegister: UINT(binding.index),
-                    RegisterSpace: 0,
-                    OffsetInDescriptorsFromTableStart: 0
-                )
-                var parameter = D3D12_ROOT_PARAMETER()
-                parameter.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE
-                parameter.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL
-                descriptorRanges.append([range])
-                rootParameters.append(parameter)
-                descriptorParameterIndices.append(rootParameters.count - 1)
-                textureParameterIndices[binding.index] = rootParameters.count - 1
-
-                var sampler = D3D12_STATIC_SAMPLER_DESC(
-                    Filter: D3D12_FILTER_MIN_MAG_MIP_LINEAR,
-                    AddressU: D3D12_TEXTURE_ADDRESS_MODE_WRAP,
-                    AddressV: D3D12_TEXTURE_ADDRESS_MODE_WRAP,
-                    AddressW: D3D12_TEXTURE_ADDRESS_MODE_WRAP,
-                    MipLODBias: 0,
-                    MaxAnisotropy: 0,
-                    ComparisonFunc: D3D12_COMPARISON_FUNC_NEVER,
-                    BorderColor: D3D12_STATIC_BORDER_COLOR_OPAQUE_WHITE,
-                    MinLOD: 0,
-                    MaxLOD: Float.greatestFiniteMagnitude,
-                    ShaderRegister: UINT(binding.index),
-                    RegisterSpace: 0,
-                    ShaderVisibility: D3D12_SHADER_VISIBILITY_PIXEL
-                )
-                staticSamplers.append(sampler)
+        for (stage, slots) in module.bindings {
+            let visibility: D3D12_SHADER_VISIBILITY
+            switch stage {
+            case .vertex:
+                visibility = D3D12_SHADER_VISIBILITY_VERTEX
+            case .fragment:
+                visibility = D3D12_SHADER_VISIBILITY_PIXEL
+            default:
+                continue
+            }
+            for binding in slots.sorted(by: { $0.index < $1.index }) {
+                switch binding.kind {
+                case .sampledTexture:
+                    var range = D3D12_DESCRIPTOR_RANGE(
+                        RangeType: D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
+                        NumDescriptors: 1,
+                        BaseShaderRegister: UINT(binding.index),
+                        RegisterSpace: 0,
+                        OffsetInDescriptorsFromTableStart: 0
+                    )
+                    var parameter = D3D12_ROOT_PARAMETER()
+                    parameter.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE
+                    parameter.ShaderVisibility = visibility
+                    descriptorRanges.append([range])
+                    rootParameters.append(parameter)
+                    descriptorParameterIndices.append(rootParameters.count - 1)
+                    textureParameterIndices[binding.index] = rootParameters.count - 1
+                case .sampler:
+                    var range = D3D12_DESCRIPTOR_RANGE(
+                        RangeType: D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER,
+                        NumDescriptors: 1,
+                        BaseShaderRegister: UINT(binding.index),
+                        RegisterSpace: 0,
+                        OffsetInDescriptorsFromTableStart: 0
+                    )
+                    var parameter = D3D12_ROOT_PARAMETER()
+                    parameter.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE
+                    parameter.ShaderVisibility = visibility
+                    descriptorRanges.append([range])
+                    rootParameters.append(parameter)
+                    descriptorParameterIndices.append(rootParameters.count - 1)
+                    samplerParameterIndices[binding.index] = rootParameters.count - 1
+                default:
+                    continue
+                }
             }
         }
 
@@ -931,23 +1069,11 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
                     )
                 }
             }
-            if staticSamplers.isEmpty {
-                rootDesc.NumStaticSamplers = 0
-                rootDesc.pStaticSamplers = nil
-                serializeResult = withUnsafePointer(to: &rootDesc) { descPointer -> HRESULT in
-                    descPointer.withMemoryRebound(to: D3D12_ROOT_SIGNATURE_DESC.self, capacity: 1) { rebound in
-                        D3D12SerializeRootSignature(rebound, D3D_ROOT_SIGNATURE_VERSION_1, &serializedRoot, &errorBlob)
-                    }
-                }
-            } else {
-                staticSamplers.withUnsafeMutableBufferPointer { samplerBuffer in
-                    rootDesc.NumStaticSamplers = UINT(samplerBuffer.count)
-                    rootDesc.pStaticSamplers = samplerBuffer.baseAddress
-                    serializeResult = withUnsafePointer(to: &rootDesc) { descPointer -> HRESULT in
-                        descPointer.withMemoryRebound(to: D3D12_ROOT_SIGNATURE_DESC.self, capacity: 1) { rebound in
-                            D3D12SerializeRootSignature(rebound, D3D_ROOT_SIGNATURE_VERSION_1, &serializedRoot, &errorBlob)
-                        }
-                    }
+            rootDesc.NumStaticSamplers = 0
+            rootDesc.pStaticSamplers = nil
+            serializeResult = withUnsafePointer(to: &rootDesc) { descPointer -> HRESULT in
+                descPointer.withMemoryRebound(to: D3D12_ROOT_SIGNATURE_DESC.self, capacity: 1) { rebound in
+                    D3D12SerializeRootSignature(rebound, D3D_ROOT_SIGNATURE_VERSION_1, &serializedRoot, &errorBlob)
                 }
             }
         }
@@ -1107,7 +1233,8 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
             rootSignature: rootSignature,
             pipelineState: pipelineState,
             vertexStride: module.vertexLayout.stride,
-            fragmentTextureParameterIndices: textureParameterIndices
+            fragmentTextureParameterIndices: textureParameterIndices,
+            samplerParameterIndices: samplerParameterIndices
         )
         if builtinPipeline == nil {
             builtinPipeline = handle
@@ -1143,21 +1270,36 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
 
         commandList.pointee.lpVtbl.pointee.SetPipelineState(commandList, pipelineResource.pipelineState)
         commandList.pointee.lpVtbl.pointee.SetGraphicsRootSignature(commandList, pipelineResource.rootSignature)
-        if !pipelineResource.fragmentTextureParameterIndices.isEmpty {
+        let needsTextures = !pipelineResource.fragmentTextureParameterIndices.isEmpty
+        let needsSamplers = !pipelineResource.samplerParameterIndices.isEmpty
+        if needsTextures {
             if srvHeap == nil {
                 try ensureSrvHeap()
             }
-            guard let srvHeap else {
-                throw AgentError.internalError("Descriptor heap unavailable for texture bindings")
+        }
+        if needsSamplers {
+            if samplerHeap == nil {
+                try ensureSamplerHeap()
             }
-            var heaps: [UnsafeMutablePointer<ID3D12DescriptorHeap>?] = [srvHeap]
-            heaps.withUnsafeMutableBufferPointer { buffer in
+        }
+        var descriptorHeaps: [UnsafeMutablePointer<ID3D12DescriptorHeap>?] = []
+        if needsTextures, let srvHeap { descriptorHeaps.append(srvHeap) }
+        if needsSamplers, let samplerHeap { descriptorHeaps.append(samplerHeap) }
+        if !descriptorHeaps.isEmpty {
+            descriptorHeaps.withUnsafeMutableBufferPointer { buffer in
                 commandList.pointee.lpVtbl.pointee.SetDescriptorHeaps(commandList, UINT(buffer.count), buffer.baseAddress)
             }
+        }
+        if needsTextures {
             for (slot, parameterIndex) in pipelineResource.fragmentTextureParameterIndices.sorted(by: { $0.key < $1.key }) {
                 let textureHandle: TextureHandle
-                if let provided: TextureHandle = bindings.value(for: slot, as: TextureHandle.self) {
-                    textureHandle = provided
+                if let entry = bindings.resource(at: slot) {
+                    switch entry {
+                    case .texture(let handle):
+                        textureHandle = handle
+                    case .buffer:
+                        throw AgentError.invalidArgument("Buffer bound to texture slot \(slot) for draw call")
+                    }
                 } else {
                     textureHandle = try ensureFallbackTextureHandle()
                 }
@@ -1165,6 +1307,20 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
                     throw AgentError.invalidArgument("Missing texture binding for slot \(slot)")
                 }
                 commandList.pointee.lpVtbl.pointee.SetGraphicsRootDescriptorTable(commandList, UINT(parameterIndex), texture.gpuHandle)
+            }
+        }
+        if needsSamplers {
+            guard let samplerHeap else {
+                throw AgentError.internalError("Sampler descriptor heap unavailable for bindings")
+            }
+            for (slot, parameterIndex) in pipelineResource.samplerParameterIndices.sorted(by: { $0.key < $1.key }) {
+                guard let samplerHandle = bindings.sampler(at: slot) else {
+                    throw AgentError.invalidArgument("Missing sampler binding for slot \(slot)")
+                }
+                guard let sampler = samplers[samplerHandle] else {
+                    throw AgentError.invalidArgument("Unknown sampler handle for slot \(slot)")
+                }
+                commandList.pointee.lpVtbl.pointee.SetGraphicsRootDescriptorTable(commandList, UINT(parameterIndex), sampler.gpuHandle)
             }
         }
         let expectedPushConstantSize = pipelineResource.module.pushConstantSize
@@ -1376,9 +1532,18 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
         commandList.pointee.lpVtbl.pointee.SetComputeRootSignature(commandList, resource.rootSignature)
 
         for (slot, parameterIndex) in resource.uniformParameterIndices {
-            guard let handle: BufferHandle = bindings.value(for: slot, as: BufferHandle.self),
-                  let buffer = buffers[handle] else {
+            guard let entry = bindings.resource(at: slot) else {
                 throw AgentError.invalidArgument("Missing uniform buffer binding at slot \(slot)")
+            }
+            let handle: BufferHandle
+            switch entry {
+            case .buffer(let bufferHandle):
+                handle = bufferHandle
+            case .texture:
+                throw AgentError.invalidArgument("Texture bound to uniform buffer slot \(slot) in compute dispatch")
+            }
+            guard let buffer = buffers[handle] else {
+                throw AgentError.invalidArgument("Unknown buffer handle bound at slot \(slot)")
             }
             transitionBuffer(handle, to: D3D12_RESOURCE_STATE_GENERIC_READ)
             let gpuAddress = buffer.resource.pointee.lpVtbl.pointee.GetGPUVirtualAddress(buffer.resource)
@@ -1387,9 +1552,18 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
 
         var storageBindings: [BufferHandle] = []
         for (slot, parameterIndex) in resource.storageParameterIndices {
-            guard let handle: BufferHandle = bindings.value(for: slot, as: BufferHandle.self),
-                  let buffer = buffers[handle] else {
+            guard let entry = bindings.resource(at: slot) else {
                 throw AgentError.invalidArgument("Missing storage buffer binding at slot \(slot)")
+            }
+            let handle: BufferHandle
+            switch entry {
+            case .buffer(let bufferHandle):
+                handle = bufferHandle
+            case .texture:
+                throw AgentError.invalidArgument("Texture bound to storage buffer slot \(slot) in compute dispatch")
+            }
+            guard let buffer = buffers[handle] else {
+                throw AgentError.invalidArgument("Unknown buffer handle bound at slot \(slot)")
             }
             transitionBuffer(handle, to: D3D12_RESOURCE_STATE_UNORDERED_ACCESS)
             let gpuAddress = buffer.resource.pointee.lpVtbl.pointee.GetGPUVirtualAddress(buffer.resource)
@@ -1976,6 +2150,8 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
             releaseCOM(&resource)
         }
         textures.removeAll()
+        samplers.removeAll()
+        freeSamplerDescriptorIndices.removeAll(keepingCapacity: false)
         fallbackTextureHandle = nil
         if var rb = readbackBuffer {
             releaseCOM(&rb)
@@ -1992,6 +2168,7 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
         releaseCOM(&rtvHeap)
         releaseCOM(&dsvHeap)
         releaseCOM(&srvHeap)
+        releaseCOM(&samplerHeap)
         releaseCOM(&fence)
         releaseCOM(&device)
         releaseCOM(&factory)

@@ -57,10 +57,16 @@ private final class RecordingRenderBackend: RenderBackend {
         return handle
     }
 
+    func createSampler(descriptor: SamplerDescriptor) throws -> SamplerHandle {
+        _ = descriptor
+        return SamplerHandle()
+    }
+
     func destroy(_ handle: ResourceHandle) {
         switch handle {
         case .buffer(let h): buffers.removeValue(forKey: h)
         case .texture(let h): textures.removeValue(forKey: h)
+        case .sampler: break
         case .pipeline(let h): pipelines.removeValue(forKey: h)
         case .computePipeline: break
         case .mesh(let h): meshes.removeValue(forKey: h)
@@ -198,7 +204,7 @@ final class SceneGraphPushConstantTests: XCTestCase {
                 XCTFail("Expected bindings to be recorded")
                 return
             }
-            let boundTexture: TextureHandle? = bindings.value(for: 10, as: TextureHandle.self)
+            let boundTexture = bindings.texture(at: 10)
             XCTAssertEqual(boundTexture, textureHandle)
         }
     }
