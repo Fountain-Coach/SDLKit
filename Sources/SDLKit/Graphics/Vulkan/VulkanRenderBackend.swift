@@ -953,6 +953,37 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
         return 0
         #endif
     }
+
+    internal struct DebugResourceInventory: Equatable {
+        let bufferCount: Int
+        let textureCount: Int
+        let samplerCount: Int
+        let meshCount: Int
+        let graphicsPipelineCount: Int
+        let computePipelineCount: Int
+    }
+
+    internal func debugResourceInventory() -> DebugResourceInventory {
+        #if canImport(CVulkan)
+        return DebugResourceInventory(
+            bufferCount: buffers.count,
+            textureCount: textures.count,
+            samplerCount: samplers.count,
+            meshCount: meshes.count,
+            graphicsPipelineCount: pipelines.count,
+            computePipelineCount: computePipelines.count
+        )
+        #else
+        return DebugResourceInventory(
+            bufferCount: 0,
+            textureCount: 0,
+            samplerCount: 0,
+            meshCount: 0,
+            graphicsPipelineCount: 0,
+            computePipelineCount: 0
+        )
+        #endif
+    }
 #endif
 
     public func registerMesh(vertexBuffer: BufferHandle,

@@ -1308,6 +1308,26 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
         )
     }
 
+    internal struct DebugResourceInventory: Equatable {
+        let bufferCount: Int
+        let textureCount: Int
+        let samplerCount: Int
+        let meshCount: Int
+        let graphicsPipelineCount: Int
+        let computePipelineCount: Int
+    }
+
+    internal func debugResourceInventory() -> DebugResourceInventory {
+        DebugResourceInventory(
+            bufferCount: buffers.count,
+            textureCount: textures.count,
+            samplerCount: samplers.count,
+            meshCount: meshes.count,
+            graphicsPipelineCount: pipelines.count,
+            computePipelineCount: computePipelines.count
+        )
+    }
+
     internal func debugBindRenderTarget(_ handle: TextureHandle, clearColor: (Float, Float, Float, Float)? = nil) throws {
         guard frameActive else {
             throw AgentError.internalError("debugBindRenderTarget called outside beginFrame/endFrame")
@@ -3070,6 +3090,7 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
                 fallbackTextureHandle = previousFallback
             }
             deviceEventHandler?(.didReset)
+            SDLLogger.info("SDLKit.Graphics.D3D12", "Device reset completed after loss: \(message)")
         } catch {
             deviceEventHandler?(.resetFailed(reason: message))
             recoveringDeviceLoss = false
