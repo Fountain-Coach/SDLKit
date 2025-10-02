@@ -188,11 +188,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Swift
-        id: swift-setup
-        uses: swift-actions/setup-swift@v1
-        with:
-          swift-version: '6.1.2'
+      - name: Install Swift 6.1 toolchain
+        run: |
+          set -euo pipefail
+          curl -fLO https://download.swift.org/swift-6.1-release/xcode/swift-6.1-RELEASE/swift-6.1-RELEASE-osx.pkg
+          sudo installer -pkg swift-6.1-RELEASE-osx.pkg -target /
+          echo "/Library/Developer/Toolchains/swift-6.1-RELEASE.xctoolchain/usr/bin" >> "$GITHUB_PATH"
+          rm swift-6.1-RELEASE-osx.pkg
 
       - name: Install dependencies (SDL3 + tools)
         run: |
@@ -206,9 +208,9 @@ jobs:
           path: |
             .build
             ~/Library/Developer/Xcode/DerivedData
-          key: ${{ runner.os }}-swift-${{ steps.swift-setup.outputs.swift-version || '6.1.2' }}-build-${{ hashFiles('Package.swift', 'Sources/**', 'Tests/**') }}
+          key: ${{ runner.os }}-swift-6.1-build-${{ hashFiles('Package.swift', 'Sources/**', 'Tests/**') }}
           restore-keys: |
-            ${{ runner.os }}-swift-${{ steps.swift-setup.outputs.swift-version || '6.1.2' }}-build-
+            ${{ runner.os }}-swift-6.1-build-
 
       - name: Cache shader artifacts
         uses: actions/cache@v4
