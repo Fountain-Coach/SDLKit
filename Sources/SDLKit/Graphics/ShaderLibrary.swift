@@ -90,8 +90,8 @@ public struct ShaderModule: Sendable {
 public final class ShaderLibrary {
     public static let shared = ShaderLibrary()
 
-    private let modules: [ShaderID: ShaderModule]
-    private let computeModules: [ShaderID: ComputeShaderModule]
+    private var modules: [ShaderID: ShaderModule]
+    private var computeModules: [ShaderID: ComputeShaderModule]
     private init() {
         let root = ShaderLibrary.resolveGeneratedRoot()
         self.modules = ShaderLibrary.loadModules(root: root)
@@ -121,6 +121,24 @@ public final class ShaderLibrary {
         let module = try computeModule(for: id)
         return try module.artifacts.requireMetalLibrary(for: id)
     }
+
+#if DEBUG
+    internal func _registerTestModule(_ module: ShaderModule) {
+        modules[module.id] = module
+    }
+
+    internal func _unregisterTestModule(_ id: ShaderID) {
+        modules.removeValue(forKey: id)
+    }
+
+    internal func _registerTestComputeModule(_ module: ComputeShaderModule) {
+        computeModules[module.id] = module
+    }
+
+    internal func _unregisterTestComputeModule(_ id: ShaderID) {
+        computeModules.removeValue(forKey: id)
+    }
+#endif
 
     private static func resolveGeneratedRoot() -> URL {
         let fm = FileManager.default
