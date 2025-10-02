@@ -13,6 +13,13 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
         let length: Int
     }
 
+    private enum TextureAccessState {
+        case unknown
+        case shaderRead
+        case shaderWrite
+        case renderTarget
+    }
+
     private struct PipelineResource {
         let state: MTLRenderPipelineState
         let descriptor: GraphicsPipelineDescriptor
@@ -42,6 +49,12 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
         let state: MTLSamplerState
     }
 
+    private struct TextureResource {
+        var texture: MTLTexture
+        var usage: TextureUsage
+        var access: TextureAccessState
+    }
+
     private let window: SDLWindow
     private let surface: RenderSurface
     private let layer: CAMetalLayer
@@ -50,7 +63,7 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
     private let inflightSemaphore = DispatchSemaphore(value: 3)
 
     private var buffers: [BufferHandle: BufferResource] = [:]
-    private var textures: [TextureHandle: MTLTexture] = [:]
+    private var textures: [TextureHandle: TextureResource] = [:]
     private var samplers: [SamplerHandle: SamplerResource] = [:]
     private var pipelines: [PipelineHandle: PipelineResource] = [:]
     private var computePipelines: [ComputePipelineHandle: ComputePipelineResource] = [:]
@@ -280,7 +293,7 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
         }
 
         let handle = TextureHandle()
-        textures[handle] = texture
+        textures[handle] = TextureResource(texture: texture, usage: descriptor.usage, access: .unknown)
         SDLLogger.debug("SDLKit.Graphics.Metal", "createTexture id=\(handle.rawValue) size=\(descriptor.width)x\(descriptor.height) format=\(descriptor.format.rawValue)")
         return handle
     }
@@ -562,6 +575,9 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
         encoder.label = "SDLKit.ComputeDispatch"
         encoder.setComputePipelineState(resource.state)
 
+        var textureTracker = MetalComputeTextureAccessTracker()
+        var updatedTextureResources: [(TextureHandle, TextureResource)] = []
+
         for slot in resource.module.bindings {
             switch slot.kind {
             case .uniformBuffer, .storageBuffer:
@@ -587,11 +603,25 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
                 }
                 switch entry {
                 case .texture(let handle):
-                    guard let texture = textures[handle] else {
+                    guard var texture = textures[handle] else {
                         encoder.endEncoding()
                         throw AgentError.invalidArgument("Unknown texture handle for compute slot \(slot.index)")
                     }
-                    encoder.setTexture(texture, index: slot.index)
+                    let requirement: MetalComputeTextureAccessTracker.Requirement = (slot.kind == .storageTexture) ? .writable : .readable
+                    if let reason = textureTracker.register(handle: handle, requirement: requirement, usage: texture.usage) {
+                        let message = "Cannot encode compute access for texture \(handle.rawValue): \(reason)"
+                        SDLLogger.error("SDLKit.Graphics.Metal", message)
+                        encoder.endEncoding()
+                        throw AgentError.invalidArgument(message)
+                    }
+                    encoder.setTexture(texture.texture, index: slot.index)
+                    switch requirement {
+                    case .readable:
+                        texture.access = .shaderRead
+                    case .writable:
+                        texture.access = .shaderWrite
+                    }
+                    updatedTextureResources.append((handle, texture))
                 case .buffer:
                     encoder.endEncoding()
                     throw AgentError.invalidArgument("Buffer bound to texture slot \(slot.index) in compute dispatch")
@@ -619,6 +649,19 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
                     throw error
                 }
                 encoder.setSamplerState(samplerResource.state, index: slot.index)
+            }
+        }
+
+        for (handle, texture) in updatedTextureResources {
+            textures[handle] = texture
+        }
+
+        let barrierHandles = textureTracker.handlesNeedingBarrier
+        var barrierTextures: [MTLTexture] = []
+        barrierTextures.reserveCapacity(barrierHandles.count)
+        for handle in barrierHandles {
+            if let texture = textures[handle]?.texture {
+                barrierTextures.append(texture)
             }
         }
 
@@ -655,8 +698,17 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
         let threadsPerThreadgroup = MTLSize(width: tgWidth, height: tgHeight, depth: tgDepth)
         let threadgroups = MTLSize(width: max(1, groupsX), height: max(1, groupsY), depth: max(1, groupsZ))
         encoder.dispatchThreadgroups(threadgroups, threadsPerThreadgroup: threadsPerThreadgroup)
+        let usedResourceBarriers = encodeTextureBarriers(within: encoder, textures: barrierTextures)
         encoder.memoryBarrier(scope: .buffers)
         encoder.endEncoding()
+
+        if !usedResourceBarriers, !barrierTextures.isEmpty {
+            if !encodeBlitTextureBarriers(on: commandBuffer, textures: barrierTextures) {
+                let handles = barrierHandles.map { String($0.rawValue) }.sorted().joined(separator: ", ")
+                let message = "Unable to encode texture synchronization barrier for compute-dispatched textures [\(handles)]."
+                SDLLogger.error("SDLKit.Graphics.Metal", message)
+            }
+        }
 
         if ownsCommandBuffer {
             commandBuffer.commit()
@@ -665,6 +717,33 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
     }
 
     // MARK: - Helpers
+
+    private func encodeTextureBarriers(within encoder: MTLComputeCommandEncoder,
+                                      textures: [MTLTexture]) -> Bool {
+        guard !textures.isEmpty else { return true }
+        if #available(macOS 10.14, iOS 12.0, tvOS 12.0, *) {
+            encoder.memoryBarrier(resources: textures)
+            return true
+        } else {
+            encoder.memoryBarrier(scope: [.textures])
+            return false
+        }
+    }
+
+    private func encodeBlitTextureBarriers(on commandBuffer: MTLCommandBuffer,
+                                           textures: [MTLTexture]) -> Bool {
+        guard !textures.isEmpty else { return true }
+        guard let blitEncoder = commandBuffer.makeBlitCommandEncoder() else { return false }
+        blitEncoder.label = "SDLKit.TextureBarrierBlit"
+        defer { blitEncoder.endEncoding() }
+        if #available(macOS 10.14, iOS 12.0, tvOS 12.0, *) {
+            blitEncoder.memoryBarrier(resources: textures)
+            return true
+        } else {
+            blitEncoder.memoryBarrier(scope: [.textures])
+            return true
+        }
+    }
 
     private func bindResources(_ slots: [BindingSlot],
                                stage: ShaderStage,
@@ -720,14 +799,16 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
                 }
                 switch entry {
                 case .texture(let handle):
-                    guard let texture = textures[handle] else {
+                    guard var textureResource = textures[handle] else {
                         throw AgentError.invalidArgument("Unknown texture handle for slot \(slot.index)")
                     }
+                    textureResource.access = .shaderRead
+                    textures[handle] = textureResource
                     switch stage {
                     case .vertex:
-                        encoder.setVertexTexture(texture, index: slot.index)
+                        encoder.setVertexTexture(textureResource.texture, index: slot.index)
                     case .fragment:
-                        encoder.setFragmentTexture(texture, index: slot.index)
+                        encoder.setFragmentTexture(textureResource.texture, index: slot.index)
                     default:
                         continue
                     }
@@ -1107,6 +1188,62 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
             }
         }
         return String(format: "%016llx", hash)
+    }
+}
+
+struct MetalComputeTextureAccessTracker {
+    enum Requirement {
+        case readable
+        case writable
+
+        var description: String {
+            switch self {
+            case .readable:
+                return "shaderRead"
+            case .writable:
+                return "shaderWrite"
+            }
+        }
+    }
+
+    private var readable: Set<TextureHandle> = []
+    private var writable: Set<TextureHandle> = []
+    private var failures: [TextureHandle: String] = [:]
+
+    mutating func register(handle: TextureHandle,
+                           requirement: Requirement,
+                           usage: TextureUsage) -> String? {
+        switch requirement {
+        case .readable:
+            guard MetalComputeTextureAccessTracker.supportsRead(usage: usage) else {
+                let reason = "requires shaderRead capability but texture was created with usage \(usage)"
+                failures[handle] = reason
+                return reason
+            }
+            readable.insert(handle)
+            return nil
+        case .writable:
+            guard usage == .shaderWrite else {
+                let reason = "requires shaderWrite capability but texture was created with usage \(usage)"
+                failures[handle] = reason
+                return reason
+            }
+            writable.insert(handle)
+            return nil
+        }
+    }
+
+    var handlesNeedingBarrier: Set<TextureHandle> { readable.union(writable) }
+
+    func failureMessage(for handle: TextureHandle) -> String? { failures[handle] }
+
+    private static func supportsRead(usage: TextureUsage) -> Bool {
+        switch usage {
+        case .shaderRead, .shaderWrite, .renderTarget:
+            return true
+        case .depthStencil:
+            return false
+        }
     }
 }
 #endif
