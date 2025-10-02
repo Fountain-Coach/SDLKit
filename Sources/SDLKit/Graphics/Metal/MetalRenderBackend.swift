@@ -79,6 +79,7 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
     private var lastCaptureHash: String?
 
     private let shaderLibrary: ShaderLibrary
+    public var deviceEventHandler: RenderBackendDeviceEventHandler?
     private var metalLibraries: [ShaderID: MTLLibrary] = [:]
     private var drawableSize: CGSize
     private var depthPixelFormat: MTLPixelFormat?

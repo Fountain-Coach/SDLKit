@@ -4,5 +4,6 @@ public enum AgentError: Error, Equatable {
     case notImplemented
     case invalidArgument(String)
     case internalError(String)
+    case deviceLost(String)
 }
 

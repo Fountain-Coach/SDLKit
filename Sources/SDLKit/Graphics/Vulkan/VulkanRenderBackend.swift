@@ -23,6 +23,7 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
     private let window: SDLWindow
     private let surface: RenderSurface
     private var core: StubRenderBackendCore
+    public var deviceEventHandler: RenderBackendDeviceEventHandler?
 
     // Vulkan handles
     private var vkInstance = VulkanMinimalInstance()
