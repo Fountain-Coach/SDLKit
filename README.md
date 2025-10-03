@@ -308,6 +308,15 @@ You can trigger a GPU-enabled CI run from a pull request comment:
 
 Note: Linux GPU harness is disabled on hosted runners. The dispatcher will route `/gpu-test linux` to macOS.
 
+### PR label trigger (for GPU runs)
+
+Apply one of these labels to a pull request to trigger a macOS GPU-enabled CI run:
+
+- `gpu` — runs the GPU harness in strict mode (no baseline writes)
+- `gpu-seed` — runs the GPU harness with baseline seeding enabled (`seed=true`)
+
+The label dispatcher will post a confirmation comment when CI is dispatched. GPU steps only run on macOS runners; Linux GPU is disabled on hosted runners.
+
 Notes:
 - The golden store is cached across CI runs. If you need a clean slate, bump the cache key (the workflow references `.github/workflows/ci.yml`) or purge the cache from the Actions UI.
 - Headless harness and unit tests continue to run for fast feedback; the GPU harness provides cross-backend visual parity assurance.

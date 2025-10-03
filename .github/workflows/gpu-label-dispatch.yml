@@ -1,0 +1,42 @@
+name: GPU Label Dispatcher
+
+on:
+  pull_request:
+    types: [labeled]
+
+permissions:
+  contents: read
+  actions: write
+  pull-requests: write
+
+jobs:
+  dispatch:
+    if: |
+      github.event.label.name == 'gpu' ||
+      github.event.label.name == 'gpu-seed'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch CI with GPU enabled
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const label = context.payload.label.name;
+            const gpu = 'true';
+            const seed = (label === 'gpu-seed') ? 'true' : 'false';
+            // macOS-only GPU harness for now
+            const os = 'macos';
+            const workflow_id = 'ci.yml';
+            const ref = context.payload.pull_request.head.ref;
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id,
+              ref,
+              inputs: { os, gpu, seed }
+            });
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              body: `GPU CI dispatched (os=${os}, gpu=${gpu}, seed=${seed}) due to label \`${label}\`.`
+            });
