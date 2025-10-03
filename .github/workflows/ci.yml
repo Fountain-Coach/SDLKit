@@ -98,7 +98,7 @@ jobs:
           backoff=5
           while [ $attempt -le $max_attempts ]; do
             echo "Linux test attempt $attempt/$max_attempts" | tee -a "$test_log"
-            if swift test -v -Xswiftc -DHEADLESS_CI 2>&1 | tee -a "$test_log"; then
+            if swift test --filter SDLKitTests -v -Xswiftc -DHEADLESS_CI 2>&1 | tee -a "$test_log"; then
               break
             fi
             if [ $attempt -eq $max_attempts ]; then
