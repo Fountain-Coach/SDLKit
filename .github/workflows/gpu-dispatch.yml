@@ -1,0 +1,56 @@
+name: GPU Command Dispatcher
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  dispatch:
+    if: |
+      github.event.issue.pull_request != null &&
+      startsWith(github.event.comment.body, '/gpu-test')
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Parse command and dispatch CI
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = (context.payload.comment.body || '').trim();
+            const parts = body.split(/\s+/);
+            // defaults
+            let os = 'macos';
+            let gpu = 'true';
+            let seed = 'false';
+            // parse args: /gpu-test [macos|all] [--seed]
+            for (let i = 1; i < parts.length; i++) {
+              const p = parts[i].toLowerCase();
+              if (['macos','all','linux'].includes(p)) {
+                os = p;
+              } else if (p === '--seed' || p === 'seed') {
+                seed = 'true';
+              }
+            }
+            // Only macOS is supported for GPU; override unsupported requests
+            if (os === 'linux') {
+              os = 'macos';
+            }
+            const workflow_id = 'ci.yml';
+            const ref = context.payload.repository.default_branch;
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id,
+              ref,
+              inputs: { os, gpu, seed }
+            });
+            const reply = `Triggered CI with gpu=${gpu}, os=${os}, seed=${seed}.` + (parts.includes('linux') ? ' (Linux GPU harness is disabled on hosted runners; using macOS.)' : '');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.issue.number,
+              body: reply
+            });

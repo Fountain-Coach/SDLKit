@@ -22,6 +22,11 @@ on:
         type: boolean
         required: false
         default: false
+      seed:
+        description: "When GPU is enabled, write golden baselines (macOS only)"
+        type: boolean
+        required: false
+        default: false
 
 defaults:
   run:
@@ -293,7 +298,7 @@ jobs:
           swift build --build-tests
 
       - name: Seed golden store (Metal, GPU) [manual]
-        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.gpu == 'true' && (github.event.inputs.os == 'macos' || github.event.inputs.os == 'all') }}
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.gpu == 'true' && github.event.inputs.seed == 'true' && (github.event.inputs.os == 'macos' || github.event.inputs.os == 'all') }}
         env:
           SDLKIT_GOLDEN: '1'
           SDLKIT_GOLDEN_WRITE: '1'

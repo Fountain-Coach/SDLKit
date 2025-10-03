@@ -296,6 +296,18 @@ gh run watch <run-id>
 
 Push normally or re-run CI. The GPU harness runs in strict mode (without the write flag) and fails on mismatches (when dispatched with `gpu=true`). To intentionally update baselines after a legitimate rendering change, repeat steps 1–2 with `gpu=true`.
 
+### PR comment trigger (for GPU runs)
+
+You can trigger a GPU-enabled CI run from a pull request comment:
+
+```text
+/gpu-test            # macOS GPU harness strict run
+/gpu-test --seed     # macOS GPU harness with seeding enabled
+/gpu-test all --seed # same as above but allows future multi-OS expansion
+```
+
+Note: Linux GPU harness is disabled on hosted runners. The dispatcher will route `/gpu-test linux` to macOS.
+
 Notes:
 - The golden store is cached across CI runs. If you need a clean slate, bump the cache key (the workflow references `.github/workflows/ci.yml`) or purge the cache from the Actions UI.
 - Headless harness and unit tests continue to run for fast feedback; the GPU harness provides cross-backend visual parity assurance.
