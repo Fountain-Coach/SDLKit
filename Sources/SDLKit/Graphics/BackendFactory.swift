@@ -310,7 +310,8 @@ final class StubRenderBackendCore {
                                    groupsZ: Int,
                                    bindings: BindingSet) throws {
         guard let descriptor = computePipelines[pipeline]?.descriptor else { return }
-        guard descriptor.shader.rawValue == "compute_storage_texture" else { return }
+        let shaderID = descriptor.shader.rawValue
+        guard shaderID == "compute_storage_texture" || shaderID == "ibl_brdf_lut" else { return }
         guard let textureHandle = bindings.texture(at: 0) else {
             throw AgentError.invalidArgument("Missing storage texture binding at slot 0")
         }
@@ -338,11 +339,20 @@ final class StubRenderBackendCore {
                     let offset = (y * width + x) * 4
                     let normalizedX = Float(x) / Float(max(1, width - 1))
                     let normalizedY = Float(y) / Float(max(1, height - 1))
-                    base[offset + 0] = UInt8(min(255, max(0, Int(normalizedX * 255.0))))
-                    base[offset + 1] = UInt8(min(255, max(0, Int(normalizedY * 255.0))))
-                    let pattern = UInt8(((x + y + groupsX + groupsY + groupsZ) % 256))
-                    base[offset + 2] = pattern
-                    base[offset + 3] = 255
+                    if shaderID == "ibl_brdf_lut" {
+                        // Deterministic BRDF LUT placeholder: pack uv in RG, zero B, opaque A
+                        base[offset + 0] = UInt8(clamping: Int(normalizedX * 255.0))
+                        base[offset + 1] = UInt8(clamping: Int(normalizedY * 255.0))
+                        base[offset + 2] = 0
+                        base[offset + 3] = 255
+                    } else {
+                        // Legacy compute_storage_texture pattern for compatibility
+                        base[offset + 0] = UInt8(clamping: Int(normalizedX * 255.0))
+                        base[offset + 1] = UInt8(clamping: Int(normalizedY * 255.0))
+                        let pattern = UInt8(((x + y + groupsX + groupsY + groupsZ) % 256))
+                        base[offset + 2] = pattern
+                        base[offset + 3] = 255
+                    }
                 }
             }
         }
