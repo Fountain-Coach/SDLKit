@@ -70,11 +70,15 @@ public final class SDLWindow {
 
         public func createVulkanSurface(instance: VkInstance) throws -> VkSurfaceKHR {
             #if canImport(CSDL3) && !HEADLESS_CI
-            var surface: VkSurfaceKHR = 0
+            var surface: VkSurfaceKHR?
             if !SDLKit_CreateVulkanSurface(windowHandle, instance, &surface) {
                 throw AgentError.internalError(SDLCore.lastError())
             }
-            return surface
+            // On platforms where VkSurfaceKHR is imported as an optional handle (OpaquePointer?), unwrap.
+            guard let s = surface else {
+                throw AgentError.internalError("SDLKit_CreateVulkanSurface returned success but produced a nil surface")
+            }
+            return s
             #else
             _ = instance
             throw AgentError.sdlUnavailable
