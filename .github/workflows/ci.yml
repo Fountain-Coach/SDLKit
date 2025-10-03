@@ -280,6 +280,11 @@ jobs:
           # Run compute parity without HEADLESS_CI so SDL and Metal are active
           swift test --skip-build --filter ComputeVectorAddParityTests/testVectorAddParity_Metal
 
+      - name: Configure pkg-config for Brew (GPU harness)
+        run: |
+          set -euo pipefail
+          echo "PKG_CONFIG_PATH=$(brew --prefix)/lib/pkgconfig" >> "$GITHUB_ENV"
+
       - name: Build tests for GPU-enabled harness (Metal)
         env:
           SDLKIT_GUI_ENABLED: 'true'
