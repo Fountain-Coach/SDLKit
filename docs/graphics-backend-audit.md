@@ -16,7 +16,7 @@ This audit reviews the three platform renderers under `Sources/SDLKit/Graphics` 
 
 ### Gaps and Risks
 - When push constants are absent, the backend injects default lighting/base-color data instead of surfacing the missing material payload, which will mask integration bugs with SceneGraphAgent.【F:Sources/SDLKit/Graphics/Metal/MetalRenderBackend.swift†L40-L43】【F:Sources/SDLKit/Graphics/Metal/MetalRenderBackend.swift†L414-L449】
-- Sampler bindings are silently ignored for compute shaders because samplers are not modeled in `BindingSet`, preventing feature parity with graphics shaders and future filtering workloads.【F:Sources/SDLKit/Graphics/Metal/MetalRenderBackend.swift†L503-L521】
+- Compute sampler bindings are modeled and validated via `BindingSet.setSampler` and enforced in the Metal backend; ensure materials provide matching sampler state when sampling in compute.【F:Sources/SDLKit/Graphics/Metal/MetalRenderBackend.swift†L640-L662】
 - Compute dispatch always issues a `.buffers` memory barrier and never covers textures/UAVs, leaving texture writes and read-after-write hazards unchecked.【F:Sources/SDLKit/Graphics/Metal/MetalRenderBackend.swift†L503-L539】
 - There is no device-loss or drawable-restore handling beyond logging, so layer reconfiguration or Metal device removal would terminate the renderer instead of recovering.【F:Sources/SDLKit/Graphics/Metal/MetalRenderBackend.swift†L134-L208】
 

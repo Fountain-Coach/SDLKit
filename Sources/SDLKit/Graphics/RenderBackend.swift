@@ -434,4 +434,8 @@ public protocol RenderBackend {
     func dispatchCompute(_ pipeline: ComputePipelineHandle,
                          groupsX: Int, groupsY: Int, groupsZ: Int,
                          bindings: BindingSet) throws
+
+    // Utility: read back the contents of a buffer into a caller-provided pointer.
+    // Implementations should block until GPU writes to the buffer are visible to CPU.
+    func readback(buffer: BufferHandle, into dst: UnsafeMutableRawPointer, length: Int) throws
 }

@@ -2313,6 +2313,25 @@ public final class D3D12RenderBackend: RenderBackend, GoldenImageCapturable {
         }
     }
 
+    // MARK: - Readback
+    public func readback(buffer: BufferHandle, into dst: UnsafeMutableRawPointer, length: Int) throws {
+        guard let resource = buffers[buffer] else {
+            throw AgentError.invalidArgument("Unknown buffer handle \(buffer.rawValue)")
+        }
+        // Buffers are allocated on UPLOAD heap (CPU-visible). Map and copy.
+        var mapped: UnsafeMutableRawPointer?
+        try checkHRESULT(resource.resource.pointee.lpVtbl.pointee.Map(resource.resource, 0, nil, &mapped), "ID3D12Resource.Map(readback)")
+        let toCopy = min(length, resource.length)
+        if let mapped {
+            memcpy(dst, mapped, toCopy)
+        }
+        resource.resource.pointee.lpVtbl.pointee.Unmap(resource.resource, 0, nil)
+        if toCopy < length {
+            let remaining = length - toCopy
+            memset(dst.advanced(by: toCopy), 0, remaining)
+        }
+    }
+
     private func ensureComputeCommandResources() throws {
         if computeCommandAllocator != nil, computeCommandList != nil { return }
         guard let device else {

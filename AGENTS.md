@@ -43,17 +43,17 @@ These opaque handles/types **must be consistent** across agents.
 
 ```swift
 public struct ShaderID: Hashable { public let rawValue: String } // e.g. "basic_lit"
-public struct BufferHandle:    Hashable { let _id: UInt64 }
-public struct TextureHandle:   Hashable { let _id: UInt64 }
-public struct PipelineHandle:  Hashable { let _id: UInt64 }
-public struct ComputePipelineHandle: Hashable { let _id: UInt64 }
-public struct MeshHandle:      Hashable { let _id: UInt64 }
+public struct BufferHandle:    Hashable { /* opaque id */ }
+public struct TextureHandle:   Hashable { /* opaque id */ }
+public struct PipelineHandle:  Hashable { /* opaque id */ }
+public struct ComputePipelineHandle: Hashable { /* opaque id */ }
+public struct MeshHandle:      Hashable { /* opaque id */ }
 
 public enum BufferUsage { case vertex, index, uniform, storage, staging }
 public enum TextureFormat { case rgba8Unorm, bgra8Unorm, depth32Float /* … */ }
 
-public struct TextureDescriptor { /* width, height, mipLevels, format, usage flags */ }
-public struct TextureInitialData { /* per‑mip raw pointers or slices */ }
+public struct TextureDescriptor { /* width, height, mipLevels, format, usage */ }
+public struct TextureInitialData { /* per‑mip byte blobs */ }
 
 public struct VertexLayout { /* attribute semantics, formats, strides */ }
 public enum ShaderStage { case vertex, fragment, compute }
@@ -63,7 +63,13 @@ public struct BindingSlot {
     public enum Kind { case uniformBuffer, storageBuffer, sampledTexture, storageTexture, sampler }
     public let kind: Kind
 }
-public struct BindingSet { public var slots: [Int: Any] } // engine‑level typed union
+// Engine‑level typed union used in draw/dispatch calls.
+public struct BindingSet {
+    public mutating func setBuffer(_ h: BufferHandle, at: Int)
+    public mutating func setTexture(_ h: TextureHandle, at: Int)
+    public mutating func setSampler(_ h: SamplerHandle, at: Int)
+    public var materialConstants: MaterialConstants? // push/material constants (bytes)
+}
 ```
 
 **Conventions**
@@ -102,23 +108,38 @@ public struct BindingSet { public var slots: [Int: Any] } // engine‑level type
 ### 4.1 RenderBackend (GraphicsAgent)
 ```swift
 public protocol RenderBackend {
+    // Lifecycle
     init(window: SDLWindow) throws
     func beginFrame() throws
     func endFrame() throws
     func resize(width: Int, height: Int) throws
     func waitGPU() throws
 
+    // Resources
     func createBuffer(bytes: UnsafeRawPointer?, length: Int, usage: BufferUsage) throws -> BufferHandle
     func createTexture(descriptor: TextureDescriptor, initialData: TextureInitialData?) throws -> TextureHandle
-    func destroy(_ handle: Any) // Buffer/Texture/Pipeline
+    func createSampler(descriptor: SamplerDescriptor) throws -> SamplerHandle
+    func destroy(_ handle: ResourceHandle)
+    func readback(buffer: BufferHandle, into dst: UnsafeMutableRawPointer, length: Int) throws
 
+    // Mesh registration
+    func registerMesh(vertexBuffer: BufferHandle,
+                      vertexCount: Int,
+                      indexBuffer: BufferHandle?,
+                      indexCount: Int,
+                      indexFormat: IndexFormat) throws -> MeshHandle
+
+    // Graphics pipelines
     func makePipeline(_ desc: GraphicsPipelineDescriptor) throws -> PipelineHandle
-    func draw(mesh: MeshHandle, pipeline: PipelineHandle,
+    func draw(mesh: MeshHandle,
+              pipeline: PipelineHandle,
               bindings: BindingSet,
               transform: float4x4) throws
 
+    // Compute pipelines
     func makeComputePipeline(_ desc: ComputePipelineDescriptor) throws -> ComputePipelineHandle
-    func dispatchCompute(_ p: ComputePipelineHandle, groupsX: Int, groupsY: Int, groupsZ: Int,
+    func dispatchCompute(_ pipeline: ComputePipelineHandle,
+                         groupsX: Int, groupsY: Int, groupsZ: Int,
                          bindings: BindingSet) throws
 }
 ```
@@ -134,6 +155,8 @@ public protocol ShaderLibrary {
 
 ### 4.3 ComputeScheduler (ComputeAgent)
 ```swift
+// Note: In SDLKit, compute is integrated into RenderBackend for symmetry and simplicity.
+// A separate facade can exist if needed, forwarding to the RenderBackend methods.
 public protocol ComputeScheduler {
     func makeComputePipeline(_ d: ComputePipelineDescriptor) throws -> ComputePipelineHandle
     func dispatch(_ groups: (Int, Int, Int), pipeline: ComputePipelineHandle,
@@ -181,8 +204,8 @@ public protocol ComputeScheduler {
 - Acceptance: lighting matches reference image within tolerance on all backends.
 
 **M4 — Compute MVP**
-- Vector‑add compute; verify buffer output; integrate schedule via GraphicsAgent.
-- Acceptance: CPU vs GPU parity; dispatch timing logged; no stalls.
+- Vector‑add compute; verify buffer output; integrated via `RenderBackend` compute APIs.
+- Acceptance: CPU vs GPU parity (buffer readback); dispatch timing logged; no stalls.
 
 **M5 — Graphics ⇄ Compute Interop**
 - Compute updates a particle buffer rendered as instanced meshes.
@@ -223,6 +246,8 @@ public protocol ComputeScheduler {
 - Matrix builds (CI): macOS (Metal), Linux (Vulkan).
 - Windows (D3D12) is excluded from CI due to the Swift ≥ 6 requirement; re‑enable when Windows toolchains catch up.
 - Smoke tests: triangle; scene‑mesh; compute vector‑add.
+- Note: Headless CI skips GPU-backed golden tests. A GPU-enabled leg (windowing allowed) should
+  run the regression harness to enforce cross-backend parity before merges.
 - Optional headless checksums (where supported) and `--validation on` runs.
 - Artifacts: upload compiled shaders and logs for inspection.
 

@@ -133,6 +133,9 @@ jobs:
           set -euo pipefail
           swift test --skip-build --filter BackendHarnessTests -Xswiftc -DHEADLESS_CI
 
+      # TODO: Add a GPU-enabled runner to execute the regression harness with a real windowing
+      # session (no HEADLESS_CI) so golden images are validated on Linux Vulkan prior to merge.
+
       - name: Upload regression harness artifacts (Vulkan)
         if: always()
         uses: actions/upload-artifact@v4
@@ -245,6 +248,9 @@ jobs:
         run: |
           set -euo pipefail
           swift test --skip-build --filter BackendHarnessTests -Xswiftc -DHEADLESS_CI
+
+      # TODO: Add an additional macOS job with GUI enabled (no HEADLESS_CI) to run the regression
+      # harness on the real Metal backend and publish golden images as build artifacts.
 
       - name: Upload regression harness artifacts (Metal)
         if: always()

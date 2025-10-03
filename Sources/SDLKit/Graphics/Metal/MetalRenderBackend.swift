@@ -1204,6 +1204,24 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
                                   data: data)
     }
 
+    // MARK: - Readback
+    public func readback(buffer: BufferHandle, into dst: UnsafeMutableRawPointer, length: Int) throws {
+        guard let resource = buffers[buffer] else {
+            throw AgentError.invalidArgument("Unknown buffer handle \(buffer.rawValue)")
+        }
+        // Buffers are created with .storageModeShared; a direct memcpy is sufficient.
+        let srcPtr = resource.buffer.contents()
+        guard srcPtr != nil else {
+            throw AgentError.internalError("Metal buffer not CPU-accessible for readback")
+        }
+        let toCopy = min(length, resource.length)
+        memcpy(dst, srcPtr, toCopy)
+        if toCopy < length {
+            let remaining = length - toCopy
+            memset(dst.advanced(by: toCopy), 0, remaining)
+        }
+    }
+
     private static func hashHex(data: Data) -> String {
         // FNV-1a 64-bit
         var hash: UInt64 = 0xcbf29ce484222325

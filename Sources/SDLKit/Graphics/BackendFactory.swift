@@ -442,6 +442,23 @@ public class StubRenderBackend: RenderBackend {
     func withMutableBufferData(_ handle: BufferHandle, _ body: (inout Data) throws -> Void) throws {
         try core.withMutableBufferData(handle, body)
     }
+
+    public func readback(buffer: BufferHandle, into dst: UnsafeMutableRawPointer, length: Int) throws {
+        guard let data = core.bufferData(buffer) else {
+            throw AgentError.invalidArgument("Unknown buffer handle \(buffer.rawValue)")
+        }
+        let toCopy = min(length, data.count)
+        data.withUnsafeBytes { bytes in
+            if let base = bytes.baseAddress {
+                memcpy(dst, base, toCopy)
+            }
+        }
+        if toCopy < length {
+            let remaining = length - toCopy
+            let zeroPtr = dst.advanced(by: toCopy)
+            memset(zeroPtr, 0, remaining)
+        }
+    }
 }
 
 extension StubRenderBackend: GoldenImageCapturable {

@@ -2330,6 +2330,42 @@ public final class VulkanRenderBackend: RenderBackend, GoldenImageCapturable {
         try core.dispatchCompute(pipeline, groupsX: groupsX, groupsY: groupsY, groupsZ: groupsZ, bindings: bindings)
         #endif
     }
+
+    // MARK: - Readback
+    public func readback(buffer: BufferHandle, into dst: UnsafeMutableRawPointer, length: Int) throws {
+        #if canImport(CVulkan)
+        guard let dev = device else { throw AgentError.internalError("Vulkan device not ready") }
+        guard let srcRes = buffers[buffer], let srcBuffer = srcRes.buffer else {
+            throw AgentError.invalidArgument("Unknown buffer handle \(buffer.rawValue)")
+        }
+        try ensureCommandPoolAndSync()
+        // Create host-visible staging buffer
+        var stagingBuffer: VkBuffer? = nil
+        var stagingMemory: VkDeviceMemory? = nil
+        let size = VkDeviceSize(min(length, srcRes.length))
+        try createBuffer(size: size,
+                         usage: UInt32(VK_BUFFER_USAGE_TRANSFER_DST_BIT),
+                         properties: UInt32(VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT),
+                         bufferOut: &stagingBuffer,
+                         memoryOut: &stagingMemory)
+        // Copy src -> staging and wait for completion
+        try copyBuffer(src: srcBuffer, dst: stagingBuffer, size: size)
+        // Map and copy to destination
+        var mapped: UnsafeMutableRawPointer? = nil
+        _ = vkMapMemory(dev, stagingMemory, 0, size, 0, &mapped)
+        if let mapped {
+            memcpy(dst, mapped, Int(size))
+            vkUnmapMemory(dev, stagingMemory)
+        }
+        if Int(size) < length {
+            memset(dst.advanced(by: Int(size)), 0, length - Int(size))
+        }
+        if let sb = stagingBuffer { vkDestroyBuffer(dev, sb, nil) }
+        if let sm = stagingMemory { vkFreeMemory(dev, sm, nil) }
+        #else
+        throw AgentError.missingDependency("Vulkan headers unavailable; readback not supported in this build")
+        #endif
+    }
     // MARK: - Vulkan init
     private func initializeVulkan() throws {
         // Query SDL-required instance extensions via the window’s native handles
