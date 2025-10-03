@@ -17,6 +17,11 @@ on:
           - linux
           - windows
           - macos
+      gpu:
+        description: "Enable GPU harness steps (macOS only)"
+        type: boolean
+        required: false
+        default: false
 
 defaults:
   run:
@@ -269,6 +274,48 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: macos-golden-artifacts
+          path: ${{ env.SDLKIT_GOLDEN_ARTIFACT_DIR }}
+          if-no-files-found: ignore
+
+      # Optional GPU-enabled steps (macOS only). Run via `workflow_dispatch` with `gpu=true`.
+      - name: Configure pkg-config for Brew (GPU harness)
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.gpu == 'true' && (github.event.inputs.os == 'macos' || github.event.inputs.os == 'all') }}
+        run: |
+          set -euo pipefail
+          echo "PKG_CONFIG_PATH=$(brew --prefix)/lib/pkgconfig" >> "$GITHUB_ENV"
+
+      - name: Build tests for GPU-enabled harness (Metal)
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.gpu == 'true' && (github.event.inputs.os == 'macos' || github.event.inputs.os == 'all') }}
+        env:
+          SDLKIT_GUI_ENABLED: 'true'
+        run: |
+          set -euo pipefail
+          swift build --build-tests
+
+      - name: Seed golden store (Metal, GPU) [manual]
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.gpu == 'true' && (github.event.inputs.os == 'macos' || github.event.inputs.os == 'all') }}
+        env:
+          SDLKIT_GOLDEN: '1'
+          SDLKIT_GOLDEN_WRITE: '1'
+          SDLKIT_GUI_ENABLED: 'true'
+        run: |
+          set -euo pipefail
+          swift test --skip-build --filter BackendHarnessTests
+
+      - name: Run regression harness (Metal, GPU strict)
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.gpu == 'true' && (github.event.inputs.os == 'macos' || github.event.inputs.os == 'all') }}
+        env:
+          SDLKIT_GOLDEN: '1'
+          SDLKIT_GUI_ENABLED: 'true'
+        run: |
+          set -euo pipefail
+          swift test --skip-build --filter BackendHarnessTests
+
+      - name: Upload regression harness artifacts (Metal, GPU)
+        if: ${{ always() && github.event_name == 'workflow_dispatch' && github.event.inputs.gpu == 'true' && (github.event.inputs.os == 'macos' || github.event.inputs.os == 'all') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-golden-artifacts-gpu
           path: ${{ env.SDLKIT_GOLDEN_ARTIFACT_DIR }}
           if-no-files-found: ignore
 

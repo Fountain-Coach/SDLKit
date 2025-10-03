@@ -275,7 +275,7 @@ Steps:
 1) Seed macOS (Metal) baselines
 
 ```bash
-gh workflow run CI -f os=macos --ref main
+gh workflow run CI -f os=macos -f gpu=true --ref main
 gh run watch <run-id>
 ```
 
@@ -294,7 +294,7 @@ gh run watch <run-id>
 
 3) Verify strict parity
 
-Push normally or re-run CI. The GPU harness runs in strict mode (without the write flag) and fails on mismatches. To intentionally update baselines after a legitimate rendering change, repeat steps 1–2.
+Push normally or re-run CI. The GPU harness runs in strict mode (without the write flag) and fails on mismatches (when dispatched with `gpu=true`). To intentionally update baselines after a legitimate rendering change, repeat steps 1–2 with `gpu=true`.
 
 Notes:
 - The golden store is cached across CI runs. If you need a clean slate, bump the cache key (the workflow references `.github/workflows/ci.yml`) or purge the cache from the Actions UI.
