@@ -265,6 +265,40 @@ To reproduce the M1–M6 acceptance milestones referenced in `AGENTS.md`, use th
 - **M2/M3 – Scene graph + lighting:** The demo transitions into the lit SceneGraph sample, while the golden image tests render the cube with `basic_lit` to validate lighting consistency.【F:Sources/SDLKitDemo/main.swift†L221-L276】【F:Tests/SDLKitTests/GoldenImageTests.swift†L1-L80】
 - **M4 – Compute vector add:** `ShaderLibrary` includes the `vector_add` compute module so agents can register compute pipelines or write parity tests via `ShaderLibrary.shared.computeModule(for:)`, using the same artifact cache as the graphics shaders.【F:Sources/SDLKit/Graphics/ShaderLibrary.swift†L206-L256】 The CI pipeline runs a parity test on Metal that compares GPU output to CPU via the new buffer readback API.【F:Sources/SDLKit/Graphics/RenderBackend.swift†L208-L235】【F:Tests/SDLKitTests/ComputeVectorAddParityTests.swift†L1-L60】
 - **M5 – Graphics/compute interop:** `SceneGraphComputeInteropTests` animates a scene node whose vertices are rewritten each frame by the `scenegraph_wave` compute shader, proving shared resource flow.【F:Sources/SDLKit/SceneGraph/SceneGraphComputeInterop.swift†L1-L88】【F:Tests/SDLKitTests/SceneGraphComputeInteropTests.swift†L1-L41】 The regression harness uses a real compute shader (`ibl_brdf_lut`) to produce a storage texture prior to drawing so all backends exercise actual compute pipelines.【F:Sources/SDLKit/Support/RenderBackendTestHarness.swift†L200-L290】【F:Sources/SDLKit/Graphics/ShaderLibrary.swift†L481-L520】
+
+## Maintainers — Seeding Golden Baselines
+
+The GPU-enabled regression harness (Metal on macOS, Vulkan on Linux) compares rendered output against stored baselines. To initialize or update these baselines, use GitHub Actions’ manual dispatch. The baselines are persisted in `.fountain/sdlkit` (cached between CI runs) and exposed as artifacts for review.
+
+Steps:
+
+1) Seed macOS (Metal) baselines
+
+```bash
+gh workflow run CI -f os=macos --ref main
+gh run watch <run-id>
+```
+
+- The CI job includes a “Seed golden store (Metal, GPU) [manual]” step that runs with `SDLKIT_GOLDEN_WRITE=1` and writes baselines to `.fountain/sdlkit`.
+- Artifacts: `macos-golden-artifacts-gpu` contain the capture image(s) and hash files.
+
+2) Seed Linux (Vulkan) baselines
+
+```bash
+gh workflow run CI -f os=linux --ref main
+gh run watch <run-id>
+```
+
+- The CI job includes a “Seed golden store (Vulkan, GPU) [manual]” step that runs under Xvfb with validation enabled and writes baselines.
+- Artifacts: `linux-golden-artifacts-gpu` contain the capture image(s) and hash files.
+
+3) Verify strict parity
+
+Push normally or re-run CI. The GPU harness runs in strict mode (without the write flag) and fails on mismatches. To intentionally update baselines after a legitimate rendering change, repeat steps 1–2.
+
+Notes:
+- The golden store is cached across CI runs. If you need a clean slate, bump the cache key (the workflow references `.github/workflows/ci.yml`) or purge the cache from the Actions UI.
+- Headless harness and unit tests continue to run for fast feedback; the GPU harness provides cross-backend visual parity assurance.
 - **M6 – Tooling & docs:** This README and the shader build plugin document the full toolchain; updating shaders or adding materials now exercises the same workflow CI runs.【F:Plugins/ShaderBuildPlugin/Plugin.swift†L10-L39】【F:Scripts/ShaderBuild/build-shaders.py†L20-L189】
 
 ## Glossary & Tags
