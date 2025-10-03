@@ -82,11 +82,10 @@ final class ComputeVectorAddParityTests: XCTestCase {
         #if os(Linux)
         do { try await runVectorAddParity(backendOverride: "vulkan") }
         catch AgentError.sdlUnavailable { throw XCTSkip("SDL unavailable; skipping") }
-        catch AgentError.missingDependency { throw XCTSkip("Vulkan headers/loader unavailable; skipping") }
+        catch AgentError.missingDependency(_) { throw XCTSkip("Vulkan headers/loader unavailable; skipping") }
         catch AgentError.invalidArgument(let msg) { throw XCTSkip(msg) }
         #else
         throw XCTSkip("Vulkan test only on Linux")
         #endif
     }
 }
-

@@ -5,5 +5,5 @@ public enum AgentError: Error, Equatable {
     case invalidArgument(String)
     case internalError(String)
     case deviceLost(String)
+    case missingDependency(String)
 }
-
