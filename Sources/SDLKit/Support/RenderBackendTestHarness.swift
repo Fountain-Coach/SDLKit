@@ -213,8 +213,10 @@ public enum RenderBackendTestHarness {
                                                  capturable: GoldenImageCapturable,
                                                  backendKey: String,
                                                  options: Options) throws -> Result {
+        // Use a real compute module so backends exercise actual shader pipelines.
+        let computeShader = ShaderID("ibl_brdf_lut")
         let computeDescriptor = ComputePipelineDescriptor(label: "harness_compute_storage",
-                                                          shader: ShaderID("compute_storage_texture"))
+                                                          shader: computeShader)
         let computePipeline = try backend.makeComputePipeline(computeDescriptor)
         let storageDescriptor = TextureDescriptor(width: options.computeTextureSize.width,
                                                   height: options.computeTextureSize.height,
@@ -263,11 +265,23 @@ public enum RenderBackendTestHarness {
 
         var computeBindings = BindingSet()
         computeBindings.setTexture(storageTexture, at: 0)
+        // Push constants for IBL BRDF LUT (sample count, etc.). Keep it simple and deterministic.
+        var constants = Data(count: MemoryLayout<Float>.size * 4)
+        constants.withUnsafeMutableBytes { raw in
+            if let base = raw.bindMemory(to: Float.self).baseAddress {
+                base[0] = 64.0 // sampleCount
+                base[1] = 0.0; base[2] = 0.0; base[3] = 0.0
+            }
+        }
+        computeBindings.materialConstants = BindingSet.MaterialConstants(data: constants)
+        // Dispatch in threadgroups of (16,16,1)
+        let groupsX = max(1, (options.computeTextureSize.width + 15) / 16)
+        let groupsY = max(1, (options.computeTextureSize.height + 15) / 16)
         try backend.dispatchCompute(computePipeline,
-                                     groupsX: max(1, options.computeTextureSize.width / 8),
-                                     groupsY: max(1, options.computeTextureSize.height / 8),
-                                     groupsZ: 1,
-                                     bindings: computeBindings)
+                                    groupsX: groupsX,
+                                    groupsY: groupsY,
+                                    groupsZ: 1,
+                                    bindings: computeBindings)
 
         capturable.requestCapture()
 

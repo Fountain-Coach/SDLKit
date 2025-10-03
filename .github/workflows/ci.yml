@@ -260,21 +260,6 @@ jobs:
           path: ${{ env.SDLKIT_GOLDEN_ARTIFACT_DIR }}
           if-no-files-found: ignore
 
-      - name: Run regression harness (Metal)
-        env:
-          SDLKIT_GOLDEN: '1'
-          SDLKIT_GUI_ENABLED: 'false'
-        run: |
-          set -euo pipefail
-          swift test --skip-build --filter BackendHarnessTests -Xswiftc -DHEADLESS_CI
-
-      - name: Upload regression harness artifacts (Metal)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: macos-golden-artifacts
-          path: ${{ env.SDLKIT_GOLDEN_ARTIFACT_DIR }}
-          if-no-files-found: ignore
       - name: Run compute parity (Metal, GPU)
         env:
           SDLKIT_GUI_ENABLED: 'true'
@@ -282,3 +267,27 @@ jobs:
           set -euo pipefail
           # Run compute parity without HEADLESS_CI so SDL and Metal are active
           swift test --skip-build --filter ComputeVectorAddParityTests/testVectorAddParity_Metal
+
+      - name: Build tests for GPU-enabled harness (Metal)
+        env:
+          SDLKIT_GUI_ENABLED: 'true'
+        run: |
+          set -euo pipefail
+          swift build --build-tests
+
+      - name: Run regression harness (Metal, GPU)
+        env:
+          SDLKIT_GOLDEN: '1'
+          SDLKIT_GOLDEN_WRITE: '1'
+          SDLKIT_GUI_ENABLED: 'true'
+        run: |
+          set -euo pipefail
+          swift test --skip-build --filter BackendHarnessTests
+
+      - name: Upload regression harness artifacts (Metal, GPU)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-golden-artifacts-gpu
+          path: ${{ env.SDLKIT_GOLDEN_ARTIFACT_DIR }}
+          if-no-files-found: ignore
