@@ -700,6 +700,7 @@ public struct SDLKitJSONAgent {
         case .invalidArgument(let msg): return errorJSON(code: "invalid_argument", details: msg)
         case .internalError(let msg): return errorJSON(code: "internal_error", details: msg)
         case .deviceLost(let details): return errorJSON(code: "device_lost", details: details)
+        case .missingDependency(let dep): return errorJSON(code: "missing_dependency", details: dep)
         }
     }
 }
