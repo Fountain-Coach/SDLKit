@@ -118,6 +118,11 @@ private final class SamplerTrackingBackend: RenderBackend {
         }
         lastBoundSamplers = bound
     }
+
+    func readback(buffer: BufferHandle, into dst: UnsafeMutableRawPointer, length: Int) throws {
+        // Tests do not require buffer readback in this backend; zero-fill for safety.
+        memset(dst, 0, length)
+    }
 }
 
 final class ComputeSamplerBindingTests: XCTestCase {

@@ -125,6 +125,11 @@ private final class EnforcingBackend: RenderBackend {
             }
         }
     }
+
+    func readback(buffer: BufferHandle, into dst: UnsafeMutableRawPointer, length: Int) throws {
+        // Tests using EnforcingBackend do not rely on readback; zero-fill for safety.
+        memset(dst, 0, length)
+    }
 }
 
 final class PushConstantValidationTests: XCTestCase {

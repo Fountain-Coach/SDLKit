@@ -139,6 +139,21 @@ private final class RecordingRenderBackend: RenderBackend {
         _ = (pipeline, groupsX, groupsY, groupsZ, bindings)
         throw AgentError.notImplemented
     }
+
+    func readback(buffer: BufferHandle, into dst: UnsafeMutableRawPointer, length: Int) throws {
+        if let res = buffers[buffer] {
+            let toCopy = min(length, res.data.count)
+            res.data.withUnsafeBytes { bytes in
+                if let base = bytes.baseAddress { memcpy(dst, base, toCopy) }
+            }
+            if toCopy < length {
+                memset(dst.advanced(by: toCopy), 0, length - toCopy)
+            }
+        } else {
+            // No buffer content recorded; zero-fill for safety.
+            memset(dst, 0, length)
+        }
+    }
 }
 
 final class SceneGraphPushConstantTests: XCTestCase {
