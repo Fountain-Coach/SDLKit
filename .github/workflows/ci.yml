@@ -275,3 +275,10 @@ jobs:
           name: macos-golden-artifacts
           path: ${{ env.SDLKIT_GOLDEN_ARTIFACT_DIR }}
           if-no-files-found: ignore
+      - name: Run compute parity (Metal, GPU)
+        env:
+          SDLKIT_GUI_ENABLED: 'true'
+        run: |
+          set -euo pipefail
+          # Run compute parity without HEADLESS_CI so SDL and Metal are active
+          swift test --skip-build --filter ComputeVectorAddParityTests/testVectorAddParity_Metal

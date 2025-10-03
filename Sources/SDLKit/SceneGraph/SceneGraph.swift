@@ -230,6 +230,16 @@ public enum SceneGraphRenderer {
             var bindings = BindingSet()
             if let textureHandle = material.params.texture {
                 bindings.setTexture(textureHandle, at: 10) // fragment texture slot 0
+                // If the shader expects a sampler at the same slot, bind a default one.
+                if let module = try? ShaderLibrary.shared.module(for: material.shader) {
+                    if let fragmentSlots = module.bindings[.fragment] {
+                        let needsSampler = fragmentSlots.contains(where: { $0.index == 10 && $0.kind == .sampler })
+                        if needsSampler {
+                            let sampler = try defaultLinearSampler(backend: backend)
+                            bindings.setSampler(sampler, at: 10)
+                        }
+                    }
+                }
             }
             let mvp = node.worldTransform * vp
             // Determine light direction preference: material overrides scene
@@ -265,6 +275,27 @@ public enum SceneGraphRenderer {
         )
         let handle = try backend.makePipeline(desc)
         pipelineCache[material.shader] = handle
+        return handle
+    }
+}
+
+// MARK: - Default sampler cache
+extension SceneGraphRenderer {
+    private static var _defaultSampler: SamplerHandle?
+    private static func defaultLinearSampler(backend: RenderBackend) throws -> SamplerHandle {
+        if let h = _defaultSampler { return h }
+        let desc = SamplerDescriptor(label: "SDLKit.DefaultLinear",
+                                     minFilter: .linear,
+                                     magFilter: .linear,
+                                     mipFilter: .linear,
+                                     addressModeU: .repeatTexture,
+                                     addressModeV: .repeatTexture,
+                                     addressModeW: .repeatTexture,
+                                     lodMinClamp: 0,
+                                     lodMaxClamp: 32,
+                                     maxAnisotropy: 1)
+        let handle = try backend.createSampler(descriptor: desc)
+        _defaultSampler = handle
         return handle
     }
 }
