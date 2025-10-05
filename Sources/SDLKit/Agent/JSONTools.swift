@@ -114,6 +114,8 @@ public struct SDLKitJSONAgent {
         case audioA2MStreamStop = "/agent/audio/a2m/stream/stop"
         case midiStart = "/agent/midi/start"
         case midiStop = "/agent/midi/stop"
+        case midiDestinations = "/agent/midi/destinations"
+        case midiSelect = "/agent/midi/select"
         case audioPlaybackQueueOpen = "/agent/audio/playback/queue/open"
         case audioPlaybackQueueEnqueue = "/agent/audio/playback/queue/enqueue"
         case audioPlaybackPlayWAV = "/agent/audio/playback/play_wav"
@@ -410,6 +412,24 @@ public struct SDLKitJSONAgent {
                 struct Res: Codable { let ok: Bool }
                 _midiOut?.stop(); _midiOut = nil
                 return try JSONEncoder().encode(Res(ok: true))
+            case .midiDestinations:
+                #if os(macOS)
+                struct Res: Codable { let destinations: [String] }
+                return try JSONEncoder().encode(Res(destinations: MIDIOut.listDestinations()))
+                #else
+                return Self.errorJSON(code: "not_implemented", details: "MIDI listing not available on this platform")
+                #endif
+            case .midiSelect:
+                struct Req: Codable { let index: Int }
+                struct Res: Codable { let ok: Bool }
+                let req = try JSONDecoder().decode(Req.self, from: body)
+                #if os(macOS)
+                guard let mo = _midiOut else { throw AgentError.invalidArgument("MIDI not started") }
+                try mo.selectDestination(index: req.index)
+                return try JSONEncoder().encode(Res(ok: true))
+                #else
+                return Self.errorJSON(code: "not_implemented", details: "MIDI select not available on this platform")
+                #endif
             case .audioA2MStreamPoll:
                 struct Req: Codable { let audio_id: Int; let since: Int?; let max_events: Int?; let timeout_ms: Int? }
                 struct EventOut: Codable { let kind: String; let note: Int; let velocity: Int; let frameIndex: Int; let timestamp_ms: Int }

@@ -19,10 +19,7 @@ public final class MIDIOut {
         let ps = MIDIOutputPortCreate(client, "SDLKitOut" as CFString, &port)
         guard ps == 0 else { throw AgentError.internalError("MIDIOutputPortCreate failed: \(ps)") }
         outPort = port
-        // pick first destination
-        let count = MIDIGetNumberOfDestinations()
-        guard count > 0 else { throw AgentError.internalError("No MIDI destinations available") }
-        dest = MIDIGetDestination(0)
+        try selectDestination(index: 0)
     }
 
     public func stop() {
@@ -46,6 +43,27 @@ public final class MIDIOut {
             // TODO: Implement UMP (MIDI 2.0) when widely available
         }
     }
+
+    public static func listDestinations() -> [String] {
+        var names: [String] = []
+        let count = MIDIGetNumberOfDestinations()
+        for i in 0..<count {
+            let ep = MIDIGetDestination(i)
+            var cfName: Unmanaged<CFString>?
+            var name: String = "Destination \(i)"
+            if MIDIObjectGetStringProperty(ep, kMIDIPropertyName, &cfName) == 0, let cf = cfName?.takeRetainedValue() {
+                name = cf as String
+            }
+            names.append(name)
+        }
+        return names
+    }
+
+    public func selectDestination(index: Int) throws {
+        let count = MIDIGetNumberOfDestinations()
+        guard index >= 0 && index < count else { throw AgentError.invalidArgument("MIDI destination index out of range") }
+        dest = MIDIGetDestination(index)
+    }
 }
 #else
 public final class MIDIOut {
@@ -54,4 +72,3 @@ public final class MIDIOut {
     public func send(noteOn: Bool, note: UInt8, velocity: UInt8, channel: UInt8 = 0) {}
 }
 #endif
-

@@ -62,6 +62,10 @@ Follow the platform-specific setup instructions (Homebrew, apt, vcpkg, or manual
   - `POST /agent/audio/a2m/stream/start` → begin background stream for given capture
   - `POST /agent/audio/a2m/stream/poll` → `{ events, next }` with optional `since`, `max_events`, `timeout_ms`
   - `POST /agent/audio/a2m/stream/stop`
+  - `POST /agent/midi/start` → open MIDI out (macOS)
+  - `POST /agent/midi/destinations` → list device names
+  - `POST /agent/midi/select` → choose destination by index
+  - `POST /agent/midi/stop`
 
 ### Shader toolchain workflow
 

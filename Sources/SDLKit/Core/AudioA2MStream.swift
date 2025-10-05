@@ -14,6 +14,9 @@ final class AudioA2MStream {
 
     private let sink: ((MIDIEvent) -> Void)?
 
+    private var overlapMono: [Float] = []
+    private var frameIndex: Int = 0
+
     init(sessId: Int, sess: SDLKitJSONAgent.CaptureSessionProxy, a2m: AudioA2MStub, featCPU: AudioFeaturePump?, gpuState: SDLKitJSONAgent.GPUStreamProxy?, sink: ((MIDIEvent) -> Void)? = nil) {
         self.sessId = sessId
         self.sess = sess
@@ -62,9 +65,15 @@ final class AudioA2MStream {
                 var raw = Array(repeating: Float(0), count: 32 * hs * chans)
                 let read = sess.pump.readFrames(into: &raw)
                 if read > 0 {
-                    var mono: [Float] = []; mono.reserveCapacity(read)
+                    var mono: [Float] = overlapMono; mono.reserveCapacity(overlapMono.count + read)
                     for i in 0..<read { var acc: Float = 0; for c in 0..<chans { acc += raw[i*chans + c] }; mono.append(acc / Float(chans)) }
-                    let windows = SDLKitJSONAgent.GPUStoreHelper.buildWindowsAppend(audioId: sessId, mono: mono, frameSize: gpu.frameSize, hopSize: hs, maxFrames: 32)
+                    var windows: [[Float]] = []
+                    var idx = 0
+                    while idx + gpu.frameSize <= mono.count && windows.count < 32 {
+                        windows.append(Array(mono[idx..<(idx+gpu.frameSize)]))
+                        idx += hs
+                    }
+                    overlapMono = (idx < mono.count) ? Array(mono[idx..<mono.count]) : []
                     if !windows.isEmpty {
                         let melFrames = (try? gpu.gpu.process(frames: windows)) ?? []
                         let ev = a2m.process(melFrames: melFrames, startFrameIndex: nextFrameIndex)
