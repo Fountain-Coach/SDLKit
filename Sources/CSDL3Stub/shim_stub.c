@@ -367,6 +367,19 @@ int SDLKit_PutAudioStreamData(struct SDL_AudioStream *stream, const void *buf, i
 int SDLKit_FlushAudioStream(struct SDL_AudioStream *stream) { (void)stream; return -1; }
 void SDLKit_DestroyAudioStream(struct SDL_AudioStream *stream) { (void)stream; }
 
+int SDLKit_ListAudioPlaybackDevices(uint64_t *dst_ids, int dst_count) { (void)dst_ids; (void)dst_count; return -1; }
+int SDLKit_ListAudioRecordingDevices(uint64_t *dst_ids, int dst_count) { (void)dst_ids; (void)dst_count; return -1; }
+const char *SDLKit_GetAudioDeviceNameU64(uint64_t devid) { (void)devid; return NULL; }
+int SDLKit_GetAudioDevicePreferredFormatU64(uint64_t devid, int *sample_rate, unsigned int *format, int *channels, int *sample_frames) {
+    (void)devid; (void)sample_rate; (void)format; (void)channels; (void)sample_frames; return -1;
+}
+struct SDL_AudioStream *SDLKit_OpenAudioRecordingStreamU64(uint64_t devid, int sample_rate, unsigned int format, int channels) {
+    (void)devid; (void)sample_rate; (void)format; (void)channels; return NULL;
+}
+struct SDL_AudioStream *SDLKit_OpenAudioPlaybackStreamU64(uint64_t devid, int sample_rate, unsigned int format, int channels) {
+    (void)devid; (void)sample_rate; (void)format; (void)channels; return NULL;
+}
+
 void SDLKit_TTF_Quit(void) {
     s_ttf_quit_calls++;
 }

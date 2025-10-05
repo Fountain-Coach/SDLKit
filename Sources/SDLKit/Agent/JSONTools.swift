@@ -58,6 +58,8 @@ public struct SDLKitJSONAgent {
         case drawPoints = "/agent/gui/drawPoints"
         case drawLines = "/agent/gui/drawLines"
         case drawRects = "/agent/gui/drawRects"
+        // Audio (preview)
+        case audioDevices = "/agent/audio/devices"
     }
 
     private struct CacheSignature: Equatable {
@@ -111,6 +113,11 @@ public struct SDLKitJSONAgent {
         }
         do {
             switch ep {
+            case .audioDevices:
+                struct R: Codable { struct D: Codable { let id: UInt64; let kind: String; let name: String; let sample_rate: Int; let channels: Int; let format: String; let buffer_frames: Int }; let playback: [D]; let recording: [D] }
+                let playback = try SDLAudioDeviceList.list(.playback).map { d in R.D(id: d.id, kind: "playback", name: d.name, sample_rate: d.preferred.sampleRate, channels: d.preferred.channels, format: d.preferred.format == .f32 ? "f32" : "s16", buffer_frames: d.bufferFrames) }
+                let recording = try SDLAudioDeviceList.list(.recording).map { d in R.D(id: d.id, kind: "recording", name: d.name, sample_rate: d.preferred.sampleRate, channels: d.preferred.channels, format: d.preferred.format == .f32 ? "f32" : "s16", buffer_frames: d.bufferFrames) }
+                return try JSONEncoder().encode(R(playback: playback, recording: recording))
             case .openapiYAML:
                 if let ext = Self.loadExternalOpenAPIYAML() { return ext }
                 return Data(SDLKitOpenAPI.yaml.utf8)

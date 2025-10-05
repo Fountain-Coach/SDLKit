@@ -35,17 +35,67 @@ public struct SDLAudioSpec: Equatable {
     }
 }
 
+public enum SDLAudioDeviceKind { case playback, recording }
+
+public struct SDLAudioDeviceInfo: Equatable {
+    public let id: UInt64
+    public let kind: SDLAudioDeviceKind
+    public let name: String
+    public let preferred: SDLAudioSpec
+    public let bufferFrames: Int
+}
+
+public enum SDLAudioDeviceList {
+    #if canImport(CSDL3) && !HEADLESS_CI
+    public static func list(_ kind: SDLAudioDeviceKind) throws -> [SDLAudioDeviceInfo] {
+        var ids = Array<UInt64>(repeating: 0, count: 32)
+        let n: Int32 = ids.withUnsafeMutableBufferPointer { buf in
+            if kind == .playback {
+                return SDLKit_ListAudioPlaybackDevices(buf.baseAddress, Int32(buf.count))
+            } else {
+                return SDLKit_ListAudioRecordingDevices(buf.baseAddress, Int32(buf.count))
+            }
+        }
+        if n < 0 { throw AgentError.internalError(SDLCore.lastError()) }
+        var results: [SDLAudioDeviceInfo] = []
+        for i in 0..<Int(n) {
+            let devid = ids[i]
+            guard let cname = SDLKit_GetAudioDeviceNameU64(devid) else { continue }
+            let name = String(cString: cname)
+            var sr: Int32 = 0, fmt: UInt32 = 0, ch: Int32 = 0, frames: Int32 = 0
+            if SDLKit_GetAudioDevicePreferredFormatU64(devid, &sr, &fmt, &ch, &frames) != 0 {
+                // If format query fails, provide a basic default
+                sr = 48000; fmt = SDLKit_AudioFormat_F32(); ch = 2; frames = 0
+            }
+            let spec = SDLAudioSpec(sampleRate: Int(sr), channels: Int(ch), format: (fmt == SDLKit_AudioFormat_S16() ? .s16 : .f32))
+            results.append(.init(id: devid, kind: kind, name: name, preferred: spec, bufferFrames: Int(frames)))
+        }
+        return results
+    }
+    #else
+    public static func list(_ kind: SDLAudioDeviceKind) throws -> [SDLAudioDeviceInfo] {
+        throw AgentError.sdlUnavailable
+    }
+    #endif
+}
+
 public final class SDLAudioCapture {
     #if canImport(CSDL3) && !HEADLESS_CI
     private var stream: UnsafeMutablePointer<SDL_AudioStream>?
     private let spec: SDLAudioSpec
     #endif
 
-    public init(spec: SDLAudioSpec = SDLAudioSpec()) throws {
+    public init(spec: SDLAudioSpec = SDLAudioSpec(), deviceId: UInt64? = nil) throws {
         #if canImport(CSDL3) && !HEADLESS_CI
         self.spec = spec
         try SDLCore.shared.ensureInitialized()
-        guard let s = SDLKit_OpenDefaultAudioRecordingStream(Int32(spec.sampleRate), spec.format.cFormat, Int32(spec.channels)) else {
+        let s: UnsafeMutablePointer<SDL_AudioStream>?
+        if let devid = deviceId {
+            s = SDLKit_OpenAudioRecordingStreamU64(devid, Int32(spec.sampleRate), spec.format.cFormat, Int32(spec.channels))
+        } else {
+            s = SDLKit_OpenDefaultAudioRecordingStream(Int32(spec.sampleRate), spec.format.cFormat, Int32(spec.channels))
+        }
+        guard let s else {
             throw AgentError.internalError(SDLCore.lastError())
         }
         self.stream = s
@@ -109,11 +159,17 @@ public final class SDLAudioPlayback {
     private let spec: SDLAudioSpec
     #endif
 
-    public init(spec: SDLAudioSpec = SDLAudioSpec()) throws {
+    public init(spec: SDLAudioSpec = SDLAudioSpec(), deviceId: UInt64? = nil) throws {
         #if canImport(CSDL3) && !HEADLESS_CI
         self.spec = spec
         try SDLCore.shared.ensureInitialized()
-        guard let s = SDLKit_OpenDefaultAudioPlaybackStream(Int32(spec.sampleRate), spec.format.cFormat, Int32(spec.channels)) else {
+        let s: UnsafeMutablePointer<SDL_AudioStream>?
+        if let devid = deviceId {
+            s = SDLKit_OpenAudioPlaybackStreamU64(devid, Int32(spec.sampleRate), spec.format.cFormat, Int32(spec.channels))
+        } else {
+            s = SDLKit_OpenDefaultAudioPlaybackStream(Int32(spec.sampleRate), spec.format.cFormat, Int32(spec.channels))
+        }
+        guard let s else {
             throw AgentError.internalError(SDLCore.lastError())
         }
         self.stream = s

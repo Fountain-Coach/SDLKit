@@ -352,6 +352,55 @@ typedef struct SDLKit_Event {
   static inline void SDLKit_DestroyAudioStream(SDL_AudioStream *stream) {
     SDL_DestroyAudioStream(stream);
   }
+
+  // --- Audio device enumeration ---
+  static inline int SDLKit_ListAudioPlaybackDevices(uint64_t *dst_ids, int dst_count) {
+    int count = 0;
+    SDL_AudioDeviceID *ids = SDL_GetAudioPlaybackDevices(&count);
+    if (!ids) { return -1; }
+    int n = (count < dst_count) ? count : dst_count;
+    for (int i = 0; i < n; ++i) { dst_ids[i] = (uint64_t)ids[i]; }
+    SDL_free(ids);
+    return n;
+  }
+  static inline int SDLKit_ListAudioRecordingDevices(uint64_t *dst_ids, int dst_count) {
+    int count = 0;
+    SDL_AudioDeviceID *ids = SDL_GetAudioRecordingDevices(&count);
+    if (!ids) { return -1; }
+    int n = (count < dst_count) ? count : dst_count;
+    for (int i = 0; i < n; ++i) { dst_ids[i] = (uint64_t)ids[i]; }
+    SDL_free(ids);
+    return n;
+  }
+  static inline const char *SDLKit_GetAudioDeviceNameU64(uint64_t devid) {
+    return SDL_GetAudioDeviceName((SDL_AudioDeviceID)devid);
+  }
+  static inline int SDLKit_GetAudioDevicePreferredFormatU64(uint64_t devid, int *sample_rate, unsigned int *format, int *channels, int *sample_frames) {
+    SDL_AudioSpec spec;
+    int frames = 0;
+    if (!SDL_GetAudioDeviceFormat((SDL_AudioDeviceID)devid, &spec, &frames)) { return -1; }
+    if (sample_rate) { *sample_rate = spec.freq; }
+    if (format) { *format = (unsigned int)spec.format; }
+    if (channels) { *channels = spec.channels; }
+    if (sample_frames) { *sample_frames = frames; }
+    return 0;
+  }
+  static inline SDL_AudioStream *SDLKit_OpenAudioRecordingStreamU64(uint64_t devid, int sample_rate, unsigned int format, int channels) {
+    SDL_AudioSpec spec; spec.freq = sample_rate; spec.format = (SDL_AudioFormat)format; spec.channels = channels;
+    SDL_AudioStream *stream = SDL_OpenAudioDeviceStream((SDL_AudioDeviceID)devid, &spec, NULL, NULL);
+    if (!stream) { return NULL; }
+    SDL_AudioDeviceID dev = SDL_GetAudioStreamDevice(stream);
+    (void)SDL_ResumeAudioDevice(dev);
+    return stream;
+  }
+  static inline SDL_AudioStream *SDLKit_OpenAudioPlaybackStreamU64(uint64_t devid, int sample_rate, unsigned int format, int channels) {
+    SDL_AudioSpec spec; spec.freq = sample_rate; spec.format = (SDL_AudioFormat)format; spec.channels = channels;
+    SDL_AudioStream *stream = SDL_OpenAudioDeviceStream((SDL_AudioDeviceID)devid, &spec, NULL, NULL);
+    if (!stream) { return NULL; }
+    SDL_AudioDeviceID dev = SDL_GetAudioStreamDevice(stream);
+    (void)SDL_ResumeAudioDevice(dev);
+    return stream;
+  }
 #else
   // Headless CI or no headers: provide minimal types so Swift can compile,
   // but no symbol definitions (and Swift code compiles them out in HEADLESS_CI).
@@ -457,6 +506,12 @@ typedef struct SDLKit_Event {
   int SDLKit_PutAudioStreamData(struct SDL_AudioStream *stream, const void *buf, int len);
   int SDLKit_FlushAudioStream(struct SDL_AudioStream *stream);
   void SDLKit_DestroyAudioStream(struct SDL_AudioStream *stream);
+  int SDLKit_ListAudioPlaybackDevices(uint64_t *dst_ids, int dst_count);
+  int SDLKit_ListAudioRecordingDevices(uint64_t *dst_ids, int dst_count);
+  const char *SDLKit_GetAudioDeviceNameU64(uint64_t devid);
+  int SDLKit_GetAudioDevicePreferredFormatU64(uint64_t devid, int *sample_rate, unsigned int *format, int *channels, int *sample_frames);
+  struct SDL_AudioStream *SDLKit_OpenAudioRecordingStreamU64(uint64_t devid, int sample_rate, unsigned int format, int channels);
+  struct SDL_AudioStream *SDLKit_OpenAudioPlaybackStreamU64(uint64_t devid, int sample_rate, unsigned int format, int channels);
 
   int SDLKitStub_DestroyRendererCallCount(void);
   int SDLKitStub_QuitCallCount(void);
