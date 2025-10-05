@@ -6,6 +6,10 @@ public struct SDLKitJSONAgent {
     public init() { self.agent = SDLKitGUIAgent() }
     public init(agent: SDLKitGUIAgent) { self.agent = agent }
 
+    // Minimal audio session store (preview)
+    private static var _audioStore: [Int: SDLAudioCapture] = [:]
+    private static var _nextAudioId: Int = 1
+
     public enum Endpoint: String {
         case open = "/agent/gui/window/open"
         case close = "/agent/gui/window/close"
@@ -60,6 +64,7 @@ public struct SDLKitJSONAgent {
         case drawRects = "/agent/gui/drawRects"
         // Audio (preview)
         case audioDevices = "/agent/audio/devices"
+        case audioCaptureOpen = "/agent/audio/capture/open"
     }
 
     private struct CacheSignature: Equatable {
@@ -118,6 +123,15 @@ public struct SDLKitJSONAgent {
                 let playback = try SDLAudioDeviceList.list(.playback).map { d in R.D(id: d.id, kind: "playback", name: d.name, sample_rate: d.preferred.sampleRate, channels: d.preferred.channels, format: d.preferred.format == .f32 ? "f32" : "s16", buffer_frames: d.bufferFrames) }
                 let recording = try SDLAudioDeviceList.list(.recording).map { d in R.D(id: d.id, kind: "recording", name: d.name, sample_rate: d.preferred.sampleRate, channels: d.preferred.channels, format: d.preferred.format == .f32 ? "f32" : "s16", buffer_frames: d.bufferFrames) }
                 return try JSONEncoder().encode(R(playback: playback, recording: recording))
+            case .audioCaptureOpen:
+                struct Req: Codable { let device_id: UInt64?; let sample_rate: Int?; let channels: Int?; let format: String? }
+                struct Res: Codable { let audio_id: Int }
+                let req = try JSONDecoder().decode(Req.self, from: body)
+                let fmt: SDLAudioSampleFormat = (req.format?.lowercased() == "s16") ? .s16 : .f32
+                let spec = SDLAudioSpec(sampleRate: req.sample_rate ?? 48000, channels: req.channels ?? 2, format: fmt)
+                let cap = try SDLAudioCapture(spec: spec, deviceId: req.device_id)
+                let aid = Self._nextAudioId; Self._nextAudioId += 1; Self._audioStore[aid] = cap
+                return try JSONEncoder().encode(Res(audio_id: aid))
             case .openapiYAML:
                 if let ext = Self.loadExternalOpenAPIYAML() { return ext }
                 return Data(SDLKitOpenAPI.yaml.utf8)
