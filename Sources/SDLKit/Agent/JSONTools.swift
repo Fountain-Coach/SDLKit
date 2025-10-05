@@ -11,6 +11,7 @@ public struct SDLKitJSONAgent {
     private static var _capStore: [Int: CaptureSession] = [:]
     private static var _playStore: [Int: SDLAudioPlayback] = [:]
     private static var _playQueues: [Int: SDLAudioPlaybackQueue] = [:]
+    private static var _monitors: [Int: AudioMonitor] = [:] // keyed by capture audio_id
     private static var _nextAudioId: Int = 1
 
     private struct GPUState { let gpu: AudioGPUFeatureExtractor; let frameSize: Int; let hopSize: Int; let melBands: Int; var overlapMono: [Float]; var prevMel: [Float]? }
@@ -104,6 +105,8 @@ public struct SDLKitJSONAgent {
         case audioPlaybackQueueOpen = "/agent/audio/playback/queue/open"
         case audioPlaybackQueueEnqueue = "/agent/audio/playback/queue/enqueue"
         case audioPlaybackPlayWAV = "/agent/audio/playback/play_wav"
+        case audioMonitorStart = "/agent/audio/monitor/start"
+        case audioMonitorStop = "/agent/audio/monitor/stop"
     }
 
     private struct CacheSignature: Equatable {
@@ -326,6 +329,20 @@ public struct SDLKitJSONAgent {
                 let samples = try wav.converted(to: pb.spec)
                 try pb.queue(samples: samples)
                 return try JSONEncoder().encode(Res(audio_id: aid))
+            case .audioMonitorStart:
+                struct Req: Codable { let capture_id: Int; let playback_id: Int; let chunk_frames: Int? }
+                struct Res: Codable { let ok: Bool }
+                let req = try JSONDecoder().decode(Req.self, from: body)
+                guard let sess = Self._capStore[req.capture_id], let pb = Self._playStore[req.playback_id] else { throw AgentError.invalidArgument("invalid capture_id or playback_id") }
+                let mon = try AudioMonitor(capture: sess.cap, pump: sess.pump, playback: pb, chunkFrames: req.chunk_frames ?? 1024)
+                Self._monitors[req.capture_id] = mon
+                return try JSONEncoder().encode(Res(ok: true))
+            case .audioMonitorStop:
+                struct Req: Codable { let capture_id: Int }
+                struct Res: Codable { let ok: Bool }
+                let req = try JSONDecoder().decode(Req.self, from: body)
+                if let mon = Self._monitors.removeValue(forKey: req.capture_id) { mon.stop() }
+                return try JSONEncoder().encode(Res(ok: true))
             case .audioA2MStart:
                 struct Req: Codable { let audio_id: Int; let mel_bands: Int; let energy_threshold: Float?; let min_on_frames: Int?; let min_off_frames: Int? }
                 struct Res: Codable { let ok: Bool }

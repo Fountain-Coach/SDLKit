@@ -199,6 +199,9 @@ public final class ShaderLibrary {
         if let audio = makeAudioDFTPowerComputeModule(root: root) {
             result[audio.id] = audio
         }
+        if let audioMel = makeAudioMelProjectComputeModule(root: root) {
+            result[audioMel.id] = audioMel
+        }
         return result
     }
 
@@ -534,6 +537,38 @@ public final class ShaderLibrary {
         return ComputeShaderModule(
             id: id,
             entryPoint: "audio_dft_power_cs",
+            threadgroupSize: (64, 1, 1),
+            pushConstantSize: MemoryLayout<UInt32>.size * 4,
+            bindings: bindings,
+            artifacts: artifacts
+        )
+    }
+
+    private static func makeAudioMelProjectComputeModule(root: URL) -> ComputeShaderModule? {
+        let id = ShaderID("audio_mel_project")
+        let dxilRoot = root.appendingPathComponent("dxil", isDirectory: true)
+        let spirvRoot = root.appendingPathComponent("spirv", isDirectory: true)
+        let metalRoot = root.appendingPathComponent("metal", isDirectory: true)
+
+        let artifacts = ComputeShaderModuleArtifacts(
+            dxil: ShaderLibrary.existingFile(dxilRoot.appendingPathComponent("audio_mel_project_cs.dxil")),
+            spirv: ShaderLibrary.existingFile(spirvRoot.appendingPathComponent("audio_mel_project.comp.spv")),
+            metalLibrary: ShaderLibrary.existingFile(metalRoot.appendingPathComponent("audio_mel_project.metallib"))
+        )
+
+        if artifacts.dxil == nil && artifacts.spirv == nil && artifacts.metalLibrary == nil {
+            return nil
+        }
+
+        let bindings: [BindingSlot] = [
+            BindingSlot(index: 0, kind: .storageBuffer), // input power spectra
+            BindingSlot(index: 1, kind: .storageBuffer), // mel weights matrix
+            BindingSlot(index: 2, kind: .storageBuffer)  // output mel energies
+        ]
+
+        return ComputeShaderModule(
+            id: id,
+            entryPoint: "audio_mel_project_cs",
             threadgroupSize: (64, 1, 1),
             pushConstantSize: MemoryLayout<UInt32>.size * 4,
             bindings: bindings,
