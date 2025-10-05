@@ -56,6 +56,11 @@ COMPUTE_MODULES = [
         "source": Path("Shaders/compute/ibl_brdf_lut.hlsl"),
         "entry_point": "ibl_brdf_lut_cs",
     },
+    {
+        "name": "audio_dft_power",
+        "source": Path("Shaders/compute/audio_dft_power.hlsl"),
+        "entry_point": "audio_dft_power_cs",
+    },
 ]
 
 

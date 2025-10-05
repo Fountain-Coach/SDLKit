@@ -7,7 +7,7 @@ public struct SDLKitJSONAgent {
     public init(agent: SDLKitGUIAgent) { self.agent = agent }
 
     // Minimal audio session store (preview)
-    private struct CaptureSession { let cap: SDLAudioCapture; let pump: SDLAudioChunkedCapturePump; var feat: AudioFeaturePump? }
+    private struct CaptureSession { let cap: SDLAudioCapture; let pump: SDLAudioChunkedCapturePump; var feat: AudioFeaturePump?; var a2m: AudioA2MStub?; var featureFrameCursor: Int }
     private static var _capStore: [Int: CaptureSession] = [:]
     private static var _playStore: [Int: SDLAudioPlayback] = [:]
     private static var _nextAudioId: Int = 1
@@ -72,6 +72,8 @@ public struct SDLKitJSONAgent {
         case audioPlaybackSine = "/agent/audio/playback/sine"
         case audioFeaturesStart = "/agent/audio/features/start"
         case audioFeaturesReadMel = "/agent/audio/features/read_mel"
+        case audioA2MStart = "/agent/audio/a2m/start"
+        case audioA2MRead = "/agent/audio/a2m/read"
     }
 
     private struct CacheSignature: Equatable {
@@ -139,7 +141,7 @@ public struct SDLKitJSONAgent {
                 let cap = try SDLAudioCapture(spec: spec, deviceId: req.device_id)
                 // Choose a generous ring buffer (0.5s) for now
                 let pump = SDLAudioChunkedCapturePump(capture: cap, bufferFrames: max(2048, spec.sampleRate / 2))
-                let aid = Self._nextAudioId; Self._nextAudioId += 1; Self._capStore[aid] = CaptureSession(cap: cap, pump: pump, feat: nil)
+                let aid = Self._nextAudioId; Self._nextAudioId += 1; Self._capStore[aid] = CaptureSession(cap: cap, pump: pump, feat: nil, a2m: nil, featureFrameCursor: 0)
                 return try JSONEncoder().encode(Res(audio_id: aid))
             case .audioCaptureRead:
                 struct Req: Codable { let audio_id: Int; let frames: Int }
@@ -191,6 +193,29 @@ public struct SDLKitJSONAgent {
                 let onsetData = onset.withUnsafeBufferPointer { Data(buffer: $0) }
                 let out = Res(frames: got, mel_bands: req.mel_bands, mel_base64: melData.base64EncodedString(), onset_base64: onsetData.base64EncodedString())
                 return try JSONEncoder().encode(out)
+            case .audioA2MStart:
+                struct Req: Codable { let audio_id: Int; let mel_bands: Int; let energy_threshold: Float?; let min_on_frames: Int?; let min_off_frames: Int? }
+                struct Res: Codable { let ok: Bool }
+                let req = try JSONDecoder().decode(Req.self, from: body)
+                guard var sess = Self._capStore[req.audio_id] else { throw AgentError.invalidArgument("unknown audio_id") }
+                let stub = AudioA2MStub(melBands: req.mel_bands, energyThreshold: req.energy_threshold ?? 1e-2, minOnFrames: req.min_on_frames ?? 2, minOffFrames: req.min_off_frames ?? 2)
+                sess.a2m = stub
+                sess.featureFrameCursor = 0
+                Self._capStore[req.audio_id] = sess
+                return try JSONEncoder().encode(Res(ok: true))
+            case .audioA2MRead:
+                struct Req: Codable { let audio_id: Int; let frames: Int; let mel_bands: Int }
+                struct Res: Codable { let events: [MIDIEvent] }
+                let req = try JSONDecoder().decode(Req.self, from: body)
+                guard var sess = Self._capStore[req.audio_id], let feat = sess.feat, let a2m = sess.a2m else { throw AgentError.invalidArgument("A2M not started for audio_id") }
+                let (got, mel, _) = feat.readMel(frames: req.frames, melBands: req.mel_bands)
+                var framesMel: [[Float]] = []
+                framesMel.reserveCapacity(got)
+                for i in 0..<got { let start = i * req.mel_bands; framesMel.append(Array(mel[start..<(start+req.mel_bands)])) }
+                let events = a2m.process(melFrames: framesMel, startFrameIndex: sess.featureFrameCursor)
+                sess.featureFrameCursor += got
+                Self._capStore[req.audio_id] = sess
+                return try JSONEncoder().encode(Res(events: events))
             case .openapiYAML:
                 if let ext = Self.loadExternalOpenAPIYAML() { return ext }
                 return Data(SDLKitOpenAPI.yaml.utf8)

@@ -3,14 +3,14 @@ import Foundation
 // Minimal CPU feature extraction: STFT -> mel energies + onset (spectral flux).
 // Pure Swift implementation for portability.
 
-fileprivate func hannWindow(_ n: Int) -> [Float] {
+func hannWindow(_ n: Int) -> [Float] {
     guard n > 0 else { return [] }
     let factor = 2.0 * Float.pi / Float(n - 1)
     return (0..<n).map { 0.5 * (1.0 - cos(Float($0) * factor)) }
 }
 
 // Iterative radix-2 FFT (complex), in-place arrays (real, imag).
-fileprivate final class FFTPlan {
+final class FFTPlan {
     let n: Int
     private let levels: Int
     private let cosTable: [Float]
@@ -64,7 +64,7 @@ fileprivate final class FFTPlan {
     }
 }
 
-fileprivate final class MelFilterBank {
+final class MelFilterBank {
     let sampleRate: Int
     let nFft: Int
     let nBins: Int
@@ -257,4 +257,3 @@ public final class AudioFeaturePump {
         }
     }
 }
-
