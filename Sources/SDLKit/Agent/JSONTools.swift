@@ -7,7 +7,9 @@ public struct SDLKitJSONAgent {
     public init(agent: SDLKitGUIAgent) { self.agent = agent }
 
     // Minimal audio session store (preview)
-    private static var _audioStore: [Int: SDLAudioCapture] = [:]
+    private struct CaptureSession { let cap: SDLAudioCapture; let pump: SDLAudioChunkedCapturePump }
+    private static var _capStore: [Int: CaptureSession] = [:]
+    private static var _playStore: [Int: SDLAudioPlayback] = [:]
     private static var _nextAudioId: Int = 1
 
     public enum Endpoint: String {
@@ -65,6 +67,9 @@ public struct SDLKitJSONAgent {
         // Audio (preview)
         case audioDevices = "/agent/audio/devices"
         case audioCaptureOpen = "/agent/audio/capture/open"
+        case audioCaptureRead = "/agent/audio/capture/read"
+        case audioPlaybackOpen = "/agent/audio/playback/open"
+        case audioPlaybackSine = "/agent/audio/playback/sine"
     }
 
     private struct CacheSignature: Equatable {
@@ -130,8 +135,35 @@ public struct SDLKitJSONAgent {
                 let fmt: SDLAudioSampleFormat = (req.format?.lowercased() == "s16") ? .s16 : .f32
                 let spec = SDLAudioSpec(sampleRate: req.sample_rate ?? 48000, channels: req.channels ?? 2, format: fmt)
                 let cap = try SDLAudioCapture(spec: spec, deviceId: req.device_id)
-                let aid = Self._nextAudioId; Self._nextAudioId += 1; Self._audioStore[aid] = cap
+                // Choose a generous ring buffer (0.5s) for now
+                let pump = SDLAudioChunkedCapturePump(capture: cap, bufferFrames: max(2048, spec.sampleRate / 2))
+                let aid = Self._nextAudioId; Self._nextAudioId += 1; Self._capStore[aid] = CaptureSession(cap: cap, pump: pump)
                 return try JSONEncoder().encode(Res(audio_id: aid))
+            case .audioCaptureRead:
+                struct Req: Codable { let audio_id: Int; let frames: Int }
+                struct Res: Codable { let frames: Int; let channels: Int; let format: String; let data_base64: String }
+                let req = try JSONDecoder().decode(Req.self, from: body)
+                guard let sess = Self._capStore[req.audio_id] else { throw AgentError.invalidArgument("unknown audio_id") }
+                var framesBuf = Array(repeating: Float(0), count: max(0, req.frames) * sess.cap.spec.channels)
+                let gotFrames = sess.pump.readFrames(into: &framesBuf)
+                let data = Data(bytes: framesBuf, count: gotFrames * sess.cap.spec.channels * MemoryLayout<Float>.size)
+                let out = Res(frames: gotFrames, channels: sess.cap.spec.channels, format: "f32", data_base64: data.base64EncodedString())
+                return try JSONEncoder().encode(out)
+            case .audioPlaybackOpen:
+                struct Req: Codable { let device_id: UInt64?; let sample_rate: Int?; let channels: Int?; let format: String? }
+                struct Res: Codable { let audio_id: Int }
+                let req = try JSONDecoder().decode(Req.self, from: body)
+                let fmt: SDLAudioSampleFormat = (req.format?.lowercased() == "s16") ? .s16 : .f32
+                let spec = SDLAudioSpec(sampleRate: req.sample_rate ?? 48000, channels: req.channels ?? 2, format: fmt)
+                let pb = try SDLAudioPlayback(spec: spec, deviceId: req.device_id)
+                let aid = Self._nextAudioId; Self._nextAudioId += 1; Self._playStore[aid] = pb
+                return try JSONEncoder().encode(Res(audio_id: aid))
+            case .audioPlaybackSine:
+                struct Req: Codable { let audio_id: Int; let frequency: Double; let seconds: Double; let amplitude: Double? }
+                let req = try JSONDecoder().decode(Req.self, from: body)
+                guard let pb = Self._playStore[req.audio_id] else { throw AgentError.invalidArgument("unknown audio_id") }
+                try pb.playSine(frequency: req.frequency, amplitude: req.amplitude ?? 0.2, seconds: req.seconds)
+                return Self.okJSON()
             case .openapiYAML:
                 if let ext = Self.loadExternalOpenAPIYAML() { return ext }
                 return Data(SDLKitOpenAPI.yaml.utf8)

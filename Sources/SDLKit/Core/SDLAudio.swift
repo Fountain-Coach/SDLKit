@@ -48,6 +48,7 @@ public struct SDLAudioDeviceInfo: Equatable {
 public enum SDLAudioDeviceList {
     #if canImport(CSDL3) && !HEADLESS_CI
     public static func list(_ kind: SDLAudioDeviceKind) throws -> [SDLAudioDeviceInfo] {
+        try SDLCore.shared.ensureInitialized()
         var ids = Array<UInt64>(repeating: 0, count: 32)
         let n: Int32 = ids.withUnsafeMutableBufferPointer { buf in
             if kind == .playback {
@@ -80,9 +81,9 @@ public enum SDLAudioDeviceList {
 }
 
 public final class SDLAudioCapture {
+    public let spec: SDLAudioSpec
     #if canImport(CSDL3) && !HEADLESS_CI
     private var stream: UnsafeMutablePointer<SDL_AudioStream>?
-    private let spec: SDLAudioSpec
     #endif
 
     public init(spec: SDLAudioSpec = SDLAudioSpec(), deviceId: UInt64? = nil) throws {
@@ -154,9 +155,9 @@ public final class SDLAudioCapture {
 }
 
 public final class SDLAudioPlayback {
+    public let spec: SDLAudioSpec
     #if canImport(CSDL3) && !HEADLESS_CI
     private var stream: UnsafeMutablePointer<SDL_AudioStream>?
-    private let spec: SDLAudioSpec
     #endif
 
     public init(spec: SDLAudioSpec = SDLAudioSpec(), deviceId: UInt64? = nil) throws {
@@ -174,6 +175,7 @@ public final class SDLAudioPlayback {
         }
         self.stream = s
         #else
+        self.spec = spec
         throw AgentError.sdlUnavailable
         #endif
     }
@@ -201,8 +203,68 @@ public final class SDLAudioPlayback {
     }
 
     public func queue(samples: [Float]) throws {
-        samples.withUnsafeBytes { raw in
-            try? self.queue(samples: raw)
+        try samples.withUnsafeBytes { raw in
+            try self.queue(samples: raw)
         }
+    }
+
+    // Simple sine generator helper
+    public func playSine(frequency: Double, amplitude: Double = 0.2, seconds: Double) throws {
+        let totalFrames = Int(Double(spec.sampleRate) * seconds)
+        var buffer = Array(repeating: Float(0), count: totalFrames * spec.channels)
+        let twoPi = 2.0 * Double.pi
+        for i in 0..<totalFrames {
+            let t = Double(i) / Double(spec.sampleRate)
+            let s = Float(sin(twoPi * frequency * t) * amplitude)
+            for c in 0..<spec.channels { buffer[i * spec.channels + c] = s }
+        }
+        try queue(samples: buffer)
+    }
+}
+
+public final class SDLAudioResampler {
+    #if canImport(CSDL3) && !HEADLESS_CI
+    private var stream: UnsafeMutablePointer<SDL_AudioStream>?
+    #endif
+    public let src: SDLAudioSpec
+    public let dst: SDLAudioSpec
+
+    public init(src: SDLAudioSpec, dst: SDLAudioSpec) throws {
+        self.src = src; self.dst = dst
+        #if canImport(CSDL3) && !HEADLESS_CI
+        try SDLCore.shared.ensureInitialized()
+        guard let s = SDLKit_CreateAudioStreamConvert(Int32(src.sampleRate), src.format.cFormat, Int32(src.channels), Int32(dst.sampleRate), dst.format.cFormat, Int32(dst.channels)) else {
+            throw AgentError.internalError(SDLCore.lastError())
+        }
+        self.stream = s
+        #else
+        throw AgentError.sdlUnavailable
+        #endif
+    }
+
+    deinit { #if canImport(CSDL3) && !HEADLESS_CI; if let s = stream { SDLKit_DestroyAudioStream(s) }; #endif }
+
+    public func convert(samples input: [Float]) throws -> [Float] {
+        #if canImport(CSDL3) && !HEADLESS_CI
+        guard src.format == .f32 && dst.format == .f32 else { throw AgentError.invalidArgument("SDLAudioResampler.convert supports .f32 only") }
+        guard let s = stream else { throw AgentError.internalError("resampler not initialized") }
+        if input.isEmpty { return [] }
+        let putRC = input.withUnsafeBytes { raw -> Int32 in
+            return SDLKit_PutAudioStreamData(s, raw.baseAddress, Int32(raw.count))
+        }
+        if putRC != 0 { throw AgentError.internalError(SDLCore.lastError()) }
+        // Estimate space: simple upper bound (2x) for safety
+        var out = Array(repeating: Float(0), count: max(1, (input.count * dst.sampleRate) / max(1, src.sampleRate) * dst.channels / max(1, src.channels) + 8))
+        let outBytes = out.count * MemoryLayout<Float>.size
+        let got = out.withUnsafeMutableBytes { raw -> Int32 in
+            return SDLKit_GetAudioStreamData(s, raw.baseAddress, Int32(outBytes))
+        }
+        if got < 0 { throw AgentError.internalError(SDLCore.lastError()) }
+        let samples = Int(got) / MemoryLayout<Float>.size
+        if samples < out.count { out.removeSubrange(samples..<out.count) }
+        return out
+        #else
+        throw AgentError.sdlUnavailable
+        #endif
     }
 }

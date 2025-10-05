@@ -352,6 +352,15 @@ typedef struct SDLKit_Event {
   static inline void SDLKit_DestroyAudioStream(SDL_AudioStream *stream) {
     SDL_DestroyAudioStream(stream);
   }
+  static inline SDL_AudioStream *SDLKit_CreateAudioStreamConvert(int src_rate, unsigned int src_format, int src_channels,
+                                                                 int dst_rate, unsigned int dst_format, int dst_channels) {
+    SDL_AudioSpec src; src.freq = src_rate; src.format = (SDL_AudioFormat)src_format; src.channels = src_channels;
+    SDL_AudioSpec dst; dst.freq = dst_rate; dst.format = (SDL_AudioFormat)dst_format; dst.channels = dst_channels;
+    return SDL_CreateAudioStream(&src, &dst);
+  }
+  static inline int SDLKit_ClearAudioStream(SDL_AudioStream *stream) {
+    return SDL_ClearAudioStream(stream) ? 0 : -1;
+  }
 
   // --- Audio device enumeration ---
   static inline int SDLKit_ListAudioPlaybackDevices(uint64_t *dst_ids, int dst_count) {
@@ -506,6 +515,9 @@ typedef struct SDLKit_Event {
   int SDLKit_PutAudioStreamData(struct SDL_AudioStream *stream, const void *buf, int len);
   int SDLKit_FlushAudioStream(struct SDL_AudioStream *stream);
   void SDLKit_DestroyAudioStream(struct SDL_AudioStream *stream);
+  struct SDL_AudioStream *SDLKit_CreateAudioStreamConvert(int src_rate, unsigned int src_format, int src_channels,
+                                                          int dst_rate, unsigned int dst_format, int dst_channels);
+  int SDLKit_ClearAudioStream(struct SDL_AudioStream *stream);
   int SDLKit_ListAudioPlaybackDevices(uint64_t *dst_ids, int dst_count);
   int SDLKit_ListAudioRecordingDevices(uint64_t *dst_ids, int dst_count);
   const char *SDLKit_GetAudioDeviceNameU64(uint64_t devid);

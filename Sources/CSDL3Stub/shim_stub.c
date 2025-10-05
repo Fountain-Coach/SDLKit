@@ -366,6 +366,11 @@ int SDLKit_GetAudioStreamData(struct SDL_AudioStream *stream, void *buf, int len
 int SDLKit_PutAudioStreamData(struct SDL_AudioStream *stream, const void *buf, int len) { (void)stream; (void)buf; (void)len; return -1; }
 int SDLKit_FlushAudioStream(struct SDL_AudioStream *stream) { (void)stream; return -1; }
 void SDLKit_DestroyAudioStream(struct SDL_AudioStream *stream) { (void)stream; }
+struct SDL_AudioStream *SDLKit_CreateAudioStreamConvert(int src_rate, unsigned int src_format, int src_channels,
+                                                        int dst_rate, unsigned int dst_format, int dst_channels) {
+    (void)src_rate; (void)src_format; (void)src_channels; (void)dst_rate; (void)dst_format; (void)dst_channels; return NULL;
+}
+int SDLKit_ClearAudioStream(struct SDL_AudioStream *stream) { (void)stream; return -1; }
 
 int SDLKit_ListAudioPlaybackDevices(uint64_t *dst_ids, int dst_count) { (void)dst_ids; (void)dst_count; return -1; }
 int SDLKit_ListAudioRecordingDevices(uint64_t *dst_ids, int dst_count) { (void)dst_ids; (void)dst_count; return -1; }

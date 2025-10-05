@@ -54,11 +54,11 @@ public final class SPSCFloatRingBuffer {
         let first = min(n, capacity - h)
         buffer.withUnsafeMutableBufferPointer { dst in
             if first > 0 {
-                dst.baseAddress!.advanced(by: h).assign(from: src.baseAddress!, count: first)
+                dst.baseAddress!.advanced(by: h).update(from: src.baseAddress!, count: first)
             }
             if n > first {
                 let rem = n - first
-                dst.baseAddress!.assign(from: src.baseAddress!.advanced(by: first), count: rem)
+                dst.baseAddress!.update(from: src.baseAddress!.advanced(by: first), count: rem)
             }
         }
         h = (h + n) % capacity
@@ -86,11 +86,11 @@ public final class SPSCFloatRingBuffer {
         let first = min(n, capacity - t)
         buffer.withUnsafeBufferPointer { src in
             if first > 0 {
-                dst.baseAddress!.assign(from: src.baseAddress!.advanced(by: t), count: first)
+                dst.baseAddress!.update(from: src.baseAddress!.advanced(by: t), count: first)
             }
             if n > first {
                 let rem = n - first
-                dst.baseAddress!.advanced(by: first).assign(from: src.baseAddress!, count: rem)
+                dst.baseAddress!.advanced(by: first).update(from: src.baseAddress!, count: rem)
             }
         }
         t = (t + n) % capacity
@@ -115,7 +115,9 @@ public final class SDLAudioChunkedCapturePump {
         self.capture = capture
         self.channels = capture.spec.channels
         self.ring = SPSCFloatRingBuffer(capacity: max(1, bufferFrames * channels * 2))
-        self.thread = Thread(target: Self.self, selector: #selector(runLoop), object: nil)
+        self.thread = Thread {
+            self.threadLoop()
+        }
         self.thread.name = "SDLKit.AudioPump"
         self.thread.qualityOfService = .userInitiated
         self.thread.start()
@@ -132,7 +134,7 @@ public final class SDLAudioChunkedCapturePump {
         } / channels
     }
 
-    @objc private func runLoop() {
+    private func threadLoop() {
         var temp = Array(repeating: Float(0), count: 4096)
         while running {
             let availFrames = capture.availableFrames()
@@ -141,9 +143,8 @@ public final class SDLAudioChunkedCapturePump {
                 continue
             }
             let wantFrames = min(availFrames, temp.count / channels)
-            temp.withUnsafeMutableBufferPointer { buf in
-                var framesBuf = UnsafeMutableBufferPointer(start: buf.baseAddress, count: wantFrames * channels)
-                var arr = Array(framesBuf)
+            if wantFrames > 0 {
+                var arr = Array(repeating: Float(0), count: wantFrames * channels)
                 if let read = try? capture.readFrames(into: &arr), read > 0 {
                     arr.withUnsafeBufferPointer { rb in _ = ring.write(rb) }
                 }
@@ -151,4 +152,3 @@ public final class SDLAudioChunkedCapturePump {
         }
     }
 }
-
