@@ -76,6 +76,8 @@ The repository includes the DXC/SPIRV-Cross-driven shader build pipeline and Swi
 - [Installation Guide](docs/install.md) — set up the Fountain‑Coach SDL3 fork, configure environment overrides, and verify your toolchain.
 - [Shader Toolchain Guide](docs/shader-toolchain.md) — install DXC/SPIRV-Cross, run the SwiftPM plugin, and validate shader artifacts.
 - [Scene Graph & Demo Guide](docs/scenegraph.md) — launch the 3D demo, manage golden images, and tune scene graph defaults.
+- [Status Audit](docs/status-audit.md) — current state vs goals and identified gaps.
+- [Time‑Bridge Hooks](docs/time-bridge-hooks.md) — small, safe tasks to close gaps under time constraints.
 
 ### Headless CI mode
 
