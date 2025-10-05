@@ -309,6 +309,49 @@ typedef struct SDLKit_Event {
     static inline void SDLKit_TTF_Quit(void) { }
   #endif
   static inline void SDLKit_Quit(void) { SDL_Quit(); }
+  // --- Audio (SDL3) ---
+  // Minimal wrappers to expose SDL3 audio streams for capture and playback.
+  // These use the simplified device+stream API and resume the device.
+  static inline unsigned int SDLKit_AudioFormat_F32(void) { return SDL_AUDIO_F32; }
+  static inline unsigned int SDLKit_AudioFormat_S16(void) { return SDL_AUDIO_S16; }
+
+  static inline SDL_AudioStream *SDLKit_OpenDefaultAudioRecordingStream(int sample_rate,
+                                                                        unsigned int format,
+                                                                        int channels) {
+    SDL_AudioSpec spec; spec.freq = sample_rate; spec.format = (SDL_AudioFormat)format; spec.channels = channels;
+    SDL_AudioStream *stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_RECORDING, &spec, NULL, NULL);
+    if (!stream) { return NULL; }
+    SDL_AudioDeviceID dev = SDL_GetAudioStreamDevice(stream);
+    (void)SDL_ResumeAudioDevice(dev);
+    return stream;
+  }
+
+  static inline SDL_AudioStream *SDLKit_OpenDefaultAudioPlaybackStream(int sample_rate,
+                                                                       unsigned int format,
+                                                                       int channels) {
+    SDL_AudioSpec spec; spec.freq = sample_rate; spec.format = (SDL_AudioFormat)format; spec.channels = channels;
+    SDL_AudioStream *stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, NULL, NULL);
+    if (!stream) { return NULL; }
+    SDL_AudioDeviceID dev = SDL_GetAudioStreamDevice(stream);
+    (void)SDL_ResumeAudioDevice(dev);
+    return stream;
+  }
+
+  static inline int SDLKit_GetAudioStreamAvailable(SDL_AudioStream *stream) {
+    return SDL_GetAudioStreamAvailable(stream);
+  }
+  static inline int SDLKit_GetAudioStreamData(SDL_AudioStream *stream, void *buf, int len) {
+    return SDL_GetAudioStreamData(stream, buf, len);
+  }
+  static inline int SDLKit_PutAudioStreamData(SDL_AudioStream *stream, const void *buf, int len) {
+    return SDL_PutAudioStreamData(stream, buf, len) ? 0 : -1;
+  }
+  static inline int SDLKit_FlushAudioStream(SDL_AudioStream *stream) {
+    return SDL_FlushAudioStream(stream) ? 0 : -1;
+  }
+  static inline void SDLKit_DestroyAudioStream(SDL_AudioStream *stream) {
+    SDL_DestroyAudioStream(stream);
+  }
 #else
   // Headless CI or no headers: provide minimal types so Swift can compile,
   // but no symbol definitions (and Swift code compiles them out in HEADLESS_CI).
@@ -402,6 +445,18 @@ typedef struct SDLKit_Event {
   void *SDLKit_Win32HWND(SDL_Window *window);
   bool SDLKit_CreateVulkanSurface(SDL_Window *window, VkInstance instance, VkSurfaceKHR *surface);
   void SDLKit_Quit(void);
+
+  // --- Audio (stubs) ---
+  unsigned int SDLKit_AudioFormat_F32(void);
+  unsigned int SDLKit_AudioFormat_S16(void);
+  struct SDL_AudioStream;
+  struct SDL_AudioStream *SDLKit_OpenDefaultAudioRecordingStream(int sample_rate, unsigned int format, int channels);
+  struct SDL_AudioStream *SDLKit_OpenDefaultAudioPlaybackStream(int sample_rate, unsigned int format, int channels);
+  int SDLKit_GetAudioStreamAvailable(struct SDL_AudioStream *stream);
+  int SDLKit_GetAudioStreamData(struct SDL_AudioStream *stream, void *buf, int len);
+  int SDLKit_PutAudioStreamData(struct SDL_AudioStream *stream, const void *buf, int len);
+  int SDLKit_FlushAudioStream(struct SDL_AudioStream *stream);
+  void SDLKit_DestroyAudioStream(struct SDL_AudioStream *stream);
 
   int SDLKitStub_DestroyRendererCallCount(void);
   int SDLKitStub_QuitCallCount(void);

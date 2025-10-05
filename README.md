@@ -35,6 +35,13 @@ Follow the platform-specific setup instructions (Homebrew, apt, vcpkg, or manual
 - Build: `swift build`
 - Test: `swift test`
 
+### Audio (preview)
+
+- New SDLAudio wrappers expose SDL3 audio streams for capture and playback.
+- `SDLAudioCapture` opens the default recording device and lets you pull interleaved `.f32` frames.
+- `SDLAudioPlayback` opens the default playback device and accepts queued PCM samples.
+- Headless CI and shim builds compile these APIs but return `sdlUnavailable` or throw on use.
+
 ### Shader toolchain workflow
 
 The repository includes the DXC/SPIRV-Cross-driven shader build pipeline and SwiftPM plugin so you can regenerate graphics and compute artifacts locally. [Read more →](docs/shader-toolchain.md)

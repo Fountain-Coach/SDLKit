@@ -352,6 +352,21 @@ void SDLKit_Quit(void) {
     s_quit_calls++;
 }
 
+// --- Audio (stubs) ---
+unsigned int SDLKit_AudioFormat_F32(void) { return 0; }
+unsigned int SDLKit_AudioFormat_S16(void) { return 0; }
+struct SDL_AudioStream *SDLKit_OpenDefaultAudioRecordingStream(int sample_rate, unsigned int format, int channels) {
+    (void)sample_rate; (void)format; (void)channels; return NULL;
+}
+struct SDL_AudioStream *SDLKit_OpenDefaultAudioPlaybackStream(int sample_rate, unsigned int format, int channels) {
+    (void)sample_rate; (void)format; (void)channels; return NULL;
+}
+int SDLKit_GetAudioStreamAvailable(struct SDL_AudioStream *stream) { (void)stream; return 0; }
+int SDLKit_GetAudioStreamData(struct SDL_AudioStream *stream, void *buf, int len) { (void)stream; (void)buf; (void)len; return -1; }
+int SDLKit_PutAudioStreamData(struct SDL_AudioStream *stream, const void *buf, int len) { (void)stream; (void)buf; (void)len; return -1; }
+int SDLKit_FlushAudioStream(struct SDL_AudioStream *stream) { (void)stream; return -1; }
+void SDLKit_DestroyAudioStream(struct SDL_AudioStream *stream) { (void)stream; }
+
 void SDLKit_TTF_Quit(void) {
     s_ttf_quit_calls++;
 }
