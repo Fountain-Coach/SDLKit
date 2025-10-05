@@ -49,6 +49,8 @@ Follow the platform-specific setup instructions (Homebrew, apt, vcpkg, or manual
   - `POST /agent/audio/capture/read` → `{ frames, channels, format, data_base64 }` (Float32 interleaved)
   - `POST /agent/audio/playback/open` → `{ audio_id }`
   - `POST /agent/audio/playback/sine` (queue a sine tone)
+  - `POST /agent/audio/features/start` → start mel/onset extractor
+  - `POST /agent/audio/features/read_mel` → `{ frames, mel_bands, mel_base64, onset_base64 }`
 
 ### Shader toolchain workflow
 

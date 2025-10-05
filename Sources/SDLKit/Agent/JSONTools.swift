@@ -7,7 +7,7 @@ public struct SDLKitJSONAgent {
     public init(agent: SDLKitGUIAgent) { self.agent = agent }
 
     // Minimal audio session store (preview)
-    private struct CaptureSession { let cap: SDLAudioCapture; let pump: SDLAudioChunkedCapturePump }
+    private struct CaptureSession { let cap: SDLAudioCapture; let pump: SDLAudioChunkedCapturePump; var feat: AudioFeaturePump? }
     private static var _capStore: [Int: CaptureSession] = [:]
     private static var _playStore: [Int: SDLAudioPlayback] = [:]
     private static var _nextAudioId: Int = 1
@@ -70,6 +70,8 @@ public struct SDLKitJSONAgent {
         case audioCaptureRead = "/agent/audio/capture/read"
         case audioPlaybackOpen = "/agent/audio/playback/open"
         case audioPlaybackSine = "/agent/audio/playback/sine"
+        case audioFeaturesStart = "/agent/audio/features/start"
+        case audioFeaturesReadMel = "/agent/audio/features/read_mel"
     }
 
     private struct CacheSignature: Equatable {
@@ -137,7 +139,7 @@ public struct SDLKitJSONAgent {
                 let cap = try SDLAudioCapture(spec: spec, deviceId: req.device_id)
                 // Choose a generous ring buffer (0.5s) for now
                 let pump = SDLAudioChunkedCapturePump(capture: cap, bufferFrames: max(2048, spec.sampleRate / 2))
-                let aid = Self._nextAudioId; Self._nextAudioId += 1; Self._capStore[aid] = CaptureSession(cap: cap, pump: pump)
+                let aid = Self._nextAudioId; Self._nextAudioId += 1; Self._capStore[aid] = CaptureSession(cap: cap, pump: pump, feat: nil)
                 return try JSONEncoder().encode(Res(audio_id: aid))
             case .audioCaptureRead:
                 struct Req: Codable { let audio_id: Int; let frames: Int }
@@ -164,6 +166,31 @@ public struct SDLKitJSONAgent {
                 guard let pb = Self._playStore[req.audio_id] else { throw AgentError.invalidArgument("unknown audio_id") }
                 try pb.playSine(frequency: req.frequency, amplitude: req.amplitude ?? 0.2, seconds: req.seconds)
                 return Self.okJSON()
+            case .audioFeaturesStart:
+                struct Req: Codable { let audio_id: Int; let frame_size: Int?; let hop_size: Int?; let mel_bands: Int? }
+                struct Res: Codable { let ok: Bool }
+                let req = try JSONDecoder().decode(Req.self, from: body)
+                guard var sess = Self._capStore[req.audio_id] else { throw AgentError.invalidArgument("unknown audio_id") }
+                let fs = req.frame_size ?? 2048
+                let hs = req.hop_size ?? max(256, fs/4)
+                let mb = req.mel_bands ?? 64
+                if let feat = AudioFeaturePump(capture: sess.cap, pump: sess.pump, frameSize: fs, hopSize: hs, melBands: mb) {
+                    sess.feat = feat
+                    Self._capStore[req.audio_id] = sess
+                    return try JSONEncoder().encode(Res(ok: true))
+                } else {
+                    throw AgentError.invalidArgument("invalid feature config (frame_size must be power-of-two)")
+                }
+            case .audioFeaturesReadMel:
+                struct Req: Codable { let audio_id: Int; let frames: Int; let mel_bands: Int }
+                struct Res: Codable { let frames: Int; let mel_bands: Int; let mel_base64: String; let onset_base64: String }
+                let req = try JSONDecoder().decode(Req.self, from: body)
+                guard let sess = Self._capStore[req.audio_id], let feat = sess.feat else { throw AgentError.invalidArgument("features not started for audio_id") }
+                let (got, mel, onset) = feat.readMel(frames: req.frames, melBands: req.mel_bands)
+                let melData = mel.withUnsafeBufferPointer { Data(buffer: $0) }
+                let onsetData = onset.withUnsafeBufferPointer { Data(buffer: $0) }
+                let out = Res(frames: got, mel_bands: req.mel_bands, mel_base64: melData.base64EncodedString(), onset_base64: onsetData.base64EncodedString())
+                return try JSONEncoder().encode(out)
             case .openapiYAML:
                 if let ext = Self.loadExternalOpenAPIYAML() { return ext }
                 return Data(SDLKitOpenAPI.yaml.utf8)
