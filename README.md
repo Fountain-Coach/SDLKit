@@ -49,10 +49,14 @@ Follow the platform-specific setup instructions (Homebrew, apt, vcpkg, or manual
   - `POST /agent/audio/capture/read` → `{ frames, channels, format, data_base64 }` (Float32 interleaved)
   - `POST /agent/audio/playback/open` → `{ audio_id }`
   - `POST /agent/audio/playback/sine` (queue a sine tone)
+  - `POST /agent/audio/playback/queue/open` → `{ audio_id }` (starts a ring-buffered drain)
+  - `POST /agent/audio/playback/queue/enqueue` (enqueue base64 f32 PCM)
+  - `POST /agent/audio/playback/play_wav` → opens (or reuses) playback and queues WAV
   - `POST /agent/audio/features/start` → start mel/onset extractor
+    - accepts `{ use_gpu: true, window_id, backend }` to run DFT on GPU when a render backend is available for a window
   - `POST /agent/audio/features/read_mel` → `{ frames, mel_bands, mel_base64, onset_base64 }`
   - `POST /agent/audio/a2m/start` → start stub note detection (threshold/hysteresis)
-  - `POST /agent/audio/a2m/read` → `{ events: [{ kind, note, velocity, frameIndex }] }`
+  - `POST /agent/audio/a2m/read` → `{ events: [{ kind, note, velocity, frameIndex, timestamp_ms }] }`
 
 ### Shader toolchain workflow
 

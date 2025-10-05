@@ -222,6 +222,98 @@ public final class SDLAudioPlayback {
     }
 }
 
+public final class SDLAudioPlaybackQueue {
+    private let playback: SDLAudioPlayback
+    private let ring: SPSCFloatRingBuffer
+    private let channels: Int
+    private let chunkFrames: Int
+    private var running = true
+    private let thread: Thread
+
+    public init(playback: SDLAudioPlayback, capacityFrames: Int = 48000, chunkFrames: Int = 2048) {
+        self.playback = playback
+        self.channels = playback.spec.channels
+        self.ring = SPSCFloatRingBuffer(capacity: max(1, capacityFrames * channels * 2))
+        self.chunkFrames = max(128, chunkFrames)
+        self.thread = Thread { [weak self] in self?.runLoop() }
+        self.thread.name = "SDLKit.AudioPlaybackQueue"
+        self.thread.qualityOfService = .userInitiated
+        self.thread.start()
+    }
+
+    deinit { stop() }
+
+    public func stop() { running = false }
+
+    public func enqueue(samples: [Float]) {
+        samples.withUnsafeBufferPointer { _ = ring.write($0) }
+    }
+
+    private func runLoop() {
+        var buf = Array(repeating: Float(0), count: chunkFrames * channels)
+        while running {
+            let read = buf.withUnsafeMutableBufferPointer { ring.read(into: $0) }
+            if read > 0 {
+                let bytes = read * MemoryLayout<Float>.size
+                buf.withUnsafeBytes { raw in
+                    try? playback.queue(samples: UnsafeRawBufferPointer(start: raw.baseAddress, count: bytes))
+                }
+            } else {
+                Thread.sleep(forTimeInterval: 0.002)
+            }
+        }
+    }
+}
+
+public struct SDLAudioWAV {
+    public let sampleRate: Int
+    public let channels: Int
+    public let format: SDLAudioSampleFormat
+    public let data: Data
+
+    #if canImport(CSDL3) && !HEADLESS_CI
+    public static func load(path: String) throws -> SDLAudioWAV {
+        var spec = SDL_AudioSpec()
+        var buf: UnsafeMutablePointer<UInt8>? = nil
+        var len: UInt32 = 0
+        let rc = path.withCString { p in SDLKit_LoadWAV(p, &spec, &buf, &len) }
+        guard rc == 0, let buf, len > 0 else { throw AgentError.internalError(SDLCore.lastError()) }
+        defer { SDLKit_free(buf) }
+        let data = Data(bytes: buf, count: Int(len))
+        let fmt: SDLAudioSampleFormat = (spec.format == SDLKit_AudioFormat_S16()) ? .s16 : .f32
+        return SDLAudioWAV(sampleRate: Int(spec.freq), channels: Int(spec.channels), format: fmt, data: data)
+    }
+
+    public func converted(to spec: SDLAudioSpec) throws -> [Float] {
+        if format == .f32 && spec.sampleRate == sampleRate && spec.channels == channels {
+            // reinterpret data as Float
+            var out: [Float] = Array(repeating: 0, count: data.count / MemoryLayout<Float>.size)
+            _ = out.withUnsafeMutableBytes { dst in data.copyBytes(to: dst) }
+            return out
+        }
+        let src = SDLAudioSpec(sampleRate: sampleRate, channels: channels, format: format)
+        let resampler = try SDLAudioResampler(src: src, dst: spec)
+        if format == .f32 {
+            var floats = Array(repeating: Float(0), count: data.count / MemoryLayout<Float>.size)
+            _ = floats.withUnsafeMutableBytes { dst in data.copyBytes(to: dst) }
+            return try resampler.convert(samples: floats)
+        } else {
+            // s16 -> f32 via temporary conversion
+            let sampleCount = data.count / MemoryLayout<Int16>.size
+            var floats = Array(repeating: Float(0), count: sampleCount)
+            data.withUnsafeBytes { raw in
+                let s16 = raw.bindMemory(to: Int16.self)
+                for i in 0..<sampleCount { floats[i] = Float(s16[i]) / 32768.0 }
+            }
+            return try resampler.convert(samples: floats)
+        }
+    }
+    #else
+    public static func load(path: String) throws -> SDLAudioWAV { throw AgentError.sdlUnavailable }
+    public func converted(to spec: SDLAudioSpec) throws -> [Float] { throw AgentError.sdlUnavailable }
+    #endif
+}
+
 public final class SDLAudioResampler {
     #if canImport(CSDL3) && !HEADLESS_CI
     private var stream: UnsafeMutablePointer<SDL_AudioStream>?

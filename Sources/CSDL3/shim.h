@@ -362,6 +362,16 @@ typedef struct SDLKit_Event {
     return SDL_ClearAudioStream(stream) ? 0 : -1;
   }
 
+  // WAV loading helpers
+  static inline int SDLKit_LoadWAV(const char *path, SDL_AudioSpec *out_spec, unsigned char **out_buf, unsigned int *out_len) {
+    Uint8 *buf = NULL; Uint32 len = 0; SDL_AudioSpec spec;
+    if (!SDL_LoadWAV(path, &spec, &buf, &len)) { return -1; }
+    if (out_spec) { *out_spec = spec; }
+    if (out_buf) { *out_buf = (unsigned char*)buf; }
+    if (out_len) { *out_len = (unsigned int)len; }
+    return 0;
+  }
+
   // --- Audio device enumeration ---
   static inline int SDLKit_ListAudioPlaybackDevices(uint64_t *dst_ids, int dst_count) {
     int count = 0;

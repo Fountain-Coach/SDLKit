@@ -173,8 +173,10 @@ public final class AudioFeaturePump {
     private let pump: SDLAudioChunkedCapturePump
     private let extractor: AudioFeatureExtractor
     private let channels: Int
-    private let frameSize: Int
-    private let hopSize: Int
+    public let frameSize: Int
+    public let hopSize: Int
+    public let melBands: Int
+    public let sampleRate: Int
     private var running = true
     private var thread: Thread?
 
@@ -188,6 +190,8 @@ public final class AudioFeaturePump {
         self.channels = capture.spec.channels
         self.frameSize = frameSize
         self.hopSize = hopSize
+        self.melBands = melBands
+        self.sampleRate = capture.spec.sampleRate
         guard let ex = AudioFeatureExtractor(sampleRate: capture.spec.sampleRate, channels: capture.spec.channels, frameSize: frameSize, hopSize: hopSize, melBands: melBands) else { return nil }
         self.extractor = ex
         start()

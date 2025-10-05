@@ -10,7 +10,34 @@ public struct SDLKitJSONAgent {
     private struct CaptureSession { let cap: SDLAudioCapture; let pump: SDLAudioChunkedCapturePump; var feat: AudioFeaturePump?; var a2m: AudioA2MStub?; var featureFrameCursor: Int }
     private static var _capStore: [Int: CaptureSession] = [:]
     private static var _playStore: [Int: SDLAudioPlayback] = [:]
+    private static var _playQueues: [Int: SDLAudioPlaybackQueue] = [:]
     private static var _nextAudioId: Int = 1
+
+    private struct GPUState { let gpu: AudioGPUFeatureExtractor; let frameSize: Int; let hopSize: Int; let melBands: Int; var overlapMono: [Float]; var prevMel: [Float]? }
+    private enum GPUStore {
+        private static var map: [Int: GPUState] = [:]
+        static func set(_ id: Int, gpu: AudioGPUFeatureExtractor, frameSize: Int, hopSize: Int, melBands: Int) { map[id] = GPUState(gpu: gpu, frameSize: frameSize, hopSize: hopSize, melBands: melBands, overlapMono: [], prevMel: nil) }
+        static func get(_ id: Int) -> (gpu: AudioGPUFeatureExtractor, frameSize: Int, hopSize: Int, melBands: Int)? {
+            guard let s = map[id] else { return nil }
+            return (s.gpu, s.frameSize, s.hopSize, s.melBands)
+        }
+        static func buildWindowsAppend(audioId: Int, mono: [Float], frameSize: Int, hopSize: Int, maxFrames: Int) -> [[Float]] {
+            guard var s = map[audioId] else { return [] }
+            var seq = s.overlapMono
+            seq.append(contentsOf: mono)
+            var out: [[Float]] = []
+            var idx = 0
+            while idx + frameSize <= seq.count && out.count < maxFrames {
+                out.append(Array(seq[idx..<(idx+frameSize)]))
+                idx += hopSize
+            }
+            s.overlapMono = (idx < seq.count) ? Array(seq[idx..<seq.count]) : []
+            map[audioId] = s
+            return out
+        }
+        static func getPrevMel(_ id: Int) -> [Float]? { map[id]?.prevMel }
+        static func setPrevMel(_ id: Int, prev: [Float]?) { if var s = map[id] { s.prevMel = prev; map[id] = s } }
+    }
 
     public enum Endpoint: String {
         case open = "/agent/gui/window/open"
@@ -74,6 +101,9 @@ public struct SDLKitJSONAgent {
         case audioFeaturesReadMel = "/agent/audio/features/read_mel"
         case audioA2MStart = "/agent/audio/a2m/start"
         case audioA2MRead = "/agent/audio/a2m/read"
+        case audioPlaybackQueueOpen = "/agent/audio/playback/queue/open"
+        case audioPlaybackQueueEnqueue = "/agent/audio/playback/queue/enqueue"
+        case audioPlaybackPlayWAV = "/agent/audio/playback/play_wav"
     }
 
     private struct CacheSignature: Equatable {
@@ -169,30 +199,133 @@ public struct SDLKitJSONAgent {
                 try pb.playSine(frequency: req.frequency, amplitude: req.amplitude ?? 0.2, seconds: req.seconds)
                 return Self.okJSON()
             case .audioFeaturesStart:
-                struct Req: Codable { let audio_id: Int; let frame_size: Int?; let hop_size: Int?; let mel_bands: Int? }
+                struct Req: Codable { let audio_id: Int; let frame_size: Int?; let hop_size: Int?; let mel_bands: Int?; let use_gpu: Bool?; let window_id: Int?; let backend: String? }
                 struct Res: Codable { let ok: Bool }
                 let req = try JSONDecoder().decode(Req.self, from: body)
                 guard var sess = Self._capStore[req.audio_id] else { throw AgentError.invalidArgument("unknown audio_id") }
                 let fs = req.frame_size ?? 2048
                 let hs = req.hop_size ?? max(256, fs/4)
                 let mb = req.mel_bands ?? 64
-                if let feat = AudioFeaturePump(capture: sess.cap, pump: sess.pump, frameSize: fs, hopSize: hs, melBands: mb) {
-                    sess.feat = feat
-                    Self._capStore[req.audio_id] = sess
-                    return try JSONEncoder().encode(Res(ok: true))
-                } else {
-                    throw AgentError.invalidArgument("invalid feature config (frame_size must be power-of-two)")
+                var ok = false
+                if (req.use_gpu ?? false), let windowId = req.window_id {
+                    // Try GPU path
+                    if let backend = try? agent.makeRenderBackend(windowId: windowId, override: req.backend) {
+                        if let gpu = AudioGPUFeatureExtractor(backend: backend, sampleRate: sess.cap.spec.sampleRate, frameSize: fs, melBands: mb) {
+                            // Store GPU settings in session by piggybacking on feat=nil and tracking overlap in cap store via featureFrameCursor only for timestamps.
+                            // We don't persist GPU extractor; we process on-demand in readMel using this backend each call would need a gpu ref; store via feat=nil and not used.
+                            // For simplicity here, keep CPU pump for raw frames and do GPU extraction on read.
+                            sess.feat = nil
+                            // Keep a placeholder by attaching a2m to nil; we only need to know we're GPU-enabled. We encode a sentinel by setting featureFrameCursor = -1
+                            sess.featureFrameCursor = -1
+                            // We'll stash the extractor in a static map keyed by audio_id to reuse between reads.
+                            GPUStore.set(req.audio_id, gpu: gpu, frameSize: fs, hopSize: hs, melBands: mb)
+                            ok = true
+                        }
+                    }
                 }
+                if !ok {
+                    if let feat = AudioFeaturePump(capture: sess.cap, pump: sess.pump, frameSize: fs, hopSize: hs, melBands: mb) {
+                        sess.feat = feat
+                        Self._capStore[req.audio_id] = sess
+                        ok = true
+                    } else {
+                        throw AgentError.invalidArgument("invalid feature config (frame_size must be power-of-two)")
+                    }
+                }
+                Self._capStore[req.audio_id] = sess
+                return try JSONEncoder().encode(Res(ok: ok))
             case .audioFeaturesReadMel:
                 struct Req: Codable { let audio_id: Int; let frames: Int; let mel_bands: Int }
                 struct Res: Codable { let frames: Int; let mel_bands: Int; let mel_base64: String; let onset_base64: String }
                 let req = try JSONDecoder().decode(Req.self, from: body)
-                guard let sess = Self._capStore[req.audio_id], let feat = sess.feat else { throw AgentError.invalidArgument("features not started for audio_id") }
-                let (got, mel, onset) = feat.readMel(frames: req.frames, melBands: req.mel_bands)
+                guard let sess = Self._capStore[req.audio_id] else { throw AgentError.invalidArgument("features not started for audio_id") }
+                var got = 0
+                var mel: [Float] = []
+                var onset: [Float] = []
+                if let feat = sess.feat {
+                    let res = feat.readMel(frames: req.frames, melBands: req.mel_bands)
+                    got = res.frames; mel = res.mel; onset = res.onset
+                } else if let g = GPUStore.get(req.audio_id) {
+                    // GPU path on-demand: pull raw frames from pump and window them
+                    let fs = g.frameSize, hs = g.hopSize, mb = g.melBands
+                    let framesToMake = min(req.frames, 64)
+                    // read framesToMake * hs frames
+                    var raw = Array(repeating: Float(0), count: framesToMake * hs * sess.cap.spec.channels)
+                    let read = sess.pump.readFrames(into: &raw)
+                    if read > 0 {
+                        // downmix
+                        let chans = sess.cap.spec.channels
+                        let frameCount = read
+                        var mono = [Float](); mono.reserveCapacity(frameCount)
+                        for i in 0..<frameCount {
+                            var acc: Float = 0
+                            for c in 0..<chans { acc += raw[i*chans + c] }
+                            mono.append(acc / Float(chans))
+                        }
+                        // build windows from overlap store
+                        let windows = GPUStore.buildWindowsAppend(audioId: req.audio_id, mono: mono, frameSize: fs, hopSize: hs, maxFrames: framesToMake)
+                        let melFrames = (try? g.gpu.process(frames: windows)) ?? []
+                        // flatten mel
+                        mel.reserveCapacity(melFrames.count * mb)
+                        var prev: [Float]? = GPUStore.getPrevMel(req.audio_id)
+                        for mf in melFrames {
+                            mel.append(contentsOf: mf)
+                            if let p = prev {
+                                let n = min(p.count, mf.count)
+                                var flux: Float = 0
+                                for i in 0..<n { let d = mf[i]-p[i]; if d > 0 { flux += d } }
+                                onset.append(flux)
+                            } else { onset.append(0) }
+                            prev = mf
+                        }
+                        GPUStore.setPrevMel(req.audio_id, prev: prev)
+                        got = melFrames.count
+                    }
+                } else {
+                    throw AgentError.invalidArgument("features not started for audio_id")
+                }
                 let melData = mel.withUnsafeBufferPointer { Data(buffer: $0) }
                 let onsetData = onset.withUnsafeBufferPointer { Data(buffer: $0) }
                 let out = Res(frames: got, mel_bands: req.mel_bands, mel_base64: melData.base64EncodedString(), onset_base64: onsetData.base64EncodedString())
                 return try JSONEncoder().encode(out)
+            case .audioPlaybackQueueOpen:
+                struct Req: Codable { let device_id: UInt64?; let sample_rate: Int?; let channels: Int?; let format: String? }
+                struct Res: Codable { let audio_id: Int }
+                let req = try JSONDecoder().decode(Req.self, from: body)
+                let fmt: SDLAudioSampleFormat = (req.format?.lowercased() == "s16") ? .s16 : .f32
+                let spec = SDLAudioSpec(sampleRate: req.sample_rate ?? 48000, channels: req.channels ?? 2, format: fmt)
+                let pb = try SDLAudioPlayback(spec: spec, deviceId: req.device_id)
+                let q = SDLAudioPlaybackQueue(playback: pb)
+                let aid = Self._nextAudioId; Self._nextAudioId += 1; Self._playStore[aid] = pb; Self._playQueues[aid] = q
+                return try JSONEncoder().encode(Res(audio_id: aid))
+            case .audioPlaybackQueueEnqueue:
+                struct Req: Codable { let audio_id: Int; let format: String; let channels: Int; let data_base64: String }
+                let req = try JSONDecoder().decode(Req.self, from: body)
+                guard let q = Self._playQueues[req.audio_id] else { throw AgentError.invalidArgument("unknown audio_id or queue not open") }
+                guard req.format.lowercased() == "f32" else { throw AgentError.invalidArgument("only f32 supported") }
+                guard let data = Data(base64Encoded: req.data_base64) else { throw AgentError.invalidArgument("invalid base64") }
+                var samples = Array(repeating: Float(0), count: data.count / MemoryLayout<Float>.size)
+                _ = samples.withUnsafeMutableBytes { dst in data.copyBytes(to: dst) }
+                q.enqueue(samples: samples)
+                return Self.okJSON()
+            case .audioPlaybackPlayWAV:
+                struct Req: Codable { let path: String; let audio_id: Int?; let device_id: UInt64?; let sample_rate: Int?; let channels: Int?; let format: String? }
+                struct Res: Codable { let audio_id: Int }
+                let req = try JSONDecoder().decode(Req.self, from: body)
+                let wav = try SDLAudioWAV.load(path: req.path)
+                let pb: SDLAudioPlayback
+                let aid: Int
+                if let id = req.audio_id, let existing = Self._playStore[id] {
+                    pb = existing; aid = id
+                } else {
+                    let fmt: SDLAudioSampleFormat = (req.format?.lowercased() == "s16") ? .s16 : .f32
+                    let spec = SDLAudioSpec(sampleRate: req.sample_rate ?? wav.sampleRate, channels: req.channels ?? wav.channels, format: fmt)
+                    pb = try SDLAudioPlayback(spec: spec, deviceId: req.device_id)
+                    aid = Self._nextAudioId; Self._nextAudioId += 1; Self._playStore[aid] = pb
+                }
+                let samples = try wav.converted(to: pb.spec)
+                try pb.queue(samples: samples)
+                return try JSONEncoder().encode(Res(audio_id: aid))
             case .audioA2MStart:
                 struct Req: Codable { let audio_id: Int; let mel_bands: Int; let energy_threshold: Float?; let min_on_frames: Int?; let min_off_frames: Int? }
                 struct Res: Codable { let ok: Bool }
@@ -205,7 +338,8 @@ public struct SDLKitJSONAgent {
                 return try JSONEncoder().encode(Res(ok: true))
             case .audioA2MRead:
                 struct Req: Codable { let audio_id: Int; let frames: Int; let mel_bands: Int }
-                struct Res: Codable { let events: [MIDIEvent] }
+                struct EventOut: Codable { let kind: String; let note: Int; let velocity: Int; let frameIndex: Int; let timestamp_ms: Int }
+                struct Res: Codable { let events: [EventOut] }
                 let req = try JSONDecoder().decode(Req.self, from: body)
                 guard var sess = Self._capStore[req.audio_id], let feat = sess.feat, let a2m = sess.a2m else { throw AgentError.invalidArgument("A2M not started for audio_id") }
                 let (got, mel, _) = feat.readMel(frames: req.frames, melBands: req.mel_bands)
@@ -215,7 +349,9 @@ public struct SDLKitJSONAgent {
                 let events = a2m.process(melFrames: framesMel, startFrameIndex: sess.featureFrameCursor)
                 sess.featureFrameCursor += got
                 Self._capStore[req.audio_id] = sess
-                return try JSONEncoder().encode(Res(events: events))
+                let msPerFrame = Int((Double(feat.hopSize) / Double(feat.sampleRate)) * 1000.0)
+                let outEvents = events.map { e in EventOut(kind: e.kind.rawValue, note: e.note, velocity: e.velocity, frameIndex: e.frameIndex, timestamp_ms: e.frameIndex * msPerFrame) }
+                return try JSONEncoder().encode(Res(events: outEvents))
             case .openapiYAML:
                 if let ext = Self.loadExternalOpenAPIYAML() { return ext }
                 return Data(SDLKitOpenAPI.yaml.utf8)

@@ -384,6 +384,9 @@ struct SDL_AudioStream *SDLKit_OpenAudioRecordingStreamU64(uint64_t devid, int s
 struct SDL_AudioStream *SDLKit_OpenAudioPlaybackStreamU64(uint64_t devid, int sample_rate, unsigned int format, int channels) {
     (void)devid; (void)sample_rate; (void)format; (void)channels; return NULL;
 }
+int SDLKit_LoadWAV(const char *path, struct SDL_AudioSpec *out_spec, unsigned char **out_buf, unsigned int *out_len) {
+    (void)path; (void)out_spec; (void)out_buf; (void)out_len; return -1;
+}
 
 void SDLKit_TTF_Quit(void) {
     s_ttf_quit_calls++;

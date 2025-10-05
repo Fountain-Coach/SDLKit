@@ -167,6 +167,12 @@ open class SDLKitGUIAgent {
         try bundle.window.center()
     }
 
+    // Expose a RenderBackend bound to the given window (for compute/graphics interop).
+    public func makeRenderBackend(windowId: Int, override: String? = nil) throws -> RenderBackend {
+        guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }
+        return try RenderBackendFactory.makeBackend(window: bundle.window, override: override)
+    }
+
     // MARK: - Textures
     open func textureLoad(windowId: Int, id: String, path: String) throws {
         guard let bundle = windows[windowId] else { throw AgentError.windowNotFound }
