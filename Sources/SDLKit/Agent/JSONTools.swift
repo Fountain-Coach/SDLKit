@@ -12,6 +12,7 @@ public struct SDLKitJSONAgent {
     private static var _playStore: [Int: SDLAudioPlayback] = [:]
     private static var _playQueues: [Int: SDLAudioPlaybackQueue] = [:]
     private static var _monitors: [Int: AudioMonitor] = [:] // keyed by capture audio_id
+    private static var _midiOut: MIDIOut? = nil
     private static var _nextAudioId: Int = 1
 
     private struct GPUState { let gpu: AudioGPUFeatureExtractor; let frameSize: Int; let hopSize: Int; let melBands: Int; var overlapMono: [Float]; var prevMel: [Float]? }
@@ -111,6 +112,8 @@ public struct SDLKitJSONAgent {
         case audioA2MStreamStart = "/agent/audio/a2m/stream/start"
         case audioA2MStreamPoll = "/agent/audio/a2m/stream/poll"
         case audioA2MStreamStop = "/agent/audio/a2m/stream/stop"
+        case midiStart = "/agent/midi/start"
+        case midiStop = "/agent/midi/stop"
         case audioPlaybackQueueOpen = "/agent/audio/playback/queue/open"
         case audioPlaybackQueueEnqueue = "/agent/audio/playback/queue/enqueue"
         case audioPlaybackPlayWAV = "/agent/audio/playback/play_wav"
@@ -277,17 +280,13 @@ public struct SDLKitJSONAgent {
                         // build windows from overlap store
                         let windows = GPUStore.buildWindowsAppend(audioId: req.audio_id, mono: mono, frameSize: fs, hopSize: hs, maxFrames: framesToMake)
                         let melFrames = (try? g.gpu.process(frames: windows)) ?? []
-                        // flatten mel
+                        // flatten mel and compute onset via GPU if available
                         mel.reserveCapacity(melFrames.count * mb)
-                        var prev: [Float]? = GPUStore.getPrevMel(req.audio_id)
-                        for mf in melFrames {
+                        var prev = GPUStore.getPrevMel(req.audio_id)
+                        let onsetFrames = (try? g.gpu.onsetFlux(melFrames: melFrames, prevMel: prev)) ?? []
+                        for (idx, mf) in melFrames.enumerated() {
                             mel.append(contentsOf: mf)
-                            if let p = prev {
-                                let n = min(p.count, mf.count)
-                                var flux: Float = 0
-                                for i in 0..<n { let d = mf[i]-p[i]; if d > 0 { flux += d } }
-                                onset.append(flux)
-                            } else { onset.append(0) }
+                            if idx < onsetFrames.count { onset.append(onsetFrames[idx]) } else { onset.append(0) }
                             prev = mf
                         }
                         GPUStore.setPrevMel(req.audio_id, prev: prev)
@@ -379,14 +378,37 @@ public struct SDLKitJSONAgent {
                 let outEvents = events.map { e in EventOut(kind: e.kind.rawValue, note: e.note, velocity: e.velocity, frameIndex: e.frameIndex, timestamp_ms: e.frameIndex * msPerFrame) }
                 return try JSONEncoder().encode(Res(events: outEvents))
             case .audioA2MStreamStart:
-                struct Req: Codable { let audio_id: Int }
+                struct Req: Codable { let audio_id: Int; let midi: Bool? }
                 struct Res: Codable { let ok: Bool }
                 let req = try JSONDecoder().decode(Req.self, from: body)
                 guard let sess = Self._capStore[req.audio_id], let a2m = sess.a2m else { throw AgentError.invalidArgument("A2M not started for audio_id") }
                 let proxy = CaptureSessionProxy(cap: sess.cap, pump: sess.pump)
                 let gpuProxy: GPUStreamProxy? = { if let g = GPUStore.get(req.audio_id) { return GPUStreamProxy(gpu: g.gpu, frameSize: g.frameSize, hopSize: g.hopSize, melBands: g.melBands) } else { return nil } }()
-                let stream = AudioA2MStream(sessId: req.audio_id, sess: proxy, a2m: a2m, featCPU: sess.feat, gpuState: gpuProxy)
+                let stream = AudioA2MStream(sessId: req.audio_id, sess: proxy, a2m: a2m, featCPU: sess.feat, gpuState: gpuProxy) { ev in
+                    guard (req.midi ?? false), let mo = _midiOut else { return }
+                    // map MIDIEvent to note on/off
+                    switch ev.kind {
+                    case .note_on:
+                        mo.send(noteOn: true, note: UInt8(max(0, min(127, ev.note))), velocity: UInt8(max(0, min(127, ev.velocity))))
+                    case .note_off:
+                        mo.send(noteOn: false, note: UInt8(max(0, min(127, ev.note))), velocity: 0)
+                    }
+                }
                 _a2mStreams[req.audio_id] = stream
+                return try JSONEncoder().encode(Res(ok: true))
+            case .midiStart:
+                struct Req: Codable { let midi1: Bool? }
+                struct Res: Codable { let ok: Bool }
+                let req = try JSONDecoder().decode(Req.self, from: body)
+                #if os(macOS)
+                _midiOut = try MIDIOut(midi1: req.midi1 ?? true)
+                return try JSONEncoder().encode(Res(ok: true))
+                #else
+                return Self.errorJSON(code: "not_implemented", details: "MIDI output not available on this platform")
+                #endif
+            case .midiStop:
+                struct Res: Codable { let ok: Bool }
+                _midiOut?.stop(); _midiOut = nil
                 return try JSONEncoder().encode(Res(ok: true))
             case .audioA2MStreamPoll:
                 struct Req: Codable { let audio_id: Int; let since: Int?; let max_events: Int?; let timeout_ms: Int? }

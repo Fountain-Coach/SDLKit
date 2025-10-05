@@ -66,6 +66,11 @@ COMPUTE_MODULES = [
         "source": Path("Shaders/compute/audio_mel_project.hlsl"),
         "entry_point": "audio_mel_project_cs",
     },
+    {
+        "name": "audio_onset_flux",
+        "source": Path("Shaders/compute/audio_onset_flux.hlsl"),
+        "entry_point": "audio_onset_flux_cs",
+    },
 ]
 
 

@@ -56,6 +56,11 @@ struct DemoApp {
 
     @MainActor
     private static func runDemo(on platform: DemoPlatform, agent: SDLKitGUIAgent) throws {
+        let env = ProcessInfo.processInfo.environment
+        if (env["SDLKIT_AUDIO_DEMO"] ?? "0") == "1" {
+            try runAudioMelDemo(agent: agent)
+            return
+        }
         if SDLKitConfig.demoForceLegacy2D {
             try runLegacy2DDemo(on: platform, agent: agent)
             return
@@ -66,6 +71,61 @@ struct DemoApp {
         } catch {
             print("Triangle demo failed (\(error)); falling back to legacy 2D showcase")
             try runLegacy2DDemo(on: platform, agent: agent)
+        }
+    }
+
+    @MainActor
+    private static func runAudioMelDemo(agent: SDLKitGUIAgent) throws {
+        let windowId = try agent.openWindow(title: "SDLKit Audio Mel", width: 800, height: 400)
+        defer { agent.closeWindow(windowId: windowId) }
+        // Setup capture
+        let cap = try SDLAudioCapture(spec: .init(sampleRate: 48000, channels: 1, format: .f32))
+        let pump = SDLAudioChunkedCapturePump(capture: cap, bufferFrames: 48000/2)
+        // Try GPU
+        let backend = try agent.makeRenderBackend(windowId: windowId)
+        let frameSize = 1024, hopSize = 256, melBands = 64
+        let gpu = AudioGPUFeatureExtractor(backend: backend, sampleRate: cap.spec.sampleRate, frameSize: frameSize, melBands: melBands)
+        var overlap: [Float] = []
+        let barWidth = max(1, 800 / melBands)
+        let height = 400
+        let start = Date()
+        while Date().timeIntervalSince(start) < 5.0 {
+            // Build one frame from pump
+            var hop = Array(repeating: Float(0), count: hopSize * cap.spec.channels)
+            let got = pump.readFrames(into: &hop)
+            if got == 0 { Thread.sleep(forTimeInterval: 0.005); continue }
+            var mono: [Float] = overlap
+            mono.reserveCapacity(overlap.count + got)
+            if cap.spec.channels == 1 {
+                mono.append(contentsOf: hop.prefix(got))
+            } else {
+                for i in 0..<got {
+                    var acc: Float = 0
+                    for c in 0..<cap.spec.channels { acc += hop[i*cap.spec.channels + c] }
+                    mono.append(acc / Float(cap.spec.channels))
+                }
+            }
+            if mono.count >= frameSize {
+                let frame = Array(mono.prefix(frameSize))
+                overlap = Array(mono.dropFirst(hopSize))
+                let mel: [Float]
+                if let gpu {
+                    let m = try gpu.process(frames: [frame]).first ?? []
+                    mel = m
+                } else {
+                    guard let ex = AudioFeatureExtractor(sampleRate: cap.spec.sampleRate, channels: 1, frameSize: frameSize, hopSize: hopSize, melBands: melBands) else { continue }
+                    mel = ex.processFrame(frame).mel
+                }
+                // Draw bars
+                try agent.clear(windowId: windowId, color: 0xFF101010)
+                for i in 0..<min(melBands, mel.count) {
+                    let v = min(1.0, Double(mel[i]) * 0.01)
+                    let h = Int(v * Double(height))
+                    let x = i * barWidth
+                    try agent.drawRectangle(windowId: windowId, x: x, y: height - h, width: barWidth - 1, height: h, color: 0xFF33CCFF)
+                }
+                try agent.present(windowId: windowId)
+            }
         }
     }
 

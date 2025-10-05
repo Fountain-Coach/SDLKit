@@ -202,6 +202,9 @@ public final class ShaderLibrary {
         if let audioMel = makeAudioMelProjectComputeModule(root: root) {
             result[audioMel.id] = audioMel
         }
+        if let onset = makeAudioOnsetFluxComputeModule(root: root) {
+            result[onset.id] = onset
+        }
         return result
     }
 
@@ -570,6 +573,38 @@ public final class ShaderLibrary {
             id: id,
             entryPoint: "audio_mel_project_cs",
             threadgroupSize: (64, 1, 1),
+            pushConstantSize: MemoryLayout<UInt32>.size * 4,
+            bindings: bindings,
+            artifacts: artifacts
+        )
+    }
+
+    private static func makeAudioOnsetFluxComputeModule(root: URL) -> ComputeShaderModule? {
+        let id = ShaderID("audio_onset_flux")
+        let dxilRoot = root.appendingPathComponent("dxil", isDirectory: true)
+        let spirvRoot = root.appendingPathComponent("spirv", isDirectory: true)
+        let metalRoot = root.appendingPathComponent("metal", isDirectory: true)
+
+        let artifacts = ComputeShaderModuleArtifacts(
+            dxil: ShaderLibrary.existingFile(dxilRoot.appendingPathComponent("audio_onset_flux_cs.dxil")),
+            spirv: ShaderLibrary.existingFile(spirvRoot.appendingPathComponent("audio_onset_flux.comp.spv")),
+            metalLibrary: ShaderLibrary.existingFile(metalRoot.appendingPathComponent("audio_onset_flux.metallib"))
+        )
+
+        if artifacts.dxil == nil && artifacts.spirv == nil && artifacts.metalLibrary == nil {
+            return nil
+        }
+
+        let bindings: [BindingSlot] = [
+            BindingSlot(index: 0, kind: .storageBuffer), // mel frames
+            BindingSlot(index: 1, kind: .storageBuffer), // prev mel
+            BindingSlot(index: 2, kind: .storageBuffer)  // onset out
+        ]
+
+        return ComputeShaderModule(
+            id: id,
+            entryPoint: "audio_onset_flux_cs",
+            threadgroupSize: (1, 1, 1),
             pushConstantSize: MemoryLayout<UInt32>.size * 4,
             bindings: bindings,
             artifacts: artifacts

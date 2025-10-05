@@ -12,12 +12,15 @@ final class AudioA2MStream {
     private var running = true
     private let thread: Thread
 
-    init(sessId: Int, sess: SDLKitJSONAgent.CaptureSessionProxy, a2m: AudioA2MStub, featCPU: AudioFeaturePump?, gpuState: SDLKitJSONAgent.GPUStreamProxy?) {
+    private let sink: ((MIDIEvent) -> Void)?
+
+    init(sessId: Int, sess: SDLKitJSONAgent.CaptureSessionProxy, a2m: AudioA2MStub, featCPU: AudioFeaturePump?, gpuState: SDLKitJSONAgent.GPUStreamProxy?, sink: ((MIDIEvent) -> Void)? = nil) {
         self.sessId = sessId
         self.sess = sess
         self.a2m = a2m
         self.featCPU = featCPU
         self.gpuState = gpuState
+        self.sink = sink
         self.thread = Thread { [weak self] in self?.runLoop() }
         self.thread.name = "SDLKit.A2MStream"
         self.thread.qualityOfService = .userInitiated
@@ -35,6 +38,7 @@ final class AudioA2MStream {
 
     private func append(_ newEvents: [MIDIEvent]) {
         lock.lock(); events.append(contentsOf: newEvents); lock.unlock()
+        if let sink = sink { newEvents.forEach { sink($0) } }
     }
 
     private func runLoop() {
@@ -76,4 +80,3 @@ final class AudioA2MStream {
         }
     }
 }
-

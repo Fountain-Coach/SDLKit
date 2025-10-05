@@ -124,4 +124,61 @@ public final class AudioGPUFeatureExtractor {
             return result
         }
     }
+
+    public func onsetFlux(melFrames: [[Float]], prevMel: [Float]?) throws -> [Float] {
+        let fcount = melFrames.count
+        guard fcount > 0 else { return [] }
+        let hasPrev = prevMel != nil ? 1 : 0
+        // If onset shader exists, run it; else CPU fallback
+        if (try? ShaderLibrary.shared.computeModule(for: ShaderID("audio_onset_flux"))) != nil {
+            let totalMel = fcount * melBands
+            var flat = [Float](); flat.reserveCapacity(totalMel)
+            for mf in melFrames { flat.append(contentsOf: mf.prefix(melBands)) }
+            let melBytes = flat.count * MemoryLayout<Float>.size
+            let melBuf = try backend.createBuffer(bytes: flat, length: melBytes, usage: .storage)
+            let prevBuf: BufferHandle
+            if let prev = prevMel, !prev.isEmpty {
+                prevBuf = try backend.createBuffer(bytes: prev, length: prev.count * MemoryLayout<Float>.size, usage: .storage)
+            } else {
+                // allocate zero prev
+                let zero = [Float](repeating: 0, count: melBands)
+                prevBuf = try backend.createBuffer(bytes: zero, length: zero.count * MemoryLayout<Float>.size, usage: .storage)
+            }
+            let outBytes = fcount * MemoryLayout<Float>.size
+            let outBuf = try backend.createBuffer(bytes: nil, length: outBytes, usage: .storage)
+            var bindings = BindingSet()
+            bindings.setBuffer(melBuf, at: 0)
+            bindings.setBuffer(prevBuf, at: 1)
+            bindings.setBuffer(outBuf, at: 2)
+            var params = [UInt32(melBands), UInt32(fcount), UInt32(hasPrev), 0]
+            let pbytes = Data(bytes: &params, count: MemoryLayout<UInt32>.size * 4)
+            bindings.materialConstants = BindingSet.MaterialConstants(data: pbytes)
+            // one thread per frame
+            try backend.dispatchCompute(try backend.makeComputePipeline(.init(label: "audio_onset_flux", shader: ShaderID("audio_onset_flux"))), groupsX: fcount, groupsY: 1, groupsZ: 1, bindings: bindings)
+            try backend.waitGPU()
+            var onset = Array(repeating: Float(0), count: fcount)
+            try onset.withUnsafeMutableBytes { raw in
+                try backend.readback(buffer: outBuf, into: raw.baseAddress!, length: outBytes)
+            }
+            backend.destroy(.buffer(melBuf))
+            backend.destroy(.buffer(prevBuf))
+            backend.destroy(.buffer(outBuf))
+            return onset
+        } else {
+            // CPU fallback
+            var onset: [Float] = []
+            onset.reserveCapacity(fcount)
+            var prev = prevMel
+            for mf in melFrames {
+                var flux: Float = 0
+                if let p = prev {
+                    let n = min(p.count, mf.count)
+                    for i in 0..<n { let d = mf[i] - p[i]; if d > 0 { flux += d } }
+                }
+                onset.append(flux)
+                prev = mf
+            }
+            return onset
+        }
+    }
 }
