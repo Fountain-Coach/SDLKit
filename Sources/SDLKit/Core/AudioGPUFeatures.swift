@@ -2,6 +2,8 @@ import Foundation
 
 @MainActor
 public final class AudioGPUFeatureExtractor {
+    private struct WeightKey: Hashable { let sampleRate: Int; let frameSize: Int; let melBands: Int }
+    private static var weightCache: [WeightKey: [Float]] = [:]
     private let backend: RenderBackend
     private let frameSize: Int
     private let nBins: Int
@@ -28,10 +30,14 @@ public final class AudioGPUFeatureExtractor {
             if (try? ShaderLibrary.shared.computeModule(for: ShaderID("audio_mel_project"))) != nil {
                 let melDesc = ComputePipelineDescriptor(label: "audio_mel_project", shader: ShaderID("audio_mel_project"))
                 self.computeMel = try backend.makeComputePipeline(melDesc)
-                // Flatten weights [mel][bin]
-                var weightsFlat = [Float]()
-                weightsFlat.reserveCapacity(melBands * nBins)
-                for m in 0..<melBands { weightsFlat.append(contentsOf: mel.weights[m].prefix(nBins)) }
+                // Flatten weights [mel][bin] with CPU cache
+                let key = WeightKey(sampleRate: sampleRate, frameSize: frameSize, melBands: melBands)
+                var weightsFlat = Self.weightCache[key] ?? []
+                if weightsFlat.isEmpty {
+                    weightsFlat.reserveCapacity(melBands * nBins)
+                    for m in 0..<melBands { weightsFlat.append(contentsOf: mel.weights[m].prefix(nBins)) }
+                    Self.weightCache[key] = weightsFlat
+                }
                 melWeightsBuffer = try backend.createBuffer(bytes: weightsFlat, length: weightsFlat.count * MemoryLayout<Float>.size, usage: .storage)
             } else {
                 self.computeMel = nil

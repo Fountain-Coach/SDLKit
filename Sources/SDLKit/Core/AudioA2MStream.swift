@@ -1,0 +1,79 @@
+import Foundation
+
+final class AudioA2MStream {
+    private let sessId: Int
+    private let sess: SDLKitJSONAgent.CaptureSessionProxy
+    private let a2m: AudioA2MStub
+    private let featCPU: AudioFeaturePump?
+    private let gpuState: SDLKitJSONAgent.GPUStreamProxy?
+    private let lock = NSLock()
+    private var events: [MIDIEvent] = []
+    private var nextFrameIndex: Int = 0
+    private var running = true
+    private let thread: Thread
+
+    init(sessId: Int, sess: SDLKitJSONAgent.CaptureSessionProxy, a2m: AudioA2MStub, featCPU: AudioFeaturePump?, gpuState: SDLKitJSONAgent.GPUStreamProxy?) {
+        self.sessId = sessId
+        self.sess = sess
+        self.a2m = a2m
+        self.featCPU = featCPU
+        self.gpuState = gpuState
+        self.thread = Thread { [weak self] in self?.runLoop() }
+        self.thread.name = "SDLKit.A2MStream"
+        self.thread.qualityOfService = .userInitiated
+        self.thread.start()
+    }
+
+    func stop() { running = false }
+
+    func poll(since: Int, max: Int) -> [MIDIEvent] {
+        lock.lock(); defer { lock.unlock() }
+        let start = min(since, events.count)
+        let end = min(events.count, start + max)
+        return Array(events[start..<end])
+    }
+
+    private func append(_ newEvents: [MIDIEvent]) {
+        lock.lock(); events.append(contentsOf: newEvents); lock.unlock()
+    }
+
+    private func runLoop() {
+        while running {
+            if let cpu = featCPU {
+                let res = cpu.readMel(frames: 32, melBands: cpu.melBands)
+                if res.frames > 0 {
+                    var framesMel: [[Float]] = []
+                    framesMel.reserveCapacity(res.frames)
+                    for i in 0..<res.frames { let s = i * cpu.melBands; framesMel.append(Array(res.mel[s..<(s+cpu.melBands)])) }
+                    let ev = a2m.process(melFrames: framesMel, startFrameIndex: nextFrameIndex)
+                    nextFrameIndex += res.frames
+                    append(ev)
+                } else {
+                    Thread.sleep(forTimeInterval: 0.005)
+                }
+            } else if let gpu = gpuState {
+                // Pull raw hopSize frames from pump
+                let hs = gpu.hopSize
+                let chans = sess.cap.spec.channels
+                var raw = Array(repeating: Float(0), count: 32 * hs * chans)
+                let read = sess.pump.readFrames(into: &raw)
+                if read > 0 {
+                    var mono: [Float] = []; mono.reserveCapacity(read)
+                    for i in 0..<read { var acc: Float = 0; for c in 0..<chans { acc += raw[i*chans + c] }; mono.append(acc / Float(chans)) }
+                    let windows = SDLKitJSONAgent.GPUStoreHelper.buildWindowsAppend(audioId: sessId, mono: mono, frameSize: gpu.frameSize, hopSize: hs, maxFrames: 32)
+                    if !windows.isEmpty {
+                        let melFrames = (try? gpu.gpu.process(frames: windows)) ?? []
+                        let ev = a2m.process(melFrames: melFrames, startFrameIndex: nextFrameIndex)
+                        nextFrameIndex += melFrames.count
+                        append(ev)
+                    }
+                } else {
+                    Thread.sleep(forTimeInterval: 0.005)
+                }
+            } else {
+                Thread.sleep(forTimeInterval: 0.01)
+            }
+        }
+    }
+}
+

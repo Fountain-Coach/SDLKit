@@ -40,6 +40,12 @@ public struct SDLKitJSONAgent {
         static func setPrevMel(_ id: Int, prev: [Float]?) { if var s = map[id] { s.prevMel = prev; map[id] = s } }
     }
 
+    struct CaptureSessionProxy {
+        let cap: SDLAudioCapture
+        let pump: SDLAudioChunkedCapturePump
+    }
+    struct GPUStreamProxy { let gpu: AudioGPUFeatureExtractor; let frameSize: Int; let hopSize: Int; let melBands: Int }
+
     public enum Endpoint: String {
         case open = "/agent/gui/window/open"
         case close = "/agent/gui/window/close"
@@ -102,6 +108,9 @@ public struct SDLKitJSONAgent {
         case audioFeaturesReadMel = "/agent/audio/features/read_mel"
         case audioA2MStart = "/agent/audio/a2m/start"
         case audioA2MRead = "/agent/audio/a2m/read"
+        case audioA2MStreamStart = "/agent/audio/a2m/stream/start"
+        case audioA2MStreamPoll = "/agent/audio/a2m/stream/poll"
+        case audioA2MStreamStop = "/agent/audio/a2m/stream/stop"
         case audioPlaybackQueueOpen = "/agent/audio/playback/queue/open"
         case audioPlaybackQueueEnqueue = "/agent/audio/playback/queue/enqueue"
         case audioPlaybackPlayWAV = "/agent/audio/playback/play_wav"
@@ -369,6 +378,43 @@ public struct SDLKitJSONAgent {
                 let msPerFrame = Int((Double(feat.hopSize) / Double(feat.sampleRate)) * 1000.0)
                 let outEvents = events.map { e in EventOut(kind: e.kind.rawValue, note: e.note, velocity: e.velocity, frameIndex: e.frameIndex, timestamp_ms: e.frameIndex * msPerFrame) }
                 return try JSONEncoder().encode(Res(events: outEvents))
+            case .audioA2MStreamStart:
+                struct Req: Codable { let audio_id: Int }
+                struct Res: Codable { let ok: Bool }
+                let req = try JSONDecoder().decode(Req.self, from: body)
+                guard let sess = Self._capStore[req.audio_id], let a2m = sess.a2m else { throw AgentError.invalidArgument("A2M not started for audio_id") }
+                let proxy = CaptureSessionProxy(cap: sess.cap, pump: sess.pump)
+                let gpuProxy: GPUStreamProxy? = { if let g = GPUStore.get(req.audio_id) { return GPUStreamProxy(gpu: g.gpu, frameSize: g.frameSize, hopSize: g.hopSize, melBands: g.melBands) } else { return nil } }()
+                let stream = AudioA2MStream(sessId: req.audio_id, sess: proxy, a2m: a2m, featCPU: sess.feat, gpuState: gpuProxy)
+                _a2mStreams[req.audio_id] = stream
+                return try JSONEncoder().encode(Res(ok: true))
+            case .audioA2MStreamPoll:
+                struct Req: Codable { let audio_id: Int; let since: Int?; let max_events: Int?; let timeout_ms: Int? }
+                struct EventOut: Codable { let kind: String; let note: Int; let velocity: Int; let frameIndex: Int; let timestamp_ms: Int }
+                struct Res: Codable { let events: [EventOut]; let next: Int }
+                let req = try JSONDecoder().decode(Req.self, from: body)
+                guard let stream = _a2mStreams[req.audio_id] else { throw AgentError.invalidArgument("stream not started for audio_id") }
+                let since = req.since ?? 0
+                let max = max(1, req.max_events ?? 128)
+                let deadline = (req.timeout_ms ?? 0) > 0 ? Date().addingTimeInterval(Double(req.timeout_ms!) / 1000.0) : Date()
+                var out: [MIDIEvent] = stream.poll(since: since, max: max)
+                while out.isEmpty && Date() < deadline {
+                    Thread.sleep(forTimeInterval: 0.01)
+                    out = stream.poll(since: since, max: max)
+                }
+                // Derive ms from CPU feat if present; else from GPU proxy (uses hopSize from GPU store, sampleRate from capture spec)
+                let sess = _capStore[req.audio_id]
+                let sampleRate = sess?.cap.spec.sampleRate ?? 48000
+                let hop = sess?.feat?.hopSize ?? GPUStore.get(req.audio_id)?.hopSize ?? 512
+                let msPerFrame = Int((Double(hop) / Double(sampleRate)) * 1000.0)
+                let enc = out.enumerated().map { (idx, e) in EventOut(kind: e.kind.rawValue, note: e.note, velocity: e.velocity, frameIndex: e.frameIndex, timestamp_ms: e.frameIndex * msPerFrame) }
+                return try JSONEncoder().encode(Res(events: enc, next: since + enc.count))
+            case .audioA2MStreamStop:
+                struct Req: Codable { let audio_id: Int }
+                struct Res: Codable { let ok: Bool }
+                let req = try JSONDecoder().decode(Req.self, from: body)
+                if let s = _a2mStreams.removeValue(forKey: req.audio_id) { s.stop() }
+                return try JSONEncoder().encode(Res(ok: true))
             case .openapiYAML:
                 if let ext = Self.loadExternalOpenAPIYAML() { return ext }
                 return Data(SDLKitOpenAPI.yaml.utf8)

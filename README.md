@@ -59,6 +59,9 @@ Follow the platform-specific setup instructions (Homebrew, apt, vcpkg, or manual
   - `POST /agent/audio/features/read_mel` → `{ frames, mel_bands, mel_base64, onset_base64 }`
   - `POST /agent/audio/a2m/start` → start stub note detection (threshold/hysteresis)
   - `POST /agent/audio/a2m/read` → `{ events: [{ kind, note, velocity, frameIndex, timestamp_ms }] }`
+  - `POST /agent/audio/a2m/stream/start` → begin background stream for given capture
+  - `POST /agent/audio/a2m/stream/poll` → `{ events, next }` with optional `since`, `max_events`, `timeout_ms`
+  - `POST /agent/audio/a2m/stream/stop`
 
 ### Shader toolchain workflow
 
