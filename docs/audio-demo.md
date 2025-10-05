@@ -62,3 +62,14 @@ Notes
 - Headless CI does not perform audio I/O; endpoints are available but will error with sdlUnavailable.
 - GPU features path requires a window-bound RenderBackend. Metal is the default backend on macOS; Vulkan on Linux.
 - The A2M stub is not a real model; it’s a placeholder for integration.
+
+CLI Client
+
+You can exercise the streaming endpoints with the included Python client (requires `requests`):
+
+  python3 Scripts/audio_stream_client.py --gpu --midi --seconds 10
+
+Flags:
+- `--gpu` enables GPU features where available.
+- `--midi` mirrors events to the first MIDI destination (macOS).
+- `--seconds` controls run duration.

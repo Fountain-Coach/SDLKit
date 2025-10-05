@@ -84,7 +84,8 @@ struct DemoApp {
         // Try GPU
         let backend = try agent.makeRenderBackend(windowId: windowId)
         let frameSize = 1024, hopSize = 256, melBands = 64
-        let gpu = AudioGPUFeatureExtractor(backend: backend, sampleRate: cap.spec.sampleRate, frameSize: frameSize, melBands: melBands)
+        var gpuExtractor = AudioGPUFeatureExtractor(backend: backend, sampleRate: cap.spec.sampleRate, frameSize: frameSize, melBands: melBands)
+        var useGPU = gpuExtractor != nil
         var overlap: [Float] = []
         let barWidth = max(1, 800 / melBands)
         let height = 400
@@ -105,12 +106,21 @@ struct DemoApp {
                     mono.append(acc / Float(cap.spec.channels))
                 }
             }
+            // allow runtime toggle via any key press
+            if let ev = try? agent.captureEvent(windowId: windowId, timeoutMs: 0), let e = ev {
+                switch e.type {
+                case .keyDown:
+                    useGPU.toggle()
+                case .quit, .windowClosed:
+                    break
+                default: break
+                }
+            }
             if mono.count >= frameSize {
                 let frame = Array(mono.prefix(frameSize))
                 overlap = Array(mono.dropFirst(hopSize))
                 let mel: [Float]
-                if let gpu {
-                    let m = try gpu.process(frames: [frame]).first ?? []
+                if useGPU, let ge = gpuExtractor, let m = try? ge.process(frames: [frame]).first {
                     mel = m
                 } else {
                     guard let ex = AudioFeatureExtractor(sampleRate: cap.spec.sampleRate, channels: 1, frameSize: frameSize, hopSize: hopSize, melBands: melBands) else { continue }
