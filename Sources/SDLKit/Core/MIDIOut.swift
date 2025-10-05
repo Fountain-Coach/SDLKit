@@ -7,6 +7,7 @@ public final class MIDIOut {
     private var client: MIDIClientRef = 0
     private var outPort: MIDIPortRef = 0
     private var dest: MIDIEndpointRef = 0
+    private var defaultChannel: UInt8 = 0
     private let midi1: Bool
 
     public init(midi1: Bool = true) throws {
@@ -29,10 +30,11 @@ public final class MIDIOut {
 
     deinit { stop() }
 
-    public func send(noteOn: Bool, note: UInt8, velocity: UInt8, channel: UInt8 = 0) {
+    public func send(noteOn: Bool, note: UInt8, velocity: UInt8, channel: UInt8? = nil) {
         if midi1 {
             var packetList = MIDIPacketList(numPackets: 1, packet: MIDIPacket())
-            let status: UInt8 = (noteOn ? 0x90 : 0x80) | (channel & 0x0F)
+            let ch = (channel ?? defaultChannel) & 0x0F
+            let status: UInt8 = (noteOn ? 0x90 : 0x80) | ch
             var bytes: [UInt8] = [status, note, velocity]
             bytes.withUnsafeMutableBytes { raw in
                 var pkt = MIDIPacketListInit(&packetList)
@@ -63,6 +65,25 @@ public final class MIDIOut {
         let count = MIDIGetNumberOfDestinations()
         guard index >= 0 && index < count else { throw AgentError.invalidArgument("MIDI destination index out of range") }
         dest = MIDIGetDestination(index)
+    }
+
+    public func selectDestination(nameContains: String) throws {
+        let count = MIDIGetNumberOfDestinations()
+        var found: Int? = nil
+        for i in 0..<count {
+            let ep = MIDIGetDestination(i)
+            var cfName: Unmanaged<CFString>?
+            if MIDIObjectGetStringProperty(ep, kMIDIPropertyName, &cfName) == 0, let cf = cfName?.takeRetainedValue() {
+                let s = cf as String
+                if s.lowercased().contains(nameContains.lowercased()) { found = i; break }
+            }
+        }
+        if let idx = found { try selectDestination(index: idx) } else { throw AgentError.invalidArgument("MIDI destination not found: \(nameContains)") }
+    }
+
+    public func setDefaultChannel(_ ch: Int) throws {
+        guard ch >= 0 && ch < 16 else { throw AgentError.invalidArgument("MIDI channel out of range (0-15)") }
+        defaultChannel = UInt8(ch)
     }
 }
 #else

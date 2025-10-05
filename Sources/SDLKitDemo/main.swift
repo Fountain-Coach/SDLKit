@@ -116,6 +116,12 @@ struct DemoApp {
                     guard let ex = AudioFeatureExtractor(sampleRate: cap.spec.sampleRate, channels: 1, frameSize: frameSize, hopSize: hopSize, melBands: melBands) else { continue }
                     mel = ex.processFrame(frame).mel
                 }
+                // Derive simple note for overlay
+                var maxVal: Float = 0; var maxIdx = 0
+                for i in 0..<min(melBands, mel.count) { if mel[i] > maxVal { maxVal = mel[i]; maxIdx = i } }
+                let note = 36 + (maxIdx * (96 - 36)) / max(1, melBands-1)
+                let velocity = max(1, min(127, Int((maxVal * 127.0 * 0.01).rounded())))
+
                 // Draw bars
                 try agent.clear(windowId: windowId, color: 0xFF101010)
                 for i in 0..<min(melBands, mel.count) {
@@ -124,6 +130,12 @@ struct DemoApp {
                     let x = i * barWidth
                     try agent.drawRectangle(windowId: windowId, x: x, y: height - h, width: barWidth - 1, height: h, color: 0xFF33CCFF)
                 }
+                #if canImport(SDLKitTTF)
+                do {
+                    let text = "Note: \(note)  Vel: \(velocity)"
+                    try agent.drawText(windowId: windowId, text: text, x: 10, y: 8, font: "/System/Library/Fonts/Supplemental/Arial Unicode.ttf", size: 18, color: 0xFFFFFFFF)
+                } catch { /* ignore if font unavailable */ }
+                #endif
                 try agent.present(windowId: windowId)
             }
         }

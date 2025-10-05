@@ -109,6 +109,7 @@ public struct SDLKitJSONAgent {
         case audioFeaturesReadMel = "/agent/audio/features/read_mel"
         case audioA2MStart = "/agent/audio/a2m/start"
         case audioA2MRead = "/agent/audio/a2m/read"
+        case audioA2MTest = "/agent/audio/a2m/test"
         case audioA2MStreamStart = "/agent/audio/a2m/stream/start"
         case audioA2MStreamPoll = "/agent/audio/a2m/stream/poll"
         case audioA2MStreamStop = "/agent/audio/a2m/stream/stop"
@@ -116,6 +117,8 @@ public struct SDLKitJSONAgent {
         case midiStop = "/agent/midi/stop"
         case midiDestinations = "/agent/midi/destinations"
         case midiSelect = "/agent/midi/select"
+        case midiSelectByName = "/agent/midi/selectByName"
+        case midiChannel = "/agent/midi/channel"
         case audioPlaybackQueueOpen = "/agent/audio/playback/queue/open"
         case audioPlaybackQueueEnqueue = "/agent/audio/playback/queue/enqueue"
         case audioPlaybackPlayWAV = "/agent/audio/playback/play_wav"
@@ -379,6 +382,26 @@ public struct SDLKitJSONAgent {
                 let msPerFrame = Int((Double(feat.hopSize) / Double(feat.sampleRate)) * 1000.0)
                 let outEvents = events.map { e in EventOut(kind: e.kind.rawValue, note: e.note, velocity: e.velocity, frameIndex: e.frameIndex, timestamp_ms: e.frameIndex * msPerFrame) }
                 return try JSONEncoder().encode(Res(events: outEvents))
+            case .audioA2MTest:
+                struct Req: Codable { let mel_bands: Int; let frames: Int; let mel_base64: String }
+                struct EventOut: Codable { let kind: String; let note: Int; let velocity: Int; let frameIndex: Int }
+                struct Res: Codable { let events: [EventOut] }
+                let req = try JSONDecoder().decode(Req.self, from: body)
+                guard let data = Data(base64Encoded: req.mel_base64) else { throw AgentError.invalidArgument("invalid base64") }
+                let total = data.count / MemoryLayout<Float>.size
+                guard total == req.frames * req.mel_bands else { throw AgentError.invalidArgument("mel data size mismatch") }
+                var mel = Array(repeating: Float(0), count: total)
+                _ = mel.withUnsafeMutableBytes { dst in data.copyBytes(to: dst) }
+                var framesMel: [[Float]] = []
+                framesMel.reserveCapacity(req.frames)
+                for i in 0..<req.frames {
+                    let s = i * req.mel_bands
+                    framesMel.append(Array(mel[s..<(s+req.mel_bands)]))
+                }
+                let stub = AudioA2MStub(melBands: req.mel_bands)
+                let ev = stub.process(melFrames: framesMel, startFrameIndex: 0)
+                let out = ev.map { EventOut(kind: $0.kind.rawValue, note: $0.note, velocity: $0.velocity, frameIndex: $0.frameIndex) }
+                return try JSONEncoder().encode(Res(events: out))
             case .audioA2MStreamStart:
                 struct Req: Codable { let audio_id: Int; let midi: Bool? }
                 struct Res: Codable { let ok: Bool }
@@ -429,6 +452,28 @@ public struct SDLKitJSONAgent {
                 return try JSONEncoder().encode(Res(ok: true))
                 #else
                 return Self.errorJSON(code: "not_implemented", details: "MIDI select not available on this platform")
+                #endif
+            case .midiSelectByName:
+                struct Req: Codable { let contains: String }
+                struct Res: Codable { let ok: Bool }
+                let req = try JSONDecoder().decode(Req.self, from: body)
+                #if os(macOS)
+                guard let mo = _midiOut else { throw AgentError.invalidArgument("MIDI not started") }
+                try mo.selectDestination(nameContains: req.contains)
+                return try JSONEncoder().encode(Res(ok: true))
+                #else
+                return Self.errorJSON(code: "not_implemented", details: "MIDI select not available on this platform")
+                #endif
+            case .midiChannel:
+                struct Req: Codable { let channel: Int }
+                struct Res: Codable { let ok: Bool }
+                let req = try JSONDecoder().decode(Req.self, from: body)
+                #if os(macOS)
+                guard let mo = _midiOut else { throw AgentError.invalidArgument("MIDI not started") }
+                try mo.setDefaultChannel(req.channel)
+                return try JSONEncoder().encode(Res(ok: true))
+                #else
+                return Self.errorJSON(code: "not_implemented", details: "MIDI channel not available on this platform")
                 #endif
             case .audioA2MStreamPoll:
                 struct Req: Codable { let audio_id: Int; let since: Int?; let max_events: Int?; let timeout_ms: Int? }
