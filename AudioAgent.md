@@ -7,31 +7,35 @@ This document tracks the audio scope for SDLKit: SDL3 stream‑based capture and
 - Safe, headless‑friendly APIs (compile in, throw on use under HEADLESS_CI).
 - Building block for real‑time pipelines (framing, features, inference).
 
-## Current Status (M0)
+## Current Status
 - C shim exposes minimal audio wrappers:
   - `SDLKit_OpenDefaultAudioRecordingStream`, `SDLKit_OpenDefaultAudioPlaybackStream`
   - `SDLKit_GetAudioStream{Available,Data}`, `SDLKit_PutAudioStreamData`, `SDLKit_DestroyAudioStream`
   - Format helpers: `SDLKit_AudioFormat_F32`, `SDLKit_AudioFormat_S16`
 - Swift API (preview):
-  - `SDLAudioCapture` — pull interleaved `.f32` frames from default recording device
-  - `SDLAudioPlayback` — queue PCM samples to default playback device
-- Tests: headless‑safe constructor exercise.
+  - `SDLAudioCapture` — pull interleaved `.f32` frames from default or selected recording device
+  - `SDLAudioPlayback` — queue PCM samples; `playSine()` helper
+  - `SDLAudioDeviceList` — enumerate playback/recording devices with preferred formats
+  - `SDLAudioResampler` — convert/sample-rate via SDL_CreateAudioStream
+  - `SDLAudioChunkedCapturePump` — background pump into a ring buffer
+- JSON endpoints: list devices, open capture, read chunks; open playback, queue sine
+- Tests: headless‑safe constructor + ring buffer unit tests.
 
 ## Milestones & Acceptance
 
 M0 — Shim + Swift wrappers (this change)
 - Acceptance: HEADLESS_CI builds; shims compile; API throws gracefully without SDL.
 
-M1 — Device enumeration and selection
+M1 — Device enumeration and selection (done)
 - Add device listing (playback/recording), names, and preferred specs.
 - Acceptance: list non‑zero devices on dev machines; default open succeeds or produces readable error.
 
-M2 — Ring buffer + chunked capture
+M2 — Ring buffer + chunked capture (done)
 - Lock‑free SPSC ring buffer between SDL audio thread and processing thread.
 - `readFrames(count:)` guarantees exact hops; back‑pressure policy documented.
 - Acceptance: synthetic capture harness verifies chunking and no drops under load.
 
-M3 — Playback helpers
+M3 — Playback helpers (done)
 - Convenience sine/beep generator; utility resampler via SDL streams.
 - Acceptance: audible playback on dev machines; queue depth remains bounded.
 
@@ -67,4 +71,3 @@ try playback.queue(samples: interleaved)
 ```
 
 Note: In headless/CI builds, these constructors throw `sdlUnavailable`.
-

@@ -41,6 +41,14 @@ Follow the platform-specific setup instructions (Homebrew, apt, vcpkg, or manual
 - `SDLAudioCapture` opens the default recording device and lets you pull interleaved `.f32` frames.
 - `SDLAudioPlayback` opens the default playback device and accepts queued PCM samples.
 - Headless CI and shim builds compile these APIs but return `sdlUnavailable` or throw on use.
+- Device enumeration: `SDLAudioDeviceList.list(.playback/.recording)` gets device IDs, names, and preferred specs.
+- Resampler: `SDLAudioResampler` wraps SDL_CreateAudioStream for format/rate conversion.
+- JSON endpoints (preview):
+  - `POST /agent/audio/devices`
+  - `POST /agent/audio/capture/open` → `{ audio_id }`
+  - `POST /agent/audio/capture/read` → `{ frames, channels, format, data_base64 }` (Float32 interleaved)
+  - `POST /agent/audio/playback/open` → `{ audio_id }`
+  - `POST /agent/audio/playback/sine` (queue a sine tone)
 
 ### Shader toolchain workflow
 
