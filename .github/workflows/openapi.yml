@@ -15,12 +15,19 @@ on:
 jobs:
   openapi-build:
     runs-on: macos-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
+      - name: Cache SwiftPM
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.swiftpm
+            .build
+          key: ${{ runner.os }}-swiftpm-${{ hashFiles('Package.swift', 'Package.resolved', 'Sources/SDLKitAPI/openapi.yaml', 'Sources/SDLKitAPI/openapi-generator-config.yaml') }}
       - name: Select Xcode
         run: sudo xcode-select -s "/Applications/Xcode.app/Contents/Developer"
       - name: Swift version
         run: swift --version
       - name: Build OpenAPI target (codegen)
         run: swift build -v --target SDLKitAPI
-

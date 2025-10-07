@@ -1,11 +1,10 @@
 generate:
   types: true
   client: true
-  server: true
+  server: false
 
 accessModifier: public
 
 additional:
   - name: asyncSequenceConcurrency
     value: true
-
