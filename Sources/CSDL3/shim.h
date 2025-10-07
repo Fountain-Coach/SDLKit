@@ -514,8 +514,7 @@ typedef struct SDLKit_Event {
   struct SDL_Texture;
   struct SDL_Surface *SDLKit_TTF_RenderUTF8_Blended(SDLKit_TTF_Font *font, const char *text,
                                              uint8_t r, uint8_t g, uint8_t b, uint8_t a);
-  struct SDL_Renderer;
-  struct SDL_Texture *SDLKit_CreateTextureFromSurface(struct SDL_Renderer *renderer, struct SDL_Surface *surface);
+  void *SDLKit_CreateTextureFromSurface(void *renderer, void *surface);
   void SDLKit_DestroySurface(void *surface);
   void SDLKit_DestroyTexture(void *tex);
   void SDLKit_GetTextureSize(void *tex, int *w, int *h);
