@@ -1,7 +1,7 @@
 generate:
   types: true
   client: true
-  server: false
+  server: true
 
 accessModifier: public
 
