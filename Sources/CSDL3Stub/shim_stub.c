@@ -277,23 +277,20 @@ struct SDL_Surface *SDLKit_TTF_RenderUTF8_Blended(SDLKit_TTF_Font *font, const c
     return NULL;
 }
 
-void SDLKit_DestroyRenderer(SDL_Renderer *renderer);
-void SDLKit_DestroyWindow(SDL_Window *window);
-
 void *SDLKit_CreateTextureFromSurface(void *renderer, struct SDL_Surface *surface) {
     (void)renderer; (void)surface;
     return NULL;
 }
 
-void SDLKit_DestroySurface(struct SDL_Surface *surface) {
+void SDLKit_DestroySurface(void *surface) {
     (void)surface;
 }
 
-void SDLKit_DestroyTexture(struct SDL_Texture *tex) {
+void SDLKit_DestroyTexture(void *tex) {
     (void)tex;
 }
 
-void SDLKit_GetTextureSize(struct SDL_Texture *tex, int *w, int *h) {
+void SDLKit_GetTextureSize(void *tex, int *w, int *h) {
     (void)tex;
     if (w) { *w = 0; }
     if (h) { *h = 0; }
@@ -309,17 +306,17 @@ int SDLKit_RenderTextureRotated(void *renderer, void *tex, const struct SDL_FRec
     return -1;
 }
 
-struct SDL_Surface *SDLKit_LoadBMP(const char *path) {
+void *SDLKit_LoadBMP(const char *path) {
     (void)path;
     return NULL;
 }
 
-struct SDL_Surface *SDLKit_CreateSurfaceFrom(int width, int height, unsigned int format, void *pixels, int pitch) {
+void *SDLKit_CreateSurfaceFrom(int width, int height, unsigned int format, void *pixels, int pitch) {
     (void)width; (void)height; (void)format; (void)pixels; (void)pitch;
     return NULL;
 }
 
-struct SDL_IOStream *SDLKit_RWFromFile(const char *file, const char *mode) {
+void *SDLKit_RWFromFile(const char *file, const char *mode) {
     (void)file; (void)mode;
     return NULL;
 }
@@ -328,7 +325,7 @@ unsigned int SDLKit_PixelFormat_ABGR8888(void) {
     return 0;
 }
 
-int SDLKit_RenderReadPixels(struct SDL_Renderer *renderer, int x, int y, int w, int h, void *pixels, int pitch) {
+int SDLKit_RenderReadPixels(void *renderer, int x, int y, int w, int h, void *pixels, int pitch) {
     (void)renderer; (void)x; (void)y; (void)w; (void)h; (void)pixels; (void)pitch;
     return -1;
 }
