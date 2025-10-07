@@ -44,7 +44,6 @@ jobs:
 
   macos-sdl3:
     runs-on: macos-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - name: Select Xcode
