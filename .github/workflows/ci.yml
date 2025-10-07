@@ -25,14 +25,12 @@ jobs:
   linux-headless:
     # Pin to 22.04 for stable Swift toolchain support
     runs-on: ubuntu-22.04
+    container:
+      image: swift:6.1.2-jammy
     env:
       SDLKIT_FORCE_HEADLESS: "1"
     steps:
       - uses: actions/checkout@v4
-      - name: Install Swift
-        uses: swift-actions/setup-swift@v1
-        with:
-          swift-version: "6.1.2"
       - name: Swift version
         run: swift --version
       - name: Build (headless)
