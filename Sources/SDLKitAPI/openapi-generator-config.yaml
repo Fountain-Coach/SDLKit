@@ -1,6 +1,6 @@
 generate:
-  types: true
-  client: true
-  server: true
+  - types
+  - client
+  - server
 
 accessModifier: public
