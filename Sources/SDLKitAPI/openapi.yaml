@@ -1,0 +1,250 @@
+openapi: 3.1.0
+info:
+  title: SDLKit API
+  version: 0.1.0
+  description: |-
+    SDLKit JSON control API. Endpoints are POST unless otherwise noted.
+    In headless builds, GUI/Audio/MIDI endpoints return not_implemented.
+servers:
+  - url: http://127.0.0.1:8723
+tags:
+  - name: window
+  - name: render
+  - name: texture
+  - name: screenshot
+  - name: input
+  - name: clipboard
+  - name: display
+  - name: audio
+  - name: midi
+  - name: health
+components:
+  schemas:
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: string }
+        message: { type: string }
+        details: { description: Optional details, nullable: true }
+    Ok:
+      type: object
+      properties:
+        ok: { type: boolean, default: true }
+    WindowId:
+      type: object
+      required: [window_id]
+      properties:
+        window_id: { type: integer, format: int32 }
+    Color:
+      description: ARGB as 0xAARRGGBB integer or #RRGGBB string
+      oneOf:
+        - type: integer
+          format: int64
+        - type: string
+    Rect:
+      type: object
+      required: [x,y,width,height]
+      properties:
+        x: { type: integer }
+        y: { type: integer }
+        width: { type: integer }
+        height: { type: integer }
+    Point:
+      type: object
+      required: [x,y]
+      properties:
+        x: { type: integer }
+        y: { type: integer }
+    RawScreenshot:
+      type: object
+      required: [raw_base64,width,height,pitch,format]
+      properties:
+        raw_base64: { type: string, format: byte }
+        width: { type: integer }
+        height: { type: integer }
+        pitch: { type: integer }
+        format: { type: string, enum: [ABGR8888] }
+    PNGScreenshot:
+      type: object
+      required: [png_base64,width,height,format]
+      properties:
+        png_base64: { type: string, format: byte }
+        width: { type: integer }
+        height: { type: integer }
+        format: { type: string, enum: [PNG] }
+paths:
+  /agent/gui/window/open:
+    post:
+      tags: [window]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title,width,height]
+              properties:
+                title: { type: string }
+                width: { type: integer }
+                height: { type: integer }
+      responses:
+        "200":
+          description: Opened
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WindowId' }
+        "501": { description: Not implemented in headless, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /agent/gui/window/close:
+    post:
+      tags: [window]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/WindowId' }
+      responses:
+        "200": { description: Closed, content: { application/json: { schema: { $ref: '#/components/schemas/Ok' } } } }
+  /agent/gui/window/show:
+    post:
+      tags: [window]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/WindowId' }
+      responses:
+        "200": { description: Ok, content: { application/json: { schema: { $ref: '#/components/schemas/Ok' } } } }
+  /agent/gui/window/hide:
+    post:
+      tags: [window]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/WindowId' }
+      responses:
+        "200": { description: Ok, content: { application/json: { schema: { $ref: '#/components/schemas/Ok' } } } }
+  /agent/gui/window/resize:
+    post:
+      tags: [window]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/WindowId'
+                - type: object
+                  required: [width,height]
+                  properties:
+                    width: { type: integer }
+                    height: { type: integer }
+      responses:
+        "200": { description: Ok, content: { application/json: { schema: { $ref: '#/components/schemas/Ok' } } } }
+  /agent/gui/window/getInfo:
+    post:
+      tags: [window]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/WindowId' }
+      responses:
+        "200":
+          description: Info
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [x,y,width,height,title]
+                properties:
+                  x: { type: integer }
+                  y: { type: integer }
+                  width: { type: integer }
+                  height: { type: integer }
+                  title: { type: string }
+  /agent/gui/clear:
+    post:
+      tags: [render]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/WindowId'
+                - type: object
+                  required: [color]
+                  properties:
+                    color: { $ref: '#/components/schemas/Color' }
+      responses:
+        "200": { description: Ok, content: { application/json: { schema: { $ref: '#/components/schemas/Ok' } } } }
+  /agent/gui/drawRectangle:
+    post:
+      tags: [render]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/WindowId'
+                - $ref: '#/components/schemas/Rect'
+                - type: object
+                  required: [color]
+                  properties:
+                    color: { $ref: '#/components/schemas/Color' }
+      responses:
+        "200": { description: Ok, content: { application/json: { schema: { $ref: '#/components/schemas/Ok' } } } }
+  /agent/gui/present:
+    post:
+      tags: [render]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/WindowId' }
+      responses:
+        "200": { description: Ok, content: { application/json: { schema: { $ref: '#/components/schemas/Ok' } } } }
+  /agent/gui/screenshot/capture:
+    post:
+      tags: [screenshot]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/WindowId'
+                - type: object
+                  properties:
+                    format: { type: string, enum: [raw,png], default: raw }
+      responses:
+        "200":
+          description: Screenshot data
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/RawScreenshot'
+                  - $ref: '#/components/schemas/PNGScreenshot'
+        "501": { description: Not implemented if image support missing, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /health:
+    get:
+      tags: [health]
+      responses:
+        "200": { description: Ok, content: { application/json: { schema: { $ref: '#/components/schemas/Ok' } } } }
+  /version:
+    get:
+      tags: [health]
+      responses:
+        "200":
+          description: Version string
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version: { type: string }
+

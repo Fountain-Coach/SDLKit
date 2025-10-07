@@ -73,6 +73,10 @@ let package = Package(
         deps.append(.package(path: "External/Fountain-Store"))
         // SecretStore for secure secret persistence
         deps.append(.package(path: "External/swift-secretstore"))
+        // OpenAPI generator & runtimes (opt-in target only)
+        deps.append(.package(url: "https://github.com/apple/swift-openapi-generator.git", from: "1.3.2"))
+        deps.append(.package(url: "https://github.com/apple/swift-openapi-runtime.git", from: "1.1.0"))
+        deps.append(.package(url: "https://github.com/apple/swift-openapi-urlsession.git", from: "1.1.0"))
         return deps
     }(),
     targets: {
@@ -281,6 +285,21 @@ let package = Package(
                 )
             )
         }
+
+        // OpenAPI spec target (build triggers code generation; not part of default products)
+        targets.append(
+            .target(
+                name: "SDLKitAPI",
+                dependencies: [
+                    .product(name: "OpenAPIRuntime", package: "swift-openapi-runtime"),
+                    .product(name: "OpenAPIURLSession", package: "swift-openapi-urlsession")
+                ],
+                path: "Sources/SDLKitAPI",
+                plugins: [
+                    .plugin(name: "OpenAPIGenerator", package: "swift-openapi-generator")
+                ]
+            )
+        )
 
         targets.append(
             .executableTarget(
