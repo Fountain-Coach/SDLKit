@@ -6,6 +6,13 @@ Overview
 - Provides a small JSON agent for scripted control and tests; integrates with LayoutKit as a Canvas backend.
 - Clean, resilient C shim uses void* for SDL handles; Swift sees `UnsafeMutableRawPointer` and stays stable across SDL3 changes.
 
+OpenAPI (Source of Truth)
+- Spec: `Sources/SDLKitAPI/openapi.yaml` (OpenAPI 3.1)
+- Generator: Apple’s Swift OpenAPI Generator (types + client + server)
+- Dedicated workflow: `SDLKit/.github/workflows/openapi.yml` (non‑blocking)
+- Human docs: `docs/agent.md` (mirrors the spec)
+- Optional server: `SDLKitNIO` routes HTTP path → `SDLKitJSONAgent` (manual transport). A generated‑server adapter can be added to conform to the spec’s server interfaces and delegate to the router.
+
 What’s In, Right Now
 - Windowing: open/close, show/hide, resize, title, position; fetch native handles (CAMetalLayer, HWND, Vulkan surface).
 - 2D Drawing: a thin wrapper over `SDL_Renderer` for clear, lines, filled rects, textures, screenshots (ABGR8888, PNG).
@@ -29,6 +36,8 @@ Getting Started
 - Package usage
   - Add to Package.swift: `.package(path: "path/to/SDLKit")`
   - Target deps: `.product(name: "SDLKit", package: "SDLKit")`
+  - OpenAPI types/client (optional): `.target(name: "SDLKitAPI")` and depend on it
+  - NIO server (optional): `swift run SDLKitNIO` (accepts JSON body per spec)
 
 Key Targets
 - `CSDL3`: system module for SDL3 (pkg-config `sdl3`), or `CSDL3Stub` when not found.
@@ -37,6 +46,7 @@ Key Targets
 - `SDLKit`: the Swift API (window, renderer, audio, JSON agent).
 - `SDLKitTTF`: optional text helpers layered on SDLKit.
 - Demos/Tools: `SDLKitDemo`, `SDLKitGolden`, `SDLKitSettings`, `SDLKitMigrate`.
+- OpenAPI: `SDLKitAPI` (spec-driven generated types/client/server stubs), `SDLKitNIO` (manual HTTP server)
 
 Build Flags & Env
 - `HEADLESS_CI`: defined when `sdl3` is unavailable → stubs compiled; GUI/audio features become no-ops.
@@ -52,6 +62,7 @@ Design Choices
 CI & Quality Gates
 - GitHub Actions: headless macOS/Linux (blocking) and macOS SDL3 (blocking).
 - Headless jobs validate build/test without SDL; macOS job compiles and runs the non-headless suite.
+- Separate OpenAPI job generates/compiles spec outputs and stays non‑blocking.
 
 Roadmap (Near-Term)
 - 2D vector “Canvas” API for LayoutKit with batching and path/glyph support (CoreGraphics on macOS; SDL primitives elsewhere).
@@ -67,4 +78,3 @@ Repository Layout
 
 License
 - Copyright (c) Fountain‑Coach.
-
