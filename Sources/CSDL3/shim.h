@@ -33,6 +33,9 @@ typedef struct SDLKit_Event {
 
 #if __has_include(<SDL3/SDL.h>)
   #include <SDL3/SDL.h>
+  #if __has_include(<SDL3/SDL_audio.h>)
+    #include <SDL3/SDL_audio.h>
+  #endif
   #if __has_include(<SDL3/SDL_properties.h>)
     #include <SDL3/SDL_properties.h>
   #endif

@@ -45,6 +45,7 @@ public struct SDLAudioDeviceInfo: Equatable {
     public let bufferFrames: Int
 }
 
+@MainActor
 public enum SDLAudioDeviceList {
     #if canImport(CSDL3) && !HEADLESS_CI
     public static func list(_ kind: SDLAudioDeviceKind) throws -> [SDLAudioDeviceInfo] {
@@ -334,7 +335,11 @@ public final class SDLAudioResampler {
         #endif
     }
 
-    deinit { #if canImport(CSDL3) && !HEADLESS_CI; if let s = stream { SDLKit_DestroyAudioStream(s) }; #endif }
+    deinit {
+        #if canImport(CSDL3) && !HEADLESS_CI
+        if let s = stream { SDLKit_DestroyAudioStream(s) }
+        #endif
+    }
 
     public func convert(samples input: [Float]) throws -> [Float] {
         #if canImport(CSDL3) && !HEADLESS_CI

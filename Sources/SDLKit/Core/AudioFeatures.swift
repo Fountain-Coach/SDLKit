@@ -225,8 +225,6 @@ public final class AudioFeaturePump {
     private func threadLoop() {
         var overlap = [Float]()
         while running {
-            let avail = pump.readFrames(into: &[]) // quick peek is not supported; sleep small interval
-            if avail == 0 { Thread.sleep(forTimeInterval: 0.002) }
             // Read one hop worth of frames (blocking-ish)
             var hop = Array(repeating: Float(0), count: hopSize * channels)
             var got = pump.readFrames(into: &hop)

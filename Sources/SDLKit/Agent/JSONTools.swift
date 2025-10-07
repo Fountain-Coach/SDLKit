@@ -13,6 +13,9 @@ public struct SDLKitJSONAgent {
     private static var _playQueues: [Int: SDLAudioPlaybackQueue] = [:]
     private static var _monitors: [Int: AudioMonitor] = [:] // keyed by capture audio_id
     private static var _midiOut: MIDIOut? = nil
+    #if !HEADLESS_CI
+    private static var _a2mStreams: [Int: AudioA2MStream] = [:]
+    #endif
     private static var _nextAudioId: Int = 1
 
     private struct GPUState { let gpu: AudioGPUFeatureExtractor; let frameSize: Int; let hopSize: Int; let melBands: Int; var overlapMono: [Float]; var prevMel: [Float]? }

@@ -9,6 +9,8 @@ on:
 jobs:
   macos-headless:
     runs-on: macos-latest
+    env:
+      SDLKIT_FORCE_HEADLESS: "1"
     steps:
       - uses: actions/checkout@v4
       - name: Select Xcode
