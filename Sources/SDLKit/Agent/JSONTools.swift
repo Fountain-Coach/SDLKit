@@ -425,7 +425,7 @@ public struct SDLKitJSONAgent {
                 struct Req: Codable { let midi1: Bool? }
                 struct Res: Codable { let ok: Bool }
                 let req = try JSONDecoder().decode(Req.self, from: body)
-                #if os(macOS)
+                #if os(macOS) && !HEADLESS_CI
                 _midiOut = try MIDIOut(midi1: req.midi1 ?? true)
                 return try JSONEncoder().encode(Res(ok: true))
                 #else
@@ -436,7 +436,7 @@ public struct SDLKitJSONAgent {
                 _midiOut?.stop(); _midiOut = nil
                 return try JSONEncoder().encode(Res(ok: true))
             case .midiDestinations:
-                #if os(macOS)
+                #if os(macOS) && !HEADLESS_CI
                 struct Res: Codable { let destinations: [String] }
                 return try JSONEncoder().encode(Res(destinations: MIDIOut.listDestinations()))
                 #else
@@ -446,7 +446,7 @@ public struct SDLKitJSONAgent {
                 struct Req: Codable { let index: Int }
                 struct Res: Codable { let ok: Bool }
                 let req = try JSONDecoder().decode(Req.self, from: body)
-                #if os(macOS)
+                #if os(macOS) && !HEADLESS_CI
                 guard let mo = _midiOut else { throw AgentError.invalidArgument("MIDI not started") }
                 try mo.selectDestination(index: req.index)
                 return try JSONEncoder().encode(Res(ok: true))
@@ -457,7 +457,7 @@ public struct SDLKitJSONAgent {
                 struct Req: Codable { let contains: String }
                 struct Res: Codable { let ok: Bool }
                 let req = try JSONDecoder().decode(Req.self, from: body)
-                #if os(macOS)
+                #if os(macOS) && !HEADLESS_CI
                 guard let mo = _midiOut else { throw AgentError.invalidArgument("MIDI not started") }
                 try mo.selectDestination(nameContains: req.contains)
                 return try JSONEncoder().encode(Res(ok: true))
@@ -468,7 +468,7 @@ public struct SDLKitJSONAgent {
                 struct Req: Codable { let channel: Int }
                 struct Res: Codable { let ok: Bool }
                 let req = try JSONDecoder().decode(Req.self, from: body)
-                #if os(macOS)
+                #if os(macOS) && !HEADLESS_CI
                 guard let mo = _midiOut else { throw AgentError.invalidArgument("MIDI not started") }
                 try mo.setDefaultChannel(req.channel)
                 return try JSONEncoder().encode(Res(ok: true))
@@ -476,6 +476,7 @@ public struct SDLKitJSONAgent {
                 return Self.errorJSON(code: "not_implemented", details: "MIDI channel not available on this platform")
                 #endif
             case .audioA2MStreamPoll:
+                #if !HEADLESS_CI
                 struct Req: Codable { let audio_id: Int; let since: Int?; let max_events: Int?; let timeout_ms: Int? }
                 struct EventOut: Codable { let kind: String; let note: Int; let velocity: Int; let frameIndex: Int; let timestamp_ms: Int }
                 struct Res: Codable { let events: [EventOut]; let next: Int }
@@ -496,12 +497,19 @@ public struct SDLKitJSONAgent {
                 let msPerFrame = Int((Double(hop) / Double(sampleRate)) * 1000.0)
                 let enc = out.enumerated().map { (idx, e) in EventOut(kind: e.kind.rawValue, note: e.note, velocity: e.velocity, frameIndex: e.frameIndex, timestamp_ms: e.frameIndex * msPerFrame) }
                 return try JSONEncoder().encode(Res(events: enc, next: since + enc.count))
+                #else
+                return Self.errorJSON(code: "not_implemented", details: "A2M stream not available in headless build")
+                #endif
             case .audioA2MStreamStop:
+                #if !HEADLESS_CI
                 struct Req: Codable { let audio_id: Int }
                 struct Res: Codable { let ok: Bool }
                 let req = try JSONDecoder().decode(Req.self, from: body)
                 if let s = _a2mStreams.removeValue(forKey: req.audio_id) { s.stop() }
                 return try JSONEncoder().encode(Res(ok: true))
+                #else
+                return Self.errorJSON(code: "not_implemented", details: "A2M stream not available in headless build")
+                #endif
             case .openapiYAML:
                 if let ext = Self.loadExternalOpenAPIYAML() { return ext }
                 return Data(SDLKitOpenAPI.yaml.utf8)

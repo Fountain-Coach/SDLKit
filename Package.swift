@@ -175,7 +175,13 @@ let package = Package(
                     }
                     return flags
                 }(),
-                swiftSettings: useYams ? [ .define("OPENAPI_USE_YAMS") ] : [],
+                swiftSettings: {
+                    var defs: [SwiftSetting] = []
+                    if useYams { defs.append(.define("OPENAPI_USE_YAMS")) }
+                    // If system SDL3 is not available, compile in headless mode to avoid referencing SDL types.
+                    if !hasSDL3 { defs.append(.define("HEADLESS_CI")) }
+                    return defs
+                }(),
                 linkerSettings: {
                     var flags: [LinkerSetting] = []
                     if let lib = env["SDL3_LIB_DIR"], !lib.isEmpty {

@@ -312,3 +312,9 @@ enum SDLCore {
         Self.initialized = value
     }
 }
+#if HEADLESS_CI
+// Provide minimal aliases so headless builds don't fail type lookup
+typealias SDL_Window = OpaquePointer
+// Align Swift-side alias with CSDL3 definition for Vulkan surface
+typealias VkSurfaceKHR = CSDL3.VkSurfaceKHR
+#endif
