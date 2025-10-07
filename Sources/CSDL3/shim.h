@@ -308,8 +308,18 @@ typedef struct SDLKit_Event {
     return 0;
   }
   #else
+    // SDL_ttf headers not available: provide no-op wrappers so Swift can compile,
+    // and report unavailable at runtime.
+    typedef void SDLKit_TTF_Font;
     static inline int SDLKit_TTF_Available(void) { return 0; }
+    static inline int SDLKit_TTF_Init(void) { return -1; }
+    static inline SDLKit_TTF_Font *SDLKit_TTF_OpenFont(const char *path, int ptsize) { (void)path; (void)ptsize; return NULL; }
+    static inline void SDLKit_TTF_CloseFont(SDLKit_TTF_Font *font) { (void)font; }
     static inline void SDLKit_TTF_Quit(void) { }
+    static inline SDL_Surface *SDLKit_TTF_RenderUTF8_Blended(SDLKit_TTF_Font *font, const char *text,
+                                                             uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+      (void)font; (void)text; (void)r; (void)g; (void)b; (void)a; return NULL;
+    }
   #endif
   static inline void SDLKit_Quit(void) { SDL_Quit(); }
   // --- Audio (SDL3) ---

@@ -12,8 +12,8 @@ public final class SDLRenderer {
     public let height: Int
     internal private(set) var didShutdown = false
     #if canImport(CSDL3) && !HEADLESS_CI
-    internal var handle: UnsafeMutablePointer<CSDL3.SDL_Renderer>?
-    internal var textures: [String: UnsafeMutablePointer<CSDL3.SDL_Texture>] = [:]
+    internal var handle: UnsafeMutablePointer<SDL_Renderer>?
+    internal var textures: [String: UnsafeMutablePointer<SDL_Texture>] = [:]
     #endif
 
     public init(width: Int, height: Int, window: SDLWindow) throws {
@@ -21,7 +21,7 @@ public final class SDLRenderer {
         self.height = height
         #if canImport(CSDL3) && !HEADLESS_CI
         guard let win = window.handle else { throw AgentError.internalError("Window not opened") }
-        handle = SDLKit_CreateRenderer(UnsafeMutablePointer<CSDL3.SDL_Window>(win), 0)
+        handle = SDLKit_CreateRenderer(win, 0)
         if handle == nil { throw AgentError.internalError(SDLCore.lastError()) }
         #endif
     }
@@ -70,7 +70,7 @@ public final class SDLRenderer {
         if SDLKit_SetRenderDrawColor(r, rr, gg, bb, a) != 0 {
             throw AgentError.internalError(SDLCore.lastError())
         }
-        var rect = CSDL3.SDL_FRect(x: Float(x), y: Float(y), w: Float(width), h: Float(height))
+        var rect = SDL_FRect(x: Float(x), y: Float(y), w: Float(width), h: Float(height))
         if SDLKit_RenderFillRect(r, &rect) != 0 {
             throw AgentError.internalError(SDLCore.lastError())
         }
@@ -116,7 +116,7 @@ public final class SDLRenderer {
         let sy = y1 < y2 ? 1 : -1
         var err = dx + dy
         while true {
-            var p = CSDL3.SDL_FRect(x: Float(x0), y: Float(y0), w: 1, h: 1)
+            var p = SDL_FRect(x: Float(x0), y: Float(y0), w: 1, h: 1)
             if SDLKit_RenderFillRect(r, &p) != 0 { throw AgentError.internalError(SDLCore.lastError()) }
             if x0 == x2 && y0 == y2 { break }
             let e2 = 2 * err
@@ -146,8 +146,8 @@ public final class SDLRenderer {
         func drawSpan(_ cx: Int, _ cy: Int, _ x: Int, _ y: Int) throws {
             let x0 = cx - x
             let w0 = 2 * x + 1
-            var rect1 = CSDL3.SDL_FRect(x: Float(x0), y: Float(cy + y), w: Float(w0), h: 1)
-            var rect2 = CSDL3.SDL_FRect(x: Float(x0), y: Float(cy - y), w: Float(w0), h: 1)
+            var rect1 = SDL_FRect(x: Float(x0), y: Float(cy + y), w: Float(w0), h: 1)
+            var rect2 = SDL_FRect(x: Float(x0), y: Float(cy - y), w: Float(w0), h: 1)
             if SDLKit_RenderFillRect(r, &rect1) != 0 { throw AgentError.internalError(SDLCore.lastError()) }
             if y != 0 {
                 if SDLKit_RenderFillRect(r, &rect2) != 0 { throw AgentError.internalError(SDLCore.lastError()) }
@@ -178,9 +178,9 @@ public final class SDLRenderer {
         #if canImport(CSDL3IMAGE)
         let ext = (path as NSString).pathExtension.lowercased()
         let useIMG = ext != "bmp"
-        let surf: UnsafeMutablePointer<CSDL3.SDL_Surface>? = useIMG ? SDLKit_IMG_Load(path) : SDLKit_LoadBMP(path)
+        let surf: UnsafeMutablePointer<SDL_Surface>? = useIMG ? SDLKit_IMG_Load(path) : SDLKit_LoadBMP(path)
         #else
-        let surf: UnsafeMutablePointer<CSDL3.SDL_Surface>? = SDLKit_LoadBMP(path)
+        let surf: UnsafeMutablePointer<SDL_Surface>? = SDLKit_LoadBMP(path)
         #endif
         guard let surf else { throw AgentError.internalError(SDLCore.lastError()) }
         defer { SDLKit_DestroySurface(surf) }
@@ -199,7 +199,7 @@ public final class SDLRenderer {
         SDLKit_GetTextureSize(tex, &tw, &th)
         let w = Float(width ?? Int(tw))
         let h = Float(height ?? Int(th))
-        var dst = CSDL3.SDL_FRect(x: Float(x), y: Float(y), w: w, h: h)
+        var dst = SDL_FRect(x: Float(x), y: Float(y), w: w, h: h)
         if SDLKit_RenderTexture(r, tex, nil, &dst) != 0 { throw AgentError.internalError(SDLCore.lastError()) }
         if SDLKitConfig.presentPolicy == .auto { SDLKit_RenderPresent(r) }
         #else
