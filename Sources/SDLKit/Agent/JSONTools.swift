@@ -407,6 +407,7 @@ public struct SDLKitJSONAgent {
                 let out = ev.map { EventOut(kind: $0.kind.rawValue, note: $0.note, velocity: $0.velocity, frameIndex: $0.frameIndex) }
                 return try JSONEncoder().encode(Res(events: out))
             case .audioA2MStreamStart:
+                #if !HEADLESS_CI
                 struct Req: Codable { let audio_id: Int; let midi: Bool? }
                 struct Res: Codable { let ok: Bool }
                 let req = try JSONDecoder().decode(Req.self, from: body)
@@ -425,6 +426,9 @@ public struct SDLKitJSONAgent {
                 }
                 Self._a2mStreams[req.audio_id] = stream
                 return try JSONEncoder().encode(Res(ok: true))
+                #else
+                return Self.errorJSON(code: "not_implemented", details: "A2M stream not available in headless build")
+                #endif
             case .midiStart:
                 struct Req: Codable { let midi1: Bool? }
                 struct Res: Codable { let ok: Bool }

@@ -70,19 +70,22 @@ final class AudioA2MStream {
                     for i in 0..<read { var acc: Float = 0; for c in 0..<chans { acc += raw[i*chans + c] }; mono.append(acc / Float(chans)) }
                     var windows: [[Float]] = []
                     var idx = 0
-                    while idx + gpu.frameSize <= mono.count && windows.count < 32 {
-                        windows.append(Array(mono[idx..<(idx+gpu.frameSize)]))
+                    let fsize = gpu.frameSize
+                    while idx + fsize <= mono.count && windows.count < 32 {
+                        windows.append(Array(mono[idx..<(idx+fsize)]))
                         idx += hs
                     }
                     overlapMono = (idx < mono.count) ? Array(mono[idx..<mono.count]) : []
                     if !windows.isEmpty {
                         var melFrames: [[Float]] = []
-                        let group = DispatchGroup(); group.enter()
-                        DispatchQueue.main.async {
-                            melFrames = (try? gpu.gpu.process(frames: windows)) ?? []
-                            group.leave()
+                        // Hop onto the main actor to run GPU feature extraction safely
+                        let sem = DispatchSemaphore(value: 0)
+                        let extractor = gpu.gpu
+                        Task { @MainActor in
+                            melFrames = (try? extractor.process(frames: windows)) ?? []
+                            sem.signal()
                         }
-                        group.wait()
+                        sem.wait()
                         let ev = a2m.process(melFrames: melFrames, startFrameIndex: nextFrameIndex)
                         nextFrameIndex += melFrames.count
                         append(ev)

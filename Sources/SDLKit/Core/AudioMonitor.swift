@@ -8,7 +8,7 @@ public final class AudioMonitor {
     private let resampler: SDLAudioResampler?
     private let chunkFrames: Int
     private var running = true
-    private let thread: Thread
+    private var thread: Thread?
 
     public init(capture: SDLAudioCapture, pump: SDLAudioChunkedCapturePump, playback: SDLAudioPlayback, chunkFrames: Int = 1024) throws {
         self.cap = capture
@@ -21,10 +21,11 @@ public final class AudioMonitor {
         } else {
             self.resampler = nil
         }
-        self.thread = Thread { [weak self] in self?.runLoop() }
-        self.thread.name = "SDLKit.AudioMonitor"
-        self.thread.qualityOfService = .userInteractive
-        self.thread.start()
+        let t = Thread { [weak self] in self?.runLoop() }
+        t.name = "SDLKit.AudioMonitor"
+        t.qualityOfService = .userInteractive
+        self.thread = t
+        t.start()
     }
 
     public func stop() { running = false }
@@ -46,4 +47,3 @@ public final class AudioMonitor {
         }
     }
 }
-

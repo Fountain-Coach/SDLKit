@@ -107,7 +107,7 @@ struct DemoApp {
                 }
             }
             // allow runtime toggle via any key press
-            if let ev = try? agent.captureEvent(windowId: windowId, timeoutMs: 0), let e = ev {
+            if let e = try? agent.captureEvent(windowId: windowId, timeoutMs: 0) {
                 switch e.type {
                 case .keyDown:
                     useGPU.toggle()

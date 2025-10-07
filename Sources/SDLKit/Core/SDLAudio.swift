@@ -230,17 +230,18 @@ public final class SDLAudioPlaybackQueue {
     private let channels: Int
     private let chunkFrames: Int
     private var running = true
-    private let thread: Thread
+    private var thread: Thread?
 
     public init(playback: SDLAudioPlayback, capacityFrames: Int = 48000, chunkFrames: Int = 2048) {
         self.playback = playback
         self.channels = playback.spec.channels
         self.ring = SPSCFloatRingBuffer(capacity: max(1, capacityFrames * channels * 2))
         self.chunkFrames = max(128, chunkFrames)
-        self.thread = Thread { [weak self] in self?.runLoop() }
-        self.thread.name = "SDLKit.AudioPlaybackQueue"
-        self.thread.qualityOfService = .userInitiated
-        self.thread.start()
+        let t = Thread { [weak self] in self?.runLoop() }
+        t.name = "SDLKit.AudioPlaybackQueue"
+        t.qualityOfService = .userInitiated
+        self.thread = t
+        t.start()
     }
 
     deinit { stop() }

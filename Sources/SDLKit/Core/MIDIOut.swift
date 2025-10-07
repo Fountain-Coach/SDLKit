@@ -40,7 +40,8 @@ public final class MIDIOut {
                 var pkt = MIDIPacketListInit(&packetList)
                 pkt = MIDIPacketListAdd(&packetList, MemoryLayout<MIDIPacketList>.size + 3, pkt, 0, 3, raw.baseAddress!.assumingMemoryBound(to: UInt8.self))
             }
-            MIDIReceivedEventList(dest, &packetList)
+            // Send legacy MIDI 1.0 packet list via CoreMIDI output port
+            MIDISend(outPort, dest, &packetList)
         } else {
             // TODO: Implement UMP (MIDI 2.0) when widely available
         }

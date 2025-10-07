@@ -1,5 +1,6 @@
 import Foundation
 
+@MainActor
 public final class AudioGPUFeatureExtractor {
     private struct WeightKey: Hashable { let sampleRate: Int; let frameSize: Int; let melBands: Int }
     private static var weightCache: [WeightKey: [Float]] = [:]
