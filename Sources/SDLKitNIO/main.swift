@@ -9,13 +9,20 @@ final class HTTPHandler: ChannelInboundHandler {
     typealias OutboundOut = HTTPServerResponsePart
 
     private var bodyData = Data()
+    private var currentPath: String?
     private let agent = SDLKitJSONAgent()
 
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
         let part = self.unwrapInboundIn(data)
         switch part {
-        case .head:
+        case .head(let request):
             bodyData.removeAll(keepingCapacity: false)
+            // Parse URI path only (ignore query for now)
+            if let qidx = request.uri.firstIndex(of: "?") {
+                currentPath = String(request.uri[..<qidx])
+            } else {
+                currentPath = request.uri
+            }
         case .body(let buf):
             var b = buf
             if let bytes = b.readBytes(length: b.readableBytes) {
@@ -24,19 +31,8 @@ final class HTTPHandler: ChannelInboundHandler {
         case .end:
             // Route by path; forward to SDLKitJSONAgent
             let reqBody = bodyData
-            let path = context.channel.pipeline.context(name: "HTTPHandler").flatMap { _ in context.channel.parent }.map { _ in "" }
-            // We cannot get the path from here directly; install a separate handler to capture head if needed.
-            // For simplicity, require body to contain { "_path": "/agent/gui/window/open", ... }
-            let responseData: Data
-            if let json = try? JSONSerialization.jsonObject(with: reqBody) as? [String: Any], let p = json["_path"] as? String {
-                var clean = json
-                clean.removeValue(forKey: "_path")
-                let body = try! JSONSerialization.data(withJSONObject: clean)
-                responseData = agent.handle(path: p, body: body)
-            } else {
-                let err = ["code": "invalid_request", "message": "body must include _path"]
-                responseData = try! JSONSerialization.data(withJSONObject: err)
-            }
+            let path = currentPath ?? "/health"
+            let responseData: Data = agent.handle(path: path, body: reqBody)
             var headers = HTTPHeaders()
             headers.add(name: "content-type", value: "application/json")
             headers.add(name: "content-length", value: String(responseData.count))
@@ -68,4 +64,3 @@ let bootstrap = ServerBootstrap(group: group)
 let channel = try bootstrap.bind(host: "127.0.0.1", port: port).wait()
 print("SDLKitNIO listening on http://127.0.0.1:\(port)")
 try channel.closeFuture.wait()
-
