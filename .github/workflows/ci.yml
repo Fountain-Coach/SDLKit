@@ -23,7 +23,8 @@ jobs:
         run: swift test -q || true
 
   linux-headless:
-    runs-on: ubuntu-latest
+    # Pin to 22.04 for stable Swift toolchain support
+    runs-on: ubuntu-22.04
     env:
       SDLKIT_FORCE_HEADLESS: "1"
     steps:
