@@ -82,7 +82,9 @@ public enum SDLAudioDeviceList {
     #endif
 }
 
+#if canImport(CSDL3) && !HEADLESS_CI
 @MainActor
+#endif
 public final class SDLAudioCapture {
     public let spec: SDLAudioSpec
     #if canImport(CSDL3) && !HEADLESS_CI
@@ -157,7 +159,9 @@ public final class SDLAudioCapture {
     }
 }
 
+#if canImport(CSDL3) && !HEADLESS_CI
 @MainActor
+#endif
 public final class SDLAudioPlayback {
     public let spec: SDLAudioSpec
     #if canImport(CSDL3) && !HEADLESS_CI
@@ -288,7 +292,7 @@ public struct SDLAudioWAV {
         guard rc == 0, let buf, len > 0 else { throw AgentError.internalError(SDLCore.lastError()) }
         defer { SDLKit_free(buf) }
         let data = Data(bytes: buf, count: Int(len))
-        let fmt: SDLAudioSampleFormat = (spec.format == SDLKit_AudioFormat_S16()) ? .s16 : .f32
+        let fmt: SDLAudioSampleFormat = (UInt32(spec.format) == SDLKit_AudioFormat_S16()) ? .s16 : .f32
         return SDLAudioWAV(sampleRate: Int(spec.freq), channels: Int(spec.channels), format: fmt, data: data)
     }
 
@@ -323,7 +327,9 @@ public struct SDLAudioWAV {
     #endif
 }
 
+#if canImport(CSDL3) && !HEADLESS_CI
 @MainActor
+#endif
 public final class SDLAudioResampler {
     #if canImport(CSDL3) && !HEADLESS_CI
     private var stream: UnsafeMutablePointer<SDL_AudioStream>?
