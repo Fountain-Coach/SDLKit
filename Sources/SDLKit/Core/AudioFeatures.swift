@@ -168,7 +168,7 @@ public final class AudioFeatureExtractor {
 }
 
 // Background mel extraction from a running capture pump.
-public final class AudioFeaturePump {
+public final class AudioFeaturePump: @unchecked Sendable {
     private let cap: SDLAudioCapture
     private let pump: SDLAudioChunkedCapturePump
     private let extractor: AudioFeatureExtractor
@@ -215,7 +215,7 @@ public final class AudioFeaturePump {
     }
 
     private func start() {
-        let t = Thread(target: self, selector: #selector(threadEntry), object: nil)
+        let t = Thread { [weak self] in self?.threadLoop() }
         t.name = "SDLKit.AudioFeaturePump"
         t.qualityOfService = .userInitiated
         self.thread = t
@@ -259,5 +259,5 @@ public final class AudioFeaturePump {
         }
     }
 
-    @objc private func threadEntry() { threadLoop() }
+    
 }

@@ -1,6 +1,6 @@
 import Foundation
 
-public final class AudioMonitor {
+public final class AudioMonitor: @unchecked Sendable {
     private let cap: SDLAudioCapture
     private let pump: SDLAudioChunkedCapturePump
     private let playback: SDLAudioPlayback
@@ -21,7 +21,7 @@ public final class AudioMonitor {
         } else {
             self.resampler = nil
         }
-        let t = Thread(target: self, selector: #selector(threadEntry), object: nil)
+        let t = Thread { [weak self] in self?.runLoop() }
         t.name = "SDLKit.AudioMonitor"
         t.qualityOfService = .userInteractive
         self.thread = t
@@ -47,5 +47,5 @@ public final class AudioMonitor {
         }
     }
 
-    @objc private func threadEntry() { runLoop() }
+    
 }

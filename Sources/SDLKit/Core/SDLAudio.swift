@@ -224,7 +224,7 @@ public final class SDLAudioPlayback {
     }
 }
 
-public final class SDLAudioPlaybackQueue {
+public final class SDLAudioPlaybackQueue: @unchecked Sendable {
     private let playback: SDLAudioPlayback
     private let ring: SPSCFloatRingBuffer
     private let channels: Int
@@ -237,7 +237,7 @@ public final class SDLAudioPlaybackQueue {
         self.channels = playback.spec.channels
         self.ring = SPSCFloatRingBuffer(capacity: max(1, capacityFrames * channels * 2))
         self.chunkFrames = max(128, chunkFrames)
-        let t = Thread(target: self, selector: #selector(threadEntry), object: nil)
+        let t = Thread { [weak self] in self?.runLoop() }
         t.name = "SDLKit.AudioPlaybackQueue"
         t.qualityOfService = .userInitiated
         self.thread = t
@@ -267,7 +267,7 @@ public final class SDLAudioPlaybackQueue {
         }
     }
 
-    @objc private func threadEntry() { runLoop() }
+    
 }
 
 public struct SDLAudioWAV {

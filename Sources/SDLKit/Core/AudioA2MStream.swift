@@ -1,6 +1,6 @@
 import Foundation
 
-final class AudioA2MStream {
+final class AudioA2MStream: @unchecked Sendable {
     private let sessId: Int
     private let sess: SDLKitJSONAgent.CaptureSessionProxy
     private let a2m: AudioA2MStub
@@ -24,7 +24,7 @@ final class AudioA2MStream {
         self.featCPU = featCPU
         self.gpuState = gpuState
         self.sink = sink
-        let t = Thread(target: self, selector: #selector(threadEntry), object: nil)
+        let t = Thread { [weak self] in self?.runLoop() }
         t.name = "SDLKit.A2MStream"
         t.qualityOfService = .userInitiated
         self.thread = t
@@ -99,5 +99,5 @@ final class AudioA2MStream {
         }
     }
 
-    @objc private func threadEntry() { runLoop() }
+    
 }

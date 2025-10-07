@@ -104,7 +104,7 @@ public final class SPSCFloatRingBuffer {
 }
 
 // A helper that runs a background pump from SDLAudioCapture into the ring buffer.
-public final class SDLAudioChunkedCapturePump {
+public final class SDLAudioChunkedCapturePump: @unchecked Sendable {
     private let capture: SDLAudioCapture
     private let ring: SPSCFloatRingBuffer
     private let channels: Int
@@ -115,7 +115,7 @@ public final class SDLAudioChunkedCapturePump {
         self.capture = capture
         self.channels = capture.spec.channels
         self.ring = SPSCFloatRingBuffer(capacity: max(1, bufferFrames * channels * 2))
-        let t = Thread(target: self, selector: #selector(threadEntry), object: nil)
+        let t = Thread { [weak self] in self?.threadLoop() }
         t.name = "SDLKit.AudioPump"
         t.qualityOfService = .userInitiated
         self.thread = t
@@ -151,5 +151,5 @@ public final class SDLAudioChunkedCapturePump {
         }
     }
 
-    @objc private func threadEntry() { threadLoop() }
+    
 }
