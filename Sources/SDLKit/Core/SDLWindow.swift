@@ -44,11 +44,11 @@ public final class SDLWindow {
         public let metalLayer: SDLKitMetalLayer?
         public let win32HWND: UnsafeMutableRawPointer?
         #if canImport(CSDL3) && !HEADLESS_CI
-        private let windowHandle: UnsafeMutablePointer<SDL_Window>
+        private let windowHandle: OpaquePointer
         #endif
 
         #if canImport(CSDL3) && !HEADLESS_CI
-        fileprivate init(window: UnsafeMutablePointer<SDL_Window>) {
+        fileprivate init(window: OpaquePointer) {
             self.windowHandle = window
             #if canImport(QuartzCore)
             if let pointer = SDLKit_MetalLayerForWindow(window) {
@@ -71,7 +71,7 @@ public final class SDLWindow {
         public func createVulkanSurface(instance: VkInstance) throws -> VkSurfaceKHR {
             #if canImport(CSDL3) && !HEADLESS_CI
             var surface: VkSurfaceKHR?
-            if !SDLKit_CreateVulkanSurface(windowHandle, instance, &surface) {
+            if !SDLKit_CreateVulkanSurface(UnsafeMutablePointer<CSDL3.SDL_Window>(windowHandle), instance, &surface) {
                 throw AgentError.internalError(SDLCore.lastError())
             }
             // On platforms where VkSurfaceKHR is imported as an optional handle (OpaquePointer?), unwrap.
@@ -113,7 +113,7 @@ public final class SDLWindow {
 
     public let config: Config
     #if canImport(CSDL3) && !HEADLESS_CI
-    var handle: UnsafeMutablePointer<SDL_Window>?
+    var handle: OpaquePointer?
     #endif
 
     public init(config: Config) { self.config = config }
@@ -125,7 +125,7 @@ public final class SDLWindow {
         guard let win = SDLKit_CreateWindow(config.title, Int32(config.width), Int32(config.height), flags) else {
             throw AgentError.internalError(SDLCore.lastError())
         }
-        handle = win
+        handle = OpaquePointer(win)
         #else
         throw AgentError.sdlUnavailable
         #endif
@@ -134,7 +134,7 @@ public final class SDLWindow {
     public func close() {
         #if canImport(CSDL3) && !HEADLESS_CI
         if let win = handle {
-            SDLKit_DestroyWindow(win)
+            SDLKit_DestroyWindow(UnsafeMutablePointer<CSDL3.SDL_Window>(win))
         }
         handle = nil
         #endif
