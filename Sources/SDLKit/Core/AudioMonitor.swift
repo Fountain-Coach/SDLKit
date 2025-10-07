@@ -10,6 +10,7 @@ public final class AudioMonitor: @unchecked Sendable {
     private var running = true
     private var thread: Thread?
 
+    @MainActor
     public init(capture: SDLAudioCapture, pump: SDLAudioChunkedCapturePump, playback: SDLAudioPlayback, chunkFrames: Int = 1024) throws {
         self.cap = capture
         self.pump = pump

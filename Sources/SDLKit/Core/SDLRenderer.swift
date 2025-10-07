@@ -5,6 +5,10 @@ import CSDL3
 #if !HEADLESS_CI && canImport(CSDL3IMAGE)
 import CSDL3IMAGE
 #endif
+// For TTF compat helper
+#if !HEADLESS_CI && canImport(CSDL3Compat)
+import CSDL3Compat
+#endif
 
 @MainActor
 public final class SDLRenderer {
@@ -12,8 +16,8 @@ public final class SDLRenderer {
     public let height: Int
     internal private(set) var didShutdown = false
     #if canImport(CSDL3) && !HEADLESS_CI
-    internal var handle: UnsafeMutablePointer<SDL_Renderer>?
-    internal var textures: [String: UnsafeMutablePointer<SDL_Texture>] = [:]
+    internal var handle: UnsafeMutableRawPointer?
+    internal var textures: [String: UnsafeMutableRawPointer] = [:]
     #endif
 
     public init(width: Int, height: Int, window: SDLWindow) throws {
@@ -178,9 +182,15 @@ public final class SDLRenderer {
         #if canImport(CSDL3IMAGE)
         let ext = (path as NSString).pathExtension.lowercased()
         let useIMG = ext != "bmp"
-        let surf: UnsafeMutablePointer<SDL_Surface>? = useIMG ? SDLKit_IMG_Load(path) : SDLKit_LoadBMP(path)
+        let surf: UnsafeMutableRawPointer? = {
+            if useIMG {
+                if let s = SDLKit_IMG_Load(path) { return UnsafeMutableRawPointer(s) } else { return nil }
+            } else {
+                return SDLKit_LoadBMP(path)
+            }
+        }()
         #else
-        let surf: UnsafeMutablePointer<SDL_Surface>? = SDLKit_LoadBMP(path)
+        let surf: UnsafeMutableRawPointer? = SDLKit_LoadBMP(path)
         #endif
         guard let surf else { throw AgentError.internalError(SDLCore.lastError()) }
         defer { SDLKit_DestroySurface(surf) }
@@ -458,8 +468,13 @@ public final class SDLRenderer {
         let rr = UInt8((color >> 16) & 0xFF)
         let gg = UInt8((color >> 8) & 0xFF)
         let bb = UInt8(color & 0xFF)
-        let tex: UnsafeMutablePointer<SDL_Texture>? = text.withCString { cstr in
-            guard let surf = SDLKit_TTF_RenderUTF8_Blended(font, cstr, rr, gg, bb, a) else { return nil }
+        let tex: UnsafeMutableRawPointer? = text.withCString { cstr in
+            #if canImport(CSDL3Compat)
+            let surf = SDLKit_TTF_RenderTextBlended_UTF8(font, cstr, rr, gg, bb, a)
+            #else
+            let surf = SDLKit_TTF_RenderUTF8_Blended(font, cstr, rr, gg, bb, a)
+            #endif
+            guard let surf else { return nil }
             defer { SDLKit_DestroySurface(surf) }
             return SDLKit_CreateTextureFromSurface(r, surf)
         }
@@ -489,15 +504,15 @@ public final class SDLRenderer {
         }
     }
 
-    private static func getFont(path: String, size: Int) throws -> UnsafeMutablePointer<SDLKit_TTF_Font> {
+    private static func getFont(path: String, size: Int) throws -> UnsafeMutableRawPointer {
         let key = FontKey(path: path, size: size)
         if let cached = fontCache[key] {
-            return cached.bindMemory(to: SDLKit_TTF_Font.self, capacity: 1)
+            return cached
         }
         guard let f = SDLKit_TTF_OpenFont(path, Int32(size)) else {
             throw AgentError.internalError(SDLCore.lastError())
         }
-        fontCache[key] = UnsafeMutableRawPointer(f)
+        fontCache[key] = f
         return f
     }
 
@@ -509,10 +524,7 @@ public final class SDLRenderer {
             }
             return
         }
-        for raw in fontCache.values {
-            let fontPtr = raw.bindMemory(to: SDLKit_TTF_Font.self, capacity: 1)
-            SDLKit_TTF_CloseFont(fontPtr)
-        }
+        for raw in fontCache.values { SDLKit_TTF_CloseFont(raw) }
         fontCache.removeAll(keepingCapacity: false)
         if ttfInitialized {
             SDLKit_TTF_Quit()

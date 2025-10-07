@@ -1,0 +1,5 @@
+module CSDL3Compat {
+  header "compat.h"
+  export *
+}
+

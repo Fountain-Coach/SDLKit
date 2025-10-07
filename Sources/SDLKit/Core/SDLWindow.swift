@@ -14,6 +14,9 @@ import Vulkan
 #if os(Linux) && canImport(CVulkan)
 import CVulkan
 #endif
+#if !HEADLESS_CI && canImport(CSDL3Compat)
+import CSDL3Compat
+#endif
 #if canImport(QuartzCore)
 public typealias SDLKitMetalLayer = CAMetalLayer
 #else
@@ -44,11 +47,11 @@ public final class SDLWindow {
         public let metalLayer: SDLKitMetalLayer?
         public let win32HWND: UnsafeMutableRawPointer?
         #if canImport(CSDL3) && !HEADLESS_CI
-        private let windowHandle: UnsafeMutablePointer<SDL_Window>
+        private let windowHandle: UnsafeMutableRawPointer
         #endif
 
         #if canImport(CSDL3) && !HEADLESS_CI
-        fileprivate init(window: UnsafeMutablePointer<SDL_Window>) {
+        fileprivate init(window: UnsafeMutableRawPointer) {
             self.windowHandle = window
             #if canImport(QuartzCore)
             if let pointer = SDLKit_MetalLayerForWindow(window) {
@@ -59,7 +62,11 @@ public final class SDLWindow {
             #else
             self.metalLayer = nil
             #endif
+            #if canImport(CSDL3Compat)
+            self.win32HWND = SDLKit_Win32HWND_Compat(window)
+            #else
             self.win32HWND = SDLKit_Win32HWND(window)
+            #endif
         }
         #else
         fileprivate init() {
@@ -113,7 +120,7 @@ public final class SDLWindow {
 
     public let config: Config
     #if canImport(CSDL3) && !HEADLESS_CI
-    var handle: UnsafeMutablePointer<SDL_Window>?
+    var handle: UnsafeMutableRawPointer?
     #endif
 
     public init(config: Config) { self.config = config }

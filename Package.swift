@@ -89,6 +89,14 @@ let package = Package(
                     ]
                 )
             )
+            // Small C compat layer for tricky symbols (property pointers, TTF text helpers)
+            targets.append(
+                .target(
+                    name: "CSDL3Compat",
+                    path: "Sources/CSDL3Compat",
+                    publicHeadersPath: "."
+                )
+            )
         } else {
             targets.append(
                 .target(
@@ -153,6 +161,12 @@ let package = Package(
                     // Only include SDL_image shims when GUI is enabled
                     if guiEnabled {
                         deps.append(.target(name: "CSDL3IMAGE", condition: .when(platforms: [.macOS, .linux])))
+                        if hasSDL3TTF {
+                            deps.append(.target(name: "CSDL3TTF", condition: .when(platforms: [.macOS, .linux])))
+                        }
+                        if hasSDL3 {
+                            deps.append(.target(name: "CSDL3Compat", condition: .when(platforms: [.macOS, .linux])))
+                        }
                     }
                     if isLinux {
                         deps.append(.target(name: "CVulkan", condition: .when(platforms: [.linux])))

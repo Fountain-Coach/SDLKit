@@ -82,20 +82,18 @@ public enum SDLAudioDeviceList {
     #endif
 }
 
-#if canImport(CSDL3) && !HEADLESS_CI
-@MainActor
-#endif
 public final class SDLAudioCapture {
     public let spec: SDLAudioSpec
     #if canImport(CSDL3) && !HEADLESS_CI
-    private var stream: UnsafeMutablePointer<SDL_AudioStream>?
+    private var stream: UnsafeMutableRawPointer?
     #endif
 
+    @MainActor
     public init(spec: SDLAudioSpec = SDLAudioSpec(), deviceId: UInt64? = nil) throws {
         #if canImport(CSDL3) && !HEADLESS_CI
         self.spec = spec
         try SDLCore.shared.ensureInitialized()
-        let s: UnsafeMutablePointer<SDL_AudioStream>?
+        let s: UnsafeMutableRawPointer?
         if let devid = deviceId {
             s = SDLKit_OpenAudioRecordingStreamU64(devid, Int32(spec.sampleRate), spec.format.cFormat, Int32(spec.channels))
         } else {
@@ -151,7 +149,7 @@ public final class SDLAudioCapture {
         let rc = buffer.withUnsafeMutableBytes { raw -> Int32 in
             return SDLKit_GetAudioStreamData(s, raw.baseAddress, Int32(byteCount))
         }
-        if rc < 0 { throw AgentError.internalError(SDLCore.lastError()) }
+        if rc < 0 { throw AgentError.internalError(String(cString: SDLKit_GetError())) }
         return Int(rc) / bytesPerFrame
         #else
         throw AgentError.sdlUnavailable
@@ -159,20 +157,18 @@ public final class SDLAudioCapture {
     }
 }
 
-#if canImport(CSDL3) && !HEADLESS_CI
-@MainActor
-#endif
 public final class SDLAudioPlayback {
     public let spec: SDLAudioSpec
     #if canImport(CSDL3) && !HEADLESS_CI
-    private var stream: UnsafeMutablePointer<SDL_AudioStream>?
+    private var stream: UnsafeMutableRawPointer?
     #endif
 
+    @MainActor
     public init(spec: SDLAudioSpec = SDLAudioSpec(), deviceId: UInt64? = nil) throws {
         #if canImport(CSDL3) && !HEADLESS_CI
         self.spec = spec
         try SDLCore.shared.ensureInitialized()
-        let s: UnsafeMutablePointer<SDL_AudioStream>?
+        let s: UnsafeMutableRawPointer?
         if let devid = deviceId {
             s = SDLKit_OpenAudioPlaybackStreamU64(devid, Int32(spec.sampleRate), spec.format.cFormat, Int32(spec.channels))
         } else {
@@ -204,7 +200,7 @@ public final class SDLAudioPlayback {
         guard let s = stream else { throw AgentError.internalError("audio stream not open") }
         if samples.count == 0 { return }
         let rc = SDLKit_PutAudioStreamData(s, samples.baseAddress, Int32(samples.count))
-        if rc != 0 { throw AgentError.internalError(SDLCore.lastError()) }
+        if rc != 0 { throw AgentError.internalError(String(cString: SDLKit_GetError())) }
         #else
         throw AgentError.sdlUnavailable
         #endif
@@ -292,7 +288,7 @@ public struct SDLAudioWAV {
         guard rc == 0, let buf, len > 0 else { throw AgentError.internalError(SDLCore.lastError()) }
         defer { SDLKit_free(buf) }
         let data = Data(bytes: buf, count: Int(len))
-        let fmt: SDLAudioSampleFormat = (UInt32(spec.format) == SDLKit_AudioFormat_S16()) ? .s16 : .f32
+        let fmt: SDLAudioSampleFormat = (spec.format == SDL_AudioFormat(SDLKit_AudioFormat_S16())) ? .s16 : .f32
         return SDLAudioWAV(sampleRate: Int(spec.freq), channels: Int(spec.channels), format: fmt, data: data)
     }
 
@@ -327,22 +323,20 @@ public struct SDLAudioWAV {
     #endif
 }
 
-#if canImport(CSDL3) && !HEADLESS_CI
-@MainActor
-#endif
 public final class SDLAudioResampler {
     #if canImport(CSDL3) && !HEADLESS_CI
-    private var stream: UnsafeMutablePointer<SDL_AudioStream>?
+    private var stream: UnsafeMutableRawPointer?
     #endif
     public let src: SDLAudioSpec
     public let dst: SDLAudioSpec
 
+    @MainActor
     public init(src: SDLAudioSpec, dst: SDLAudioSpec) throws {
         self.src = src; self.dst = dst
         #if canImport(CSDL3) && !HEADLESS_CI
         try SDLCore.shared.ensureInitialized()
         guard let s = SDLKit_CreateAudioStreamConvert(Int32(src.sampleRate), src.format.cFormat, Int32(src.channels), Int32(dst.sampleRate), dst.format.cFormat, Int32(dst.channels)) else {
-            throw AgentError.internalError(SDLCore.lastError())
+            throw AgentError.internalError(String(cString: SDLKit_GetError()))
         }
         self.stream = s
         #else
@@ -364,14 +358,14 @@ public final class SDLAudioResampler {
         let putRC = input.withUnsafeBytes { raw -> Int32 in
             return SDLKit_PutAudioStreamData(s, raw.baseAddress, Int32(raw.count))
         }
-        if putRC != 0 { throw AgentError.internalError(SDLCore.lastError()) }
+        if putRC != 0 { throw AgentError.internalError(String(cString: SDLKit_GetError())) }
         // Estimate space: simple upper bound (2x) for safety
         var out = Array(repeating: Float(0), count: max(1, (input.count * dst.sampleRate) / max(1, src.sampleRate) * dst.channels / max(1, src.channels) + 8))
         let outBytes = out.count * MemoryLayout<Float>.size
         let got = out.withUnsafeMutableBytes { raw -> Int32 in
             return SDLKit_GetAudioStreamData(s, raw.baseAddress, Int32(outBytes))
         }
-        if got < 0 { throw AgentError.internalError(SDLCore.lastError()) }
+        if got < 0 { throw AgentError.internalError(String(cString: SDLKit_GetError())) }
         let samples = Int(got) / MemoryLayout<Float>.size
         if samples < out.count { out.removeSubrange(samples..<out.count) }
         return out

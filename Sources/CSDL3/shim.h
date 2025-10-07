@@ -56,26 +56,26 @@ typedef struct SDLKit_Event {
   typedef struct SDL_AudioStream SDL_AudioStream;
   static inline const char *SDLKit_GetError(void) { return SDL_GetError(); }
   static inline int SDLKit_Init(uint32_t flags) { return SDL_Init(flags); }
-  static inline SDL_Window *SDLKit_CreateWindow(const char *title, int32_t width, int32_t height, uint32_t flags) {
-    return SDL_CreateWindow(title, width, height, flags);
+  static inline void *SDLKit_CreateWindow(const char *title, int32_t width, int32_t height, uint32_t flags) {
+    return (void *)SDL_CreateWindow(title, width, height, flags);
   }
-  static inline void SDLKit_DestroyWindow(SDL_Window *window) { SDL_DestroyWindow(window); }
-  static inline void SDLKit_DestroyRenderer(SDL_Renderer *renderer) { SDL_DestroyRenderer(renderer); }
-  static inline void SDLKit_ShowWindow(SDL_Window *window) { SDL_ShowWindow(window); }
-  static inline void SDLKit_HideWindow(SDL_Window *window) { SDL_HideWindow(window); }
-  static inline void SDLKit_SetWindowTitle(SDL_Window *window, const char *title) { SDL_SetWindowTitle(window, title); }
-  static inline const char *SDLKit_GetWindowTitle(SDL_Window *window) { return SDL_GetWindowTitle(window); }
-  static inline void SDLKit_SetWindowPosition(SDL_Window *window, int x, int y) { SDL_SetWindowPosition(window, x, y); }
-  static inline void SDLKit_GetWindowPosition(SDL_Window *window, int *x, int *y) { SDL_GetWindowPosition(window, x, y); }
-  static inline void SDLKit_SetWindowSize(SDL_Window *window, int w, int h) { SDL_SetWindowSize(window, w, h); }
-  static inline void SDLKit_GetWindowSize(SDL_Window *window, int *w, int *h) { SDL_GetWindowSize(window, w, h); }
-  static inline void SDLKit_MaximizeWindow(SDL_Window *window) { SDL_MaximizeWindow(window); }
-  static inline void SDLKit_MinimizeWindow(SDL_Window *window) { SDL_MinimizeWindow(window); }
-  static inline void SDLKit_RestoreWindow(SDL_Window *window) { SDL_RestoreWindow(window); }
-  static inline int SDLKit_SetWindowFullscreen(SDL_Window *window, int enabled) { return SDL_SetWindowFullscreen(window, enabled != 0) ? 0 : -1; }
-  static inline int SDLKit_SetWindowOpacity(SDL_Window *window, float opacity) { return SDL_SetWindowOpacity(window, opacity) ? 0 : -1; }
-  static inline int SDLKit_SetWindowAlwaysOnTop(SDL_Window *window, int enabled) { return SDL_SetWindowAlwaysOnTop(window, enabled != 0) ? 0 : -1; }
-  static inline void SDLKit_CenterWindow(SDL_Window *window) { SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED); }
+  static inline void SDLKit_DestroyWindow(void *window) { SDL_DestroyWindow((SDL_Window *)window); }
+  static inline void SDLKit_DestroyRenderer(void *renderer) { SDL_DestroyRenderer((SDL_Renderer *)renderer); }
+  static inline void SDLKit_ShowWindow(void *window) { SDL_ShowWindow((SDL_Window *)window); }
+  static inline void SDLKit_HideWindow(void *window) { SDL_HideWindow((SDL_Window *)window); }
+  static inline void SDLKit_SetWindowTitle(void *window, const char *title) { SDL_SetWindowTitle((SDL_Window *)window, title); }
+  static inline const char *SDLKit_GetWindowTitle(void *window) { return SDL_GetWindowTitle((SDL_Window *)window); }
+  static inline void SDLKit_SetWindowPosition(void *window, int x, int y) { SDL_SetWindowPosition((SDL_Window *)window, x, y); }
+  static inline void SDLKit_GetWindowPosition(void *window, int *x, int *y) { SDL_GetWindowPosition((SDL_Window *)window, x, y); }
+  static inline void SDLKit_SetWindowSize(void *window, int w, int h) { SDL_SetWindowSize((SDL_Window *)window, w, h); }
+  static inline void SDLKit_GetWindowSize(void *window, int *w, int *h) { SDL_GetWindowSize((SDL_Window *)window, w, h); }
+  static inline void SDLKit_MaximizeWindow(void *window) { SDL_MaximizeWindow((SDL_Window *)window); }
+  static inline void SDLKit_MinimizeWindow(void *window) { SDL_MinimizeWindow((SDL_Window *)window); }
+  static inline void SDLKit_RestoreWindow(void *window) { SDL_RestoreWindow((SDL_Window *)window); }
+  static inline int SDLKit_SetWindowFullscreen(void *window, int enabled) { return SDL_SetWindowFullscreen((SDL_Window *)window, enabled != 0) ? 0 : -1; }
+  static inline int SDLKit_SetWindowOpacity(void *window, float opacity) { return SDL_SetWindowOpacity((SDL_Window *)window, opacity) ? 0 : -1; }
+  static inline int SDLKit_SetWindowAlwaysOnTop(void *window, int enabled) { return SDL_SetWindowAlwaysOnTop((SDL_Window *)window, enabled != 0) ? 0 : -1; }
+  static inline void SDLKit_CenterWindow(void *window) { SDL_SetWindowPosition((SDL_Window *)window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED); }
 
   // Clipboard
   static inline int SDLKit_SetClipboardText(const char *text) { return SDL_SetClipboardText(text); }
@@ -121,71 +121,71 @@ typedef struct SDLKit_Event {
     return rc;
   }
   // Renderer creation API evolves; accept a flags arg but ignore when not needed.
-  static inline SDL_Renderer *SDLKit_CreateRenderer(SDL_Window *window, uint32_t flags) {
+  static inline void *SDLKit_CreateRenderer(void *window, uint32_t flags) {
     (void)flags;
     // Prefer default renderer (NULL name) on SDL3
-    return SDL_CreateRenderer(window, NULL);
+    return (void *)SDL_CreateRenderer((SDL_Window *)window, NULL);
   }
-  static inline int SDLKit_SetRenderDrawColor(SDL_Renderer *renderer, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
-    return SDL_SetRenderDrawColor(renderer, r, g, b, a) ? 0 : -1;
+  static inline int SDLKit_SetRenderDrawColor(void *renderer, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+    return SDL_SetRenderDrawColor((SDL_Renderer *)renderer, r, g, b, a) ? 0 : -1;
   }
-  static inline int SDLKit_RenderClear(SDL_Renderer *renderer) { return SDL_RenderClear(renderer) ? 0 : -1; }
-  static inline int SDLKit_RenderFillRect(SDL_Renderer *renderer, const struct SDL_FRect *rect) {
-    return SDL_RenderFillRect(renderer, rect) ? 0 : -1;
+  static inline int SDLKit_RenderClear(void *renderer) { return SDL_RenderClear((SDL_Renderer *)renderer) ? 0 : -1; }
+  static inline int SDLKit_RenderFillRect(void *renderer, const struct SDL_FRect *rect) {
+    return SDL_RenderFillRect((SDL_Renderer *)renderer, rect) ? 0 : -1;
   }
-  static inline int SDLKit_RenderFillRects(SDL_Renderer *renderer, const struct SDL_FRect *rects, int count) {
-    return SDL_RenderFillRects(renderer, rects, count) ? 0 : -1;
+  static inline int SDLKit_RenderFillRects(void *renderer, const struct SDL_FRect *rects, int count) {
+    return SDL_RenderFillRects((SDL_Renderer *)renderer, rects, count) ? 0 : -1;
   }
-  static inline int SDLKit_RenderRects(SDL_Renderer *renderer, const struct SDL_FRect *rects, int count) {
-    return SDL_RenderRects(renderer, rects, count) ? 0 : -1;
+  static inline int SDLKit_RenderRects(void *renderer, const struct SDL_FRect *rects, int count) {
+    return SDL_RenderRects((SDL_Renderer *)renderer, rects, count) ? 0 : -1;
   }
-  static inline int SDLKit_RenderPoints(SDL_Renderer *renderer, const struct SDL_FPoint *points, int count) {
-    return SDL_RenderPoints(renderer, points, count) ? 0 : -1;
+  static inline int SDLKit_RenderPoints(void *renderer, const struct SDL_FPoint *points, int count) {
+    return SDL_RenderPoints((SDL_Renderer *)renderer, points, count) ? 0 : -1;
   }
-  static inline int SDLKit_RenderLine(SDL_Renderer *renderer, float x1, float y1, float x2, float y2) {
-    return SDL_RenderLine(renderer, x1, y1, x2, y2) ? 0 : -1;
+  static inline int SDLKit_RenderLine(void *renderer, float x1, float y1, float x2, float y2) {
+    return SDL_RenderLine((SDL_Renderer *)renderer, x1, y1, x2, y2) ? 0 : -1;
   }
-  static inline void SDLKit_RenderPresent(SDL_Renderer *renderer) { SDL_RenderPresent(renderer); }
+  static inline void SDLKit_RenderPresent(void *renderer) { SDL_RenderPresent((SDL_Renderer *)renderer); }
   // Render state helpers
-  static inline void SDLKit_GetRenderOutputSize(SDL_Renderer *renderer, int *w, int *h) { SDL_GetRenderOutputSize(renderer, w, h); }
-  static inline void SDLKit_GetRenderScale(SDL_Renderer *renderer, float *sx, float *sy) { SDL_GetRenderScale(renderer, sx, sy); }
-  static inline int SDLKit_SetRenderScale(SDL_Renderer *renderer, float sx, float sy) { return SDL_SetRenderScale(renderer, sx, sy) ? 0 : -1; }
-  static inline void SDLKit_GetRenderDrawColor(SDL_Renderer *renderer, uint8_t *r, uint8_t *g, uint8_t *b, uint8_t *a) { SDL_GetRenderDrawColor(renderer, r, g, b, a); }
-  static inline int SDLKit_SetRenderViewport(SDL_Renderer *renderer, int x, int y, int w, int h) { SDL_Rect r = { x, y, w, h }; return SDL_SetRenderViewport(renderer, &r) ? 0 : -1; }
-  static inline void SDLKit_GetRenderViewport(SDL_Renderer *renderer, int *x, int *y, int *w, int *h) { SDL_Rect r; SDL_GetRenderViewport(renderer, &r); if (x) *x = r.x; if (y) *y = r.y; if (w) *w = r.w; if (h) *h = r.h; }
-  static inline int SDLKit_SetRenderClipRect(SDL_Renderer *renderer, int x, int y, int w, int h) { SDL_Rect r = { x, y, w, h }; return SDL_SetRenderClipRect(renderer, &r) ? 0 : -1; }
-  static inline int SDLKit_DisableRenderClipRect(SDL_Renderer *renderer) { return SDL_SetRenderClipRect(renderer, NULL) ? 0 : -1; }
-  static inline void SDLKit_GetRenderClipRect(SDL_Renderer *renderer, int *x, int *y, int *w, int *h) { SDL_Rect r; SDL_GetRenderClipRect(renderer, &r); if (x) *x = r.x; if (y) *y = r.y; if (w) *w = r.w; if (h) *h = r.h; }
+  static inline void SDLKit_GetRenderOutputSize(void *renderer, int *w, int *h) { SDL_GetRenderOutputSize((SDL_Renderer *)renderer, w, h); }
+  static inline void SDLKit_GetRenderScale(void *renderer, float *sx, float *sy) { SDL_GetRenderScale((SDL_Renderer *)renderer, sx, sy); }
+  static inline int SDLKit_SetRenderScale(void *renderer, float sx, float sy) { return SDL_SetRenderScale((SDL_Renderer *)renderer, sx, sy) ? 0 : -1; }
+  static inline void SDLKit_GetRenderDrawColor(void *renderer, uint8_t *r, uint8_t *g, uint8_t *b, uint8_t *a) { SDL_GetRenderDrawColor((SDL_Renderer *)renderer, r, g, b, a); }
+  static inline int SDLKit_SetRenderViewport(void *renderer, int x, int y, int w, int h) { SDL_Rect r = { x, y, w, h }; return SDL_SetRenderViewport((SDL_Renderer *)renderer, &r) ? 0 : -1; }
+  static inline void SDLKit_GetRenderViewport(void *renderer, int *x, int *y, int *w, int *h) { SDL_Rect r; SDL_GetRenderViewport((SDL_Renderer *)renderer, &r); if (x) *x = r.x; if (y) *y = r.y; if (w) *w = r.w; if (h) *h = r.h; }
+  static inline int SDLKit_SetRenderClipRect(void *renderer, int x, int y, int w, int h) { SDL_Rect r = { x, y, w, h }; return SDL_SetRenderClipRect((SDL_Renderer *)renderer, &r) ? 0 : -1; }
+  static inline int SDLKit_DisableRenderClipRect(void *renderer) { return SDL_SetRenderClipRect((SDL_Renderer *)renderer, NULL) ? 0 : -1; }
+  static inline void SDLKit_GetRenderClipRect(void *renderer, int *x, int *y, int *w, int *h) { SDL_Rect r; SDL_GetRenderClipRect((SDL_Renderer *)renderer, &r); if (x) *x = r.x; if (y) *y = r.y; if (w) *w = r.w; if (h) *h = r.h; }
 
-  static inline void *SDLKit_MetalLayerForWindow(SDL_Window *window) {
+  static inline void *SDLKit_MetalLayerForWindow(void *window) {
     #if __has_include(<SDL3/SDL_metal.h>)
       if (!window) return NULL;
-      return SDL_Metal_GetLayer(window);
+      return SDL_Metal_GetLayer((SDL_Window *)window);
     #else
       (void)window;
       return NULL;
     #endif
   }
 
-  static inline void *SDLKit_Win32HWND(SDL_Window *window) {
+  static inline void *SDLKit_Win32HWND(void *window) {
     (void)window;
     #if defined(SDL_PROP_WINDOW_WIN32_HWND_POINTER)
       if (!window) return NULL;
-      SDL_PropertiesID props = SDL_GetWindowProperties(window);
+      SDL_PropertiesID props = SDL_GetWindowProperties((SDL_Window *)window);
       if (!props) return NULL;
-      return SDL_GetProperty(props, SDL_PROP_WINDOW_WIN32_HWND_POINTER, NULL);
+      return SDL_GetPointerProperty(props, SDL_PROP_WINDOW_WIN32_HWND_POINTER, NULL);
     #else
       return NULL;
     #endif
   }
 
-  static inline bool SDLKit_CreateVulkanSurface(SDL_Window *window, VkInstance instance, VkSurfaceKHR *surface) {
+  static inline bool SDLKit_CreateVulkanSurface(void *window, VkInstance instance, VkSurfaceKHR *surface) {
     #if __has_include(<SDL3/SDL_vulkan.h>)
       if (!window || !surface) {
         if (surface) { *surface = (VkSurfaceKHR)0; }
         return false;
       }
-      return SDL_Vulkan_CreateSurface(window, instance, NULL, surface);
+      return SDL_Vulkan_CreateSurface((SDL_Window *)window, instance, NULL, surface);
     #else
       (void)instance; (void)surface;
       return false;
@@ -195,7 +195,7 @@ typedef struct SDLKit_Event {
   // Query required Vulkan instance extensions for the window.
   // On success, returns 1 and sets *pCount to the number of required extensions and
   // *names to an array of const char* owned by SDL. Callers should not free or modify.
-  static inline int SDLKit_Vulkan_GetInstanceExtensions(SDL_Window *window, unsigned int *pCount, const char *const **names) {
+  static inline int SDLKit_Vulkan_GetInstanceExtensions(void *window, unsigned int *pCount, const char *const **names) {
     #if __has_include(<SDL3/SDL_vulkan.h>)
       (void)window;
       Uint32 cnt = 0;
@@ -260,39 +260,39 @@ typedef struct SDLKit_Event {
     #include <SDL3_ttf/SDL_ttf.h>
     static inline int SDLKit_TTF_Available(void) { return 1; }
     static inline int SDLKit_TTF_Init(void) { return TTF_Init(); }
-    typedef TTF_Font SDLKit_TTF_Font;
-    static inline SDLKit_TTF_Font *SDLKit_TTF_OpenFont(const char *path, int ptsize) { return TTF_OpenFont(path, ptsize); }
-    static inline void SDLKit_TTF_CloseFont(SDLKit_TTF_Font *font) { if (font) TTF_CloseFont(font); }
+    static inline void *SDLKit_TTF_OpenFont(const char *path, int ptsize) { return (void *)TTF_OpenFont(path, ptsize); }
+    static inline void SDLKit_TTF_CloseFont(void *font) { if (font) TTF_CloseFont((TTF_Font *)font); }
     static inline void SDLKit_TTF_Quit(void) { TTF_Quit(); }
-    static inline SDL_Surface *SDLKit_TTF_RenderUTF8_Blended(SDLKit_TTF_Font *font, const char *text,
+    static inline SDL_Surface *SDLKit_TTF_RenderUTF8_Blended(void *font, const char *text,
                                                              uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
       SDL_Color c = { r, g, b, a };
-      return TTF_RenderUTF8_Blended(font, text, c);
+      size_t len = text ? strlen(text) : 0;
+      return TTF_RenderText_Blended((TTF_Font *)font, text, len, c);
     }
-    static inline SDL_Texture *SDLKit_CreateTextureFromSurface(SDL_Renderer *renderer, SDL_Surface *surface) {
-      return SDL_CreateTextureFromSurface(renderer, surface);
+  static inline void *SDLKit_CreateTextureFromSurface(void *renderer, void *surface) {
+      return (void *)SDL_CreateTextureFromSurface((SDL_Renderer *)renderer, (SDL_Surface *)surface);
     }
-    static inline void SDLKit_DestroySurface(SDL_Surface *surface) { SDL_DestroySurface(surface); }
-    static inline void SDLKit_DestroyTexture(SDL_Texture *tex) { SDL_DestroyTexture(tex); }
-    static inline void SDLKit_GetTextureSize(SDL_Texture *tex, int *w, int *h) {
-      float fw = 0.0f, fh = 0.0f; SDL_GetTextureSize(tex, &fw, &fh); if (w) *w = (int)fw; if (h) *h = (int)fh;
+    static inline void SDLKit_DestroySurface(void *surface) { SDL_DestroySurface((SDL_Surface *)surface); }
+    static inline void SDLKit_DestroyTexture(void *tex) { SDL_DestroyTexture((SDL_Texture *)tex); }
+    static inline void SDLKit_GetTextureSize(void *tex, int *w, int *h) {
+      float fw = 0.0f, fh = 0.0f; SDL_GetTextureSize((SDL_Texture *)tex, &fw, &fh); if (w) *w = (int)fw; if (h) *h = (int)fh;
     }
-  static inline int SDLKit_RenderTexture(SDL_Renderer *renderer, SDL_Texture *tex, const SDL_FRect *src, const SDL_FRect *dst) {
-    return SDL_RenderTexture(renderer, tex, src, dst) ? 0 : -1;
+  static inline int SDLKit_RenderTexture(void *renderer, void *tex, const SDL_FRect *src, const SDL_FRect *dst) {
+    return SDL_RenderTexture((SDL_Renderer *)renderer, (SDL_Texture *)tex, src, dst) ? 0 : -1;
   }
-  static inline int SDLKit_RenderTextureRotated(SDL_Renderer *renderer, SDL_Texture *tex, const SDL_FRect *src, const SDL_FRect *dst, double angle, int hasCenter, float cx, float cy) {
+  static inline int SDLKit_RenderTextureRotated(void *renderer, void *tex, const SDL_FRect *src, const SDL_FRect *dst, double angle, int hasCenter, float cx, float cy) {
     SDL_FPoint center = { cx, cy };
-    return SDL_RenderTextureRotated(renderer, tex, src, dst, angle, hasCenter ? &center : NULL, SDL_FLIP_NONE) ? 0 : -1;
+    return SDL_RenderTextureRotated((SDL_Renderer *)renderer, (SDL_Texture *)tex, src, dst, angle, hasCenter ? &center : NULL, SDL_FLIP_NONE) ? 0 : -1;
   }
-  static inline SDL_Surface *SDLKit_LoadBMP(const char *path) { return SDL_LoadBMP(path); }
-  static inline SDL_Surface *SDLKit_CreateSurfaceFrom(int width, int height, unsigned int format, void *pixels, int pitch) {
-    return SDL_CreateSurfaceFrom(width, height, format, pixels, pitch);
+  static inline void *SDLKit_LoadBMP(const char *path) { return (void *)SDL_LoadBMP(path); }
+  static inline void *SDLKit_CreateSurfaceFrom(int width, int height, unsigned int format, void *pixels, int pitch) {
+    return (void *)SDL_CreateSurfaceFrom(width, height, format, pixels, pitch);
   }
-  static inline SDL_IOStream *SDLKit_RWFromFile(const char *file, const char *mode) { return SDL_IOFromFile(file, mode); }
+  static inline void *SDLKit_RWFromFile(const char *file, const char *mode) { return (void *)SDL_IOFromFile(file, mode); }
   static inline unsigned int SDLKit_PixelFormat_ABGR8888(void) { return SDL_PIXELFORMAT_ABGR8888; }
-  static inline int SDLKit_RenderReadPixels(SDL_Renderer *renderer, int x, int y, int w, int h, void *pixels, int pitch) {
+  static inline int SDLKit_RenderReadPixels(void *renderer, int x, int y, int w, int h, void *pixels, int pitch) {
     SDL_Rect r = { x, y, w, h };
-    SDL_Surface *surf = SDL_RenderReadPixels(renderer, &r);
+    SDL_Surface *surf = SDL_RenderReadPixels((SDL_Renderer *)renderer, &r);
     if (!surf) { return -1; }
     SDL_Surface *conv = NULL;
     if (surf->format != SDL_PIXELFORMAT_ABGR8888) {
@@ -316,13 +316,12 @@ typedef struct SDLKit_Event {
   #else
     // SDL_ttf headers not available: provide no-op wrappers so Swift can compile,
     // and report unavailable at runtime.
-    typedef void SDLKit_TTF_Font;
     static inline int SDLKit_TTF_Available(void) { return 0; }
     static inline int SDLKit_TTF_Init(void) { return -1; }
-    static inline SDLKit_TTF_Font *SDLKit_TTF_OpenFont(const char *path, int ptsize) { (void)path; (void)ptsize; return NULL; }
-    static inline void SDLKit_TTF_CloseFont(SDLKit_TTF_Font *font) { (void)font; }
+    static inline void *SDLKit_TTF_OpenFont(const char *path, int ptsize) { (void)path; (void)ptsize; return NULL; }
+    static inline void SDLKit_TTF_CloseFont(void *font) { (void)font; }
     static inline void SDLKit_TTF_Quit(void) { }
-    static inline SDL_Surface *SDLKit_TTF_RenderUTF8_Blended(SDLKit_TTF_Font *font, const char *text,
+    static inline SDL_Surface *SDLKit_TTF_RenderUTF8_Blended(void *font, const char *text,
                                                              uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
       (void)font; (void)text; (void)r; (void)g; (void)b; (void)a; return NULL;
     }
@@ -331,10 +330,10 @@ typedef struct SDLKit_Event {
   // --- Audio (SDL3) ---
   // Minimal wrappers to expose SDL3 audio streams for capture and playback.
   // These use the simplified device+stream API and resume the device.
-  static inline unsigned int SDLKit_AudioFormat_F32(void) { return SDL_AUDIO_F32; }
-  static inline unsigned int SDLKit_AudioFormat_S16(void) { return SDL_AUDIO_S16; }
+  static inline unsigned int SDLKit_AudioFormat_F32(void) { return (unsigned int)SDL_AUDIO_F32; }
+  static inline unsigned int SDLKit_AudioFormat_S16(void) { return (unsigned int)SDL_AUDIO_S16; }
 
-  static inline SDL_AudioStream *SDLKit_OpenDefaultAudioRecordingStream(int sample_rate,
+  static inline void *SDLKit_OpenDefaultAudioRecordingStream(int sample_rate,
                                                                         unsigned int format,
                                                                         int channels) {
     SDL_AudioSpec spec; spec.freq = sample_rate; spec.format = (SDL_AudioFormat)format; spec.channels = channels;
@@ -342,10 +341,10 @@ typedef struct SDLKit_Event {
     if (!stream) { return NULL; }
     SDL_AudioDeviceID dev = SDL_GetAudioStreamDevice(stream);
     (void)SDL_ResumeAudioDevice(dev);
-    return stream;
+    return (void *)stream;
   }
 
-  static inline SDL_AudioStream *SDLKit_OpenDefaultAudioPlaybackStream(int sample_rate,
+  static inline void *SDLKit_OpenDefaultAudioPlaybackStream(int sample_rate,
                                                                        unsigned int format,
                                                                        int channels) {
     SDL_AudioSpec spec; spec.freq = sample_rate; spec.format = (SDL_AudioFormat)format; spec.channels = channels;
@@ -353,32 +352,32 @@ typedef struct SDLKit_Event {
     if (!stream) { return NULL; }
     SDL_AudioDeviceID dev = SDL_GetAudioStreamDevice(stream);
     (void)SDL_ResumeAudioDevice(dev);
-    return stream;
+    return (void *)stream;
   }
 
-  static inline int SDLKit_GetAudioStreamAvailable(SDL_AudioStream *stream) {
-    return SDL_GetAudioStreamAvailable(stream);
+  static inline int SDLKit_GetAudioStreamAvailable(void *stream) {
+    return SDL_GetAudioStreamAvailable((SDL_AudioStream *)stream);
   }
-  static inline int SDLKit_GetAudioStreamData(SDL_AudioStream *stream, void *buf, int len) {
-    return SDL_GetAudioStreamData(stream, buf, len);
+  static inline int SDLKit_GetAudioStreamData(void *stream, void *buf, int len) {
+    return SDL_GetAudioStreamData((SDL_AudioStream *)stream, buf, len);
   }
-  static inline int SDLKit_PutAudioStreamData(SDL_AudioStream *stream, const void *buf, int len) {
-    return SDL_PutAudioStreamData(stream, buf, len) ? 0 : -1;
+  static inline int SDLKit_PutAudioStreamData(void *stream, const void *buf, int len) {
+    return SDL_PutAudioStreamData((SDL_AudioStream *)stream, buf, len) ? 0 : -1;
   }
-  static inline int SDLKit_FlushAudioStream(SDL_AudioStream *stream) {
-    return SDL_FlushAudioStream(stream) ? 0 : -1;
+  static inline int SDLKit_FlushAudioStream(void *stream) {
+    return SDL_FlushAudioStream((SDL_AudioStream *)stream) ? 0 : -1;
   }
-  static inline void SDLKit_DestroyAudioStream(SDL_AudioStream *stream) {
-    SDL_DestroyAudioStream(stream);
+  static inline void SDLKit_DestroyAudioStream(void *stream) {
+    SDL_DestroyAudioStream((SDL_AudioStream *)stream);
   }
-  static inline SDL_AudioStream *SDLKit_CreateAudioStreamConvert(int src_rate, unsigned int src_format, int src_channels,
+  static inline void *SDLKit_CreateAudioStreamConvert(int src_rate, unsigned int src_format, int src_channels,
                                                                  int dst_rate, unsigned int dst_format, int dst_channels) {
     SDL_AudioSpec src; src.freq = src_rate; src.format = (SDL_AudioFormat)src_format; src.channels = src_channels;
     SDL_AudioSpec dst; dst.freq = dst_rate; dst.format = (SDL_AudioFormat)dst_format; dst.channels = dst_channels;
-    return SDL_CreateAudioStream(&src, &dst);
+    return (void *)SDL_CreateAudioStream(&src, &dst);
   }
-  static inline int SDLKit_ClearAudioStream(SDL_AudioStream *stream) {
-    return SDL_ClearAudioStream(stream) ? 0 : -1;
+  static inline int SDLKit_ClearAudioStream(void *stream) {
+    return SDL_ClearAudioStream((SDL_AudioStream *)stream) ? 0 : -1;
   }
 
   // WAV loading helpers
@@ -423,21 +422,21 @@ typedef struct SDLKit_Event {
     if (sample_frames) { *sample_frames = frames; }
     return 0;
   }
-  static inline SDL_AudioStream *SDLKit_OpenAudioRecordingStreamU64(uint64_t devid, int sample_rate, unsigned int format, int channels) {
+  static inline void *SDLKit_OpenAudioRecordingStreamU64(uint64_t devid, int sample_rate, unsigned int format, int channels) {
     SDL_AudioSpec spec; spec.freq = sample_rate; spec.format = (SDL_AudioFormat)format; spec.channels = channels;
     SDL_AudioStream *stream = SDL_OpenAudioDeviceStream((SDL_AudioDeviceID)devid, &spec, NULL, NULL);
     if (!stream) { return NULL; }
     SDL_AudioDeviceID dev = SDL_GetAudioStreamDevice(stream);
     (void)SDL_ResumeAudioDevice(dev);
-    return stream;
+    return (void *)stream;
   }
-  static inline SDL_AudioStream *SDLKit_OpenAudioPlaybackStreamU64(uint64_t devid, int sample_rate, unsigned int format, int channels) {
+  static inline void *SDLKit_OpenAudioPlaybackStreamU64(uint64_t devid, int sample_rate, unsigned int format, int channels) {
     SDL_AudioSpec spec; spec.freq = sample_rate; spec.format = (SDL_AudioFormat)format; spec.channels = channels;
     SDL_AudioStream *stream = SDL_OpenAudioDeviceStream((SDL_AudioDeviceID)devid, &spec, NULL, NULL);
     if (!stream) { return NULL; }
     SDL_AudioDeviceID dev = SDL_GetAudioStreamDevice(stream);
     (void)SDL_ResumeAudioDevice(dev);
-    return stream;
+    return (void *)stream;
   }
 #else
   // Headless CI or no headers: provide minimal types so Swift can compile,
@@ -486,24 +485,24 @@ typedef struct SDLKit_Event {
   int SDLKit_GetNumVideoDisplays(void);
   const char *SDLKit_GetDisplayName(int index);
   int SDLKit_GetDisplayBounds(int index, int *x, int *y, int *w, int *h);
-  SDL_Renderer *SDLKit_CreateRenderer(SDL_Window *window, uint32_t flags);
-  int SDLKit_SetRenderDrawColor(SDL_Renderer *renderer, uint8_t r, uint8_t g, uint8_t b, uint8_t a);
-  int SDLKit_RenderClear(SDL_Renderer *renderer);
-  int SDLKit_RenderFillRect(SDL_Renderer *renderer, const struct SDL_FRect *rect);
-  int SDLKit_RenderFillRects(struct SDL_Renderer *renderer, const struct SDL_FRect *rects, int count);
-  int SDLKit_RenderRects(struct SDL_Renderer *renderer, const struct SDL_FRect *rects, int count);
-  int SDLKit_RenderPoints(struct SDL_Renderer *renderer, const struct SDL_FPoint *points, int count);
-  int SDLKit_RenderLine(struct SDL_Renderer *renderer, float x1, float y1, float x2, float y2);
-  void SDLKit_RenderPresent(SDL_Renderer *renderer);
-  void SDLKit_GetRenderOutputSize(struct SDL_Renderer *renderer, int *w, int *h);
-  void SDLKit_GetRenderScale(struct SDL_Renderer *renderer, float *sx, float *sy);
-  int SDLKit_SetRenderScale(struct SDL_Renderer *renderer, float sx, float sy);
-  void SDLKit_GetRenderDrawColor(struct SDL_Renderer *renderer, uint8_t *r, uint8_t *g, uint8_t *b, uint8_t *a);
-  int SDLKit_SetRenderViewport(struct SDL_Renderer *renderer, int x, int y, int w, int h);
-  void SDLKit_GetRenderViewport(struct SDL_Renderer *renderer, int *x, int *y, int *w, int *h);
-  int SDLKit_SetRenderClipRect(struct SDL_Renderer *renderer, int x, int y, int w, int h);
-  int SDLKit_DisableRenderClipRect(struct SDL_Renderer *renderer);
-  void SDLKit_GetRenderClipRect(struct SDL_Renderer *renderer, int *x, int *y, int *w, int *h);
+  void *SDLKit_CreateRenderer(void *window, uint32_t flags);
+  int SDLKit_SetRenderDrawColor(void *renderer, uint8_t r, uint8_t g, uint8_t b, uint8_t a);
+  int SDLKit_RenderClear(void *renderer);
+  int SDLKit_RenderFillRect(void *renderer, const struct SDL_FRect *rect);
+  int SDLKit_RenderFillRects(void *renderer, const struct SDL_FRect *rects, int count);
+  int SDLKit_RenderRects(void *renderer, const struct SDL_FRect *rects, int count);
+  int SDLKit_RenderPoints(void *renderer, const struct SDL_FPoint *points, int count);
+  int SDLKit_RenderLine(void *renderer, float x1, float y1, float x2, float y2);
+  void SDLKit_RenderPresent(void *renderer);
+  void SDLKit_GetRenderOutputSize(void *renderer, int *w, int *h);
+  void SDLKit_GetRenderScale(void *renderer, float *sx, float *sy);
+  int SDLKit_SetRenderScale(void *renderer, float sx, float sy);
+  void SDLKit_GetRenderDrawColor(void *renderer, uint8_t *r, uint8_t *g, uint8_t *b, uint8_t *a);
+  int SDLKit_SetRenderViewport(void *renderer, int x, int y, int w, int h);
+  void SDLKit_GetRenderViewport(void *renderer, int *x, int *y, int *w, int *h);
+  int SDLKit_SetRenderClipRect(void *renderer, int x, int y, int w, int h);
+  int SDLKit_DisableRenderClipRect(void *renderer);
+  void SDLKit_GetRenderClipRect(void *renderer, int *x, int *y, int *w, int *h);
   int SDLKit_PollEvent(SDLKit_Event *out);
   int SDLKit_WaitEventTimeout(SDLKit_Event *out, int timeout_ms);
   static inline int SDLKit_TTF_Available(void) { return 0; }
@@ -517,42 +516,40 @@ typedef struct SDLKit_Event {
                                              uint8_t r, uint8_t g, uint8_t b, uint8_t a);
   struct SDL_Renderer;
   struct SDL_Texture *SDLKit_CreateTextureFromSurface(struct SDL_Renderer *renderer, struct SDL_Surface *surface);
-  void SDLKit_DestroySurface(struct SDL_Surface *surface);
-  void SDLKit_DestroyTexture(struct SDL_Texture *tex);
-  void SDLKit_GetTextureSize(struct SDL_Texture *tex, int *w, int *h);
-  int SDLKit_RenderTexture(struct SDL_Renderer *renderer, struct SDL_Texture *tex, const struct SDL_FRect *src, const struct SDL_FRect *dst);
-  int SDLKit_RenderTextureRotated(struct SDL_Renderer *renderer, struct SDL_Texture *tex, const struct SDL_FRect *src, const struct SDL_FRect *dst, double angle, int hasCenter, float cx, float cy);
-  struct SDL_Surface *SDLKit_LoadBMP(const char *path);
-  struct SDL_Surface *SDLKit_CreateSurfaceFrom(int width, int height, unsigned int format, void *pixels, int pitch);
-  struct SDL_IOStream;
-  struct SDL_IOStream *SDLKit_RWFromFile(const char *file, const char *mode);
+  void SDLKit_DestroySurface(void *surface);
+  void SDLKit_DestroyTexture(void *tex);
+  void SDLKit_GetTextureSize(void *tex, int *w, int *h);
+  int SDLKit_RenderTexture(void *renderer, void *tex, const struct SDL_FRect *src, const struct SDL_FRect *dst);
+  int SDLKit_RenderTextureRotated(void *renderer, void *tex, const struct SDL_FRect *src, const struct SDL_FRect *dst, double angle, int hasCenter, float cx, float cy);
+  void *SDLKit_LoadBMP(const char *path);
+  void *SDLKit_CreateSurfaceFrom(int width, int height, unsigned int format, void *pixels, int pitch);
+  void *SDLKit_RWFromFile(const char *file, const char *mode);
   unsigned int SDLKit_PixelFormat_ABGR8888(void);
-  int SDLKit_RenderReadPixels(struct SDL_Renderer *renderer, int x, int y, int w, int h, void *pixels, int pitch);
-  void *SDLKit_MetalLayerForWindow(SDL_Window *window);
-  void *SDLKit_Win32HWND(SDL_Window *window);
-  bool SDLKit_CreateVulkanSurface(SDL_Window *window, VkInstance instance, VkSurfaceKHR *surface);
+  int SDLKit_RenderReadPixels(void *renderer, int x, int y, int w, int h, void *pixels, int pitch);
+  void *SDLKit_MetalLayerForWindow(void *window);
+  void *SDLKit_Win32HWND(void *window);
+  bool SDLKit_CreateVulkanSurface(void *window, VkInstance instance, VkSurfaceKHR *surface);
   void SDLKit_Quit(void);
 
   // --- Audio (stubs) ---
   unsigned int SDLKit_AudioFormat_F32(void);
   unsigned int SDLKit_AudioFormat_S16(void);
-  struct SDL_AudioStream;
-  struct SDL_AudioStream *SDLKit_OpenDefaultAudioRecordingStream(int sample_rate, unsigned int format, int channels);
-  struct SDL_AudioStream *SDLKit_OpenDefaultAudioPlaybackStream(int sample_rate, unsigned int format, int channels);
-  int SDLKit_GetAudioStreamAvailable(struct SDL_AudioStream *stream);
-  int SDLKit_GetAudioStreamData(struct SDL_AudioStream *stream, void *buf, int len);
-  int SDLKit_PutAudioStreamData(struct SDL_AudioStream *stream, const void *buf, int len);
-  int SDLKit_FlushAudioStream(struct SDL_AudioStream *stream);
-  void SDLKit_DestroyAudioStream(struct SDL_AudioStream *stream);
-  struct SDL_AudioStream *SDLKit_CreateAudioStreamConvert(int src_rate, unsigned int src_format, int src_channels,
+  void *SDLKit_OpenDefaultAudioRecordingStream(int sample_rate, unsigned int format, int channels);
+  void *SDLKit_OpenDefaultAudioPlaybackStream(int sample_rate, unsigned int format, int channels);
+  int SDLKit_GetAudioStreamAvailable(void *stream);
+  int SDLKit_GetAudioStreamData(void *stream, void *buf, int len);
+  int SDLKit_PutAudioStreamData(void *stream, const void *buf, int len);
+  int SDLKit_FlushAudioStream(void *stream);
+  void SDLKit_DestroyAudioStream(void *stream);
+  void *SDLKit_CreateAudioStreamConvert(int src_rate, unsigned int src_format, int src_channels,
                                                           int dst_rate, unsigned int dst_format, int dst_channels);
-  int SDLKit_ClearAudioStream(struct SDL_AudioStream *stream);
+  int SDLKit_ClearAudioStream(void *stream);
   int SDLKit_ListAudioPlaybackDevices(uint64_t *dst_ids, int dst_count);
   int SDLKit_ListAudioRecordingDevices(uint64_t *dst_ids, int dst_count);
   const char *SDLKit_GetAudioDeviceNameU64(uint64_t devid);
   int SDLKit_GetAudioDevicePreferredFormatU64(uint64_t devid, int *sample_rate, unsigned int *format, int *channels, int *sample_frames);
-  struct SDL_AudioStream *SDLKit_OpenAudioRecordingStreamU64(uint64_t devid, int sample_rate, unsigned int format, int channels);
-  struct SDL_AudioStream *SDLKit_OpenAudioPlaybackStreamU64(uint64_t devid, int sample_rate, unsigned int format, int channels);
+  void *SDLKit_OpenAudioRecordingStreamU64(uint64_t devid, int sample_rate, unsigned int format, int channels);
+  void *SDLKit_OpenAudioPlaybackStreamU64(uint64_t devid, int sample_rate, unsigned int format, int channels);
 
   int SDLKitStub_DestroyRendererCallCount(void);
   int SDLKitStub_QuitCallCount(void);

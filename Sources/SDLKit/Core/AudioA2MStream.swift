@@ -16,6 +16,7 @@ final class AudioA2MStream: @unchecked Sendable {
 
     private var overlapMono: [Float] = []
     private var frameIndex: Int = 0
+    private let channels: Int
 
     init(sessId: Int, sess: SDLKitJSONAgent.CaptureSessionProxy, a2m: AudioA2MStub, featCPU: AudioFeaturePump?, gpuState: SDLKitJSONAgent.GPUStreamProxy?, sink: ((MIDIEvent) -> Void)? = nil) {
         self.sessId = sessId
@@ -24,6 +25,8 @@ final class AudioA2MStream: @unchecked Sendable {
         self.featCPU = featCPU
         self.gpuState = gpuState
         self.sink = sink
+        // Capture immutable channel count on the main actor to avoid cross-actor access in the background loop
+        self.channels = sess.cap.spec.channels
         let t = Thread { [weak self] in self?.runLoop() }
         t.name = "SDLKit.A2MStream"
         t.qualityOfService = .userInitiated
@@ -62,7 +65,7 @@ final class AudioA2MStream: @unchecked Sendable {
             } else if let gpu = gpuState {
                 // Pull raw hopSize frames from pump
                 let hs = gpu.hopSize
-                let chans = sess.cap.spec.channels
+                let chans = self.channels
                 var raw = Array(repeating: Float(0), count: 32 * hs * chans)
                 let read = sess.pump.readFrames(into: &raw)
                 if read > 0 {
