@@ -208,7 +208,12 @@ struct DemoApp {
             }
             defer { VulkanMinimalDestroyInstance(&instance) }
             let surface = try handles.createVulkanSurface(instance: vkInstance)
+            #if os(Linux)
+            let surfaceValue = UInt(bitPattern: surface)
+            let formattedSurface = String(format: "0x%016llX", UInt64(surfaceValue))
+            #else
             let formattedSurface = String(format: "0x%016llX", UInt64(surface))
+            #endif
             print("SDLKitDemo: Vulkan surface => \(formattedSurface)")
             #else
             print("SDLKitDemo: Vulkan headers unavailable; skipping surface creation")
@@ -415,7 +420,12 @@ struct DemoApp {
             defer { VulkanMinimalDestroyInstance(&instance) }
             do {
                 let surfaceHandle = try surface.createVulkanSurface(instance: vkInstance)
+                #if os(Linux)
+                let surfaceValue = UInt(bitPattern: surfaceHandle)
+                let formattedSurface = String(format: "0x%016llX", UInt64(surfaceValue))
+                #else
                 let formattedSurface = String(format: "0x%016llX", UInt64(surfaceHandle))
+                #endif
                 print("SDLKitDemo: Vulkan surface => \(formattedSurface)")
             } catch {
                 print("SDLKitDemo: Vulkan surface creation failed: \(error)")
