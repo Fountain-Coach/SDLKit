@@ -277,7 +277,7 @@ struct SDL_Surface *SDLKit_TTF_RenderUTF8_Blended(SDLKit_TTF_Font *font, const c
     return NULL;
 }
 
-void *SDLKit_CreateTextureFromSurface(void *renderer, struct SDL_Surface *surface) {
+void *SDLKit_CreateTextureFromSurface(void *renderer, void *surface) {
     (void)renderer; (void)surface;
     return NULL;
 }
