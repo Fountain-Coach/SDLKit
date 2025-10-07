@@ -143,68 +143,68 @@ int SDLKit_GetDisplayBounds(int index, int *x, int *y, int *w, int *h) {
     return -1;
 }
 
-SDL_Renderer *SDLKit_CreateRenderer(SDL_Window *window, uint32_t flags) {
+void *SDLKit_CreateRenderer(void *window, uint32_t flags) {
     (void)window; (void)flags;
     return NULL;
 }
 
-int SDLKit_SetRenderDrawColor(SDL_Renderer *renderer, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+int SDLKit_SetRenderDrawColor(void *renderer, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
     (void)renderer; (void)r; (void)g; (void)b; (void)a;
     return -1;
 }
 
-int SDLKit_RenderClear(SDL_Renderer *renderer) {
+int SDLKit_RenderClear(void *renderer) {
     (void)renderer;
     return -1;
 }
 
-int SDLKit_RenderFillRect(SDL_Renderer *renderer, const struct SDL_FRect *rect) {
+int SDLKit_RenderFillRect(void *renderer, const struct SDL_FRect *rect) {
     (void)renderer; (void)rect;
     return -1;
 }
 
-int SDLKit_RenderFillRects(struct SDL_Renderer *renderer, const struct SDL_FRect *rects, int count) {
+int SDLKit_RenderFillRects(void *renderer, const struct SDL_FRect *rects, int count) {
     (void)renderer; (void)rects; (void)count;
     return -1;
 }
 
-int SDLKit_RenderRects(struct SDL_Renderer *renderer, const struct SDL_FRect *rects, int count) {
+int SDLKit_RenderRects(void *renderer, const struct SDL_FRect *rects, int count) {
     (void)renderer; (void)rects; (void)count;
     return -1;
 }
 
-int SDLKit_RenderPoints(struct SDL_Renderer *renderer, const struct SDL_FPoint *points, int count) {
+int SDLKit_RenderPoints(void *renderer, const struct SDL_FPoint *points, int count) {
     (void)renderer; (void)points; (void)count;
     return -1;
 }
 
-int SDLKit_RenderLine(struct SDL_Renderer *renderer, float x1, float y1, float x2, float y2) {
+int SDLKit_RenderLine(void *renderer, float x1, float y1, float x2, float y2) {
     (void)renderer; (void)x1; (void)y1; (void)x2; (void)y2;
     return -1;
 }
 
-void SDLKit_RenderPresent(SDL_Renderer *renderer) {
+void SDLKit_RenderPresent(void *renderer) {
     (void)renderer;
 }
 
-void SDLKit_GetRenderOutputSize(struct SDL_Renderer *renderer, int *w, int *h) {
+void SDLKit_GetRenderOutputSize(void *renderer, int *w, int *h) {
     (void)renderer;
     if (w) { *w = 0; }
     if (h) { *h = 0; }
 }
 
-void SDLKit_GetRenderScale(struct SDL_Renderer *renderer, float *sx, float *sy) {
+void SDLKit_GetRenderScale(void *renderer, float *sx, float *sy) {
     (void)renderer;
     if (sx) { *sx = 1.0f; }
     if (sy) { *sy = 1.0f; }
 }
 
-int SDLKit_SetRenderScale(struct SDL_Renderer *renderer, float sx, float sy) {
+int SDLKit_SetRenderScale(void *renderer, float sx, float sy) {
     (void)renderer; (void)sx; (void)sy;
     return -1;
 }
 
-void SDLKit_GetRenderDrawColor(struct SDL_Renderer *renderer, uint8_t *r, uint8_t *g, uint8_t *b, uint8_t *a) {
+void SDLKit_GetRenderDrawColor(void *renderer, uint8_t *r, uint8_t *g, uint8_t *b, uint8_t *a) {
     (void)renderer;
     if (r) { *r = 0; }
     if (g) { *g = 0; }
@@ -212,12 +212,12 @@ void SDLKit_GetRenderDrawColor(struct SDL_Renderer *renderer, uint8_t *r, uint8_
     if (a) { *a = 0; }
 }
 
-int SDLKit_SetRenderViewport(struct SDL_Renderer *renderer, int x, int y, int w, int h) {
+int SDLKit_SetRenderViewport(void *renderer, int x, int y, int w, int h) {
     (void)renderer; (void)x; (void)y; (void)w; (void)h;
     return -1;
 }
 
-void SDLKit_GetRenderViewport(struct SDL_Renderer *renderer, int *x, int *y, int *w, int *h) {
+void SDLKit_GetRenderViewport(void *renderer, int *x, int *y, int *w, int *h) {
     (void)renderer;
     if (x) { *x = 0; }
     if (y) { *y = 0; }
@@ -225,17 +225,17 @@ void SDLKit_GetRenderViewport(struct SDL_Renderer *renderer, int *x, int *y, int
     if (h) { *h = 0; }
 }
 
-int SDLKit_SetRenderClipRect(struct SDL_Renderer *renderer, int x, int y, int w, int h) {
+int SDLKit_SetRenderClipRect(void *renderer, int x, int y, int w, int h) {
     (void)renderer; (void)x; (void)y; (void)w; (void)h;
     return -1;
 }
 
-int SDLKit_DisableRenderClipRect(struct SDL_Renderer *renderer) {
+int SDLKit_DisableRenderClipRect(void *renderer) {
     (void)renderer;
     return -1;
 }
 
-void SDLKit_GetRenderClipRect(struct SDL_Renderer *renderer, int *x, int *y, int *w, int *h) {
+void SDLKit_GetRenderClipRect(void *renderer, int *x, int *y, int *w, int *h) {
     (void)renderer;
     if (x) { *x = 0; }
     if (y) { *y = 0; }
@@ -277,7 +277,10 @@ struct SDL_Surface *SDLKit_TTF_RenderUTF8_Blended(SDLKit_TTF_Font *font, const c
     return NULL;
 }
 
-struct SDL_Texture *SDLKit_CreateTextureFromSurface(struct SDL_Renderer *renderer, struct SDL_Surface *surface) {
+void SDLKit_DestroyRenderer(SDL_Renderer *renderer);
+void SDLKit_DestroyWindow(SDL_Window *window);
+
+void *SDLKit_CreateTextureFromSurface(void *renderer, struct SDL_Surface *surface) {
     (void)renderer; (void)surface;
     return NULL;
 }
@@ -296,12 +299,12 @@ void SDLKit_GetTextureSize(struct SDL_Texture *tex, int *w, int *h) {
     if (h) { *h = 0; }
 }
 
-int SDLKit_RenderTexture(struct SDL_Renderer *renderer, struct SDL_Texture *tex, const struct SDL_FRect *src, const struct SDL_FRect *dst) {
+int SDLKit_RenderTexture(void *renderer, void *tex, const struct SDL_FRect *src, const struct SDL_FRect *dst) {
     (void)renderer; (void)tex; (void)src; (void)dst;
     return -1;
 }
 
-int SDLKit_RenderTextureRotated(struct SDL_Renderer *renderer, struct SDL_Texture *tex, const struct SDL_FRect *src, const struct SDL_FRect *dst, double angle, int hasCenter, float cx, float cy) {
+int SDLKit_RenderTextureRotated(void *renderer, void *tex, const struct SDL_FRect *src, const struct SDL_FRect *dst, double angle, int hasCenter, float cx, float cy) {
     (void)renderer; (void)tex; (void)src; (void)dst; (void)angle; (void)hasCenter; (void)cx; (void)cy;
     return -1;
 }
@@ -330,17 +333,17 @@ int SDLKit_RenderReadPixels(struct SDL_Renderer *renderer, int x, int y, int w, 
     return -1;
 }
 
-void *SDLKit_MetalLayerForWindow(SDL_Window *window) {
+void *SDLKit_MetalLayerForWindow(void *window) {
     (void)window;
     return NULL;
 }
 
-void *SDLKit_Win32HWND(SDL_Window *window) {
+void *SDLKit_Win32HWND(void *window) {
     (void)window;
     return NULL;
 }
 
-bool SDLKit_CreateVulkanSurface(SDL_Window *window, VkInstance instance, VkSurfaceKHR *surface) {
+bool SDLKit_CreateVulkanSurface(void *window, VkInstance instance, VkSurfaceKHR *surface) {
     (void)window; (void)instance;
     if (surface) {
         *surface = (VkSurfaceKHR)0;
@@ -355,22 +358,22 @@ void SDLKit_Quit(void) {
 // --- Audio (stubs) ---
 unsigned int SDLKit_AudioFormat_F32(void) { return 0; }
 unsigned int SDLKit_AudioFormat_S16(void) { return 0; }
-struct SDL_AudioStream *SDLKit_OpenDefaultAudioRecordingStream(int sample_rate, unsigned int format, int channels) {
+void *SDLKit_OpenDefaultAudioRecordingStream(int sample_rate, unsigned int format, int channels) {
     (void)sample_rate; (void)format; (void)channels; return NULL;
 }
-struct SDL_AudioStream *SDLKit_OpenDefaultAudioPlaybackStream(int sample_rate, unsigned int format, int channels) {
+void *SDLKit_OpenDefaultAudioPlaybackStream(int sample_rate, unsigned int format, int channels) {
     (void)sample_rate; (void)format; (void)channels; return NULL;
 }
-int SDLKit_GetAudioStreamAvailable(struct SDL_AudioStream *stream) { (void)stream; return 0; }
-int SDLKit_GetAudioStreamData(struct SDL_AudioStream *stream, void *buf, int len) { (void)stream; (void)buf; (void)len; return -1; }
-int SDLKit_PutAudioStreamData(struct SDL_AudioStream *stream, const void *buf, int len) { (void)stream; (void)buf; (void)len; return -1; }
-int SDLKit_FlushAudioStream(struct SDL_AudioStream *stream) { (void)stream; return -1; }
-void SDLKit_DestroyAudioStream(struct SDL_AudioStream *stream) { (void)stream; }
-struct SDL_AudioStream *SDLKit_CreateAudioStreamConvert(int src_rate, unsigned int src_format, int src_channels,
+int SDLKit_GetAudioStreamAvailable(void *stream) { (void)stream; return 0; }
+int SDLKit_GetAudioStreamData(void *stream, void *buf, int len) { (void)stream; (void)buf; (void)len; return -1; }
+int SDLKit_PutAudioStreamData(void *stream, const void *buf, int len) { (void)stream; (void)buf; (void)len; return -1; }
+int SDLKit_FlushAudioStream(void *stream) { (void)stream; return -1; }
+void SDLKit_DestroyAudioStream(void *stream) { (void)stream; }
+void *SDLKit_CreateAudioStreamConvert(int src_rate, unsigned int src_format, int src_channels,
                                                         int dst_rate, unsigned int dst_format, int dst_channels) {
     (void)src_rate; (void)src_format; (void)src_channels; (void)dst_rate; (void)dst_format; (void)dst_channels; return NULL;
 }
-int SDLKit_ClearAudioStream(struct SDL_AudioStream *stream) { (void)stream; return -1; }
+int SDLKit_ClearAudioStream(void *stream) { (void)stream; return -1; }
 
 int SDLKit_ListAudioPlaybackDevices(uint64_t *dst_ids, int dst_count) { (void)dst_ids; (void)dst_count; return -1; }
 int SDLKit_ListAudioRecordingDevices(uint64_t *dst_ids, int dst_count) { (void)dst_ids; (void)dst_count; return -1; }
@@ -378,10 +381,10 @@ const char *SDLKit_GetAudioDeviceNameU64(uint64_t devid) { (void)devid; return N
 int SDLKit_GetAudioDevicePreferredFormatU64(uint64_t devid, int *sample_rate, unsigned int *format, int *channels, int *sample_frames) {
     (void)devid; (void)sample_rate; (void)format; (void)channels; (void)sample_frames; return -1;
 }
-struct SDL_AudioStream *SDLKit_OpenAudioRecordingStreamU64(uint64_t devid, int sample_rate, unsigned int format, int channels) {
+void *SDLKit_OpenAudioRecordingStreamU64(uint64_t devid, int sample_rate, unsigned int format, int channels) {
     (void)devid; (void)sample_rate; (void)format; (void)channels; return NULL;
 }
-struct SDL_AudioStream *SDLKit_OpenAudioPlaybackStreamU64(uint64_t devid, int sample_rate, unsigned int format, int channels) {
+void *SDLKit_OpenAudioPlaybackStreamU64(uint64_t devid, int sample_rate, unsigned int format, int channels) {
     (void)devid; (void)sample_rate; (void)format; (void)channels; return NULL;
 }
 int SDLKit_LoadWAV(const char *path, struct SDL_AudioSpec *out_spec, unsigned char **out_buf, unsigned int *out_len) {
