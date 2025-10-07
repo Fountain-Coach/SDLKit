@@ -298,10 +298,7 @@ let package = Package(
                 ],
                 path: "Sources/SDLKitAPI",
                 plugins: [
-                    .plugin(name: "OpenAPIGenerator", package: "swift-openapi-generator", arguments: [
-                        "--config", "openapi-generator-config.yaml",
-                        "--input", "openapi.yaml"
-                    ])
+                    .plugin(name: "OpenAPIGenerator", package: "swift-openapi-generator")
                 ]
             )
         )
