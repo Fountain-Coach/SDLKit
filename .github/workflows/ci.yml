@@ -38,3 +38,20 @@ jobs:
         run: swift build -v
       - name: Test
         run: swift test -q || true
+
+  macos-sdl3:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: sudo xcode-select -s "/Applications/Xcode.app/Contents/Developer"
+      - name: Install SDL3 (Homebrew)
+        run: |
+          brew update
+          brew install sdl3 sdl3_ttf sdl3_image || true
+      - name: Swift version
+        run: swift --version
+      - name: Build (with SDL3)
+        run: swift build -v
+      - name: Test (non-headless)
+        run: swift test -q || true
