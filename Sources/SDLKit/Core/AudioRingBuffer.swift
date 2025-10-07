@@ -115,7 +115,7 @@ public final class SDLAudioChunkedCapturePump {
         self.capture = capture
         self.channels = capture.spec.channels
         self.ring = SPSCFloatRingBuffer(capacity: max(1, bufferFrames * channels * 2))
-        let t = Thread { [weak self] in self?.threadLoop() }
+        let t = Thread(target: self, selector: #selector(threadEntry), object: nil)
         t.name = "SDLKit.AudioPump"
         t.qualityOfService = .userInitiated
         self.thread = t
@@ -150,4 +150,6 @@ public final class SDLAudioChunkedCapturePump {
             }
         }
     }
+
+    @objc private func threadEntry() { threadLoop() }
 }

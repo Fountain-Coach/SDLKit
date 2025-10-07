@@ -215,7 +215,7 @@ public final class AudioFeaturePump {
     }
 
     private func start() {
-        let t = Thread { [weak self] in self?.threadLoop() }
+        let t = Thread(target: self, selector: #selector(threadEntry), object: nil)
         t.name = "SDLKit.AudioFeaturePump"
         t.qualityOfService = .userInitiated
         self.thread = t
@@ -258,4 +258,6 @@ public final class AudioFeaturePump {
             if idx < mono.count { overlap = Array(mono[idx..<mono.count]) } else { overlap.removeAll(keepingCapacity: true) }
         }
     }
+
+    @objc private func threadEntry() { threadLoop() }
 }
