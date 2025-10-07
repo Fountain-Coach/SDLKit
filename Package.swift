@@ -77,6 +77,8 @@ let package = Package(
         deps.append(.package(url: "https://github.com/apple/swift-openapi-generator.git", from: "1.3.2"))
         deps.append(.package(url: "https://github.com/apple/swift-openapi-runtime.git", from: "1.1.0"))
         deps.append(.package(url: "https://github.com/apple/swift-openapi-urlsession.git", from: "1.1.0"))
+        // SwiftNIO (opt-in server target)
+        deps.append(.package(url: "https://github.com/apple/swift-nio.git", from: "2.60.0"))
         return deps
     }(),
     targets: {
@@ -296,8 +298,25 @@ let package = Package(
                 ],
                 path: "Sources/SDLKitAPI",
                 plugins: [
-                    .plugin(name: "OpenAPIGenerator", package: "swift-openapi-generator")
+                    .plugin(name: "OpenAPIGenerator", package: "swift-openapi-generator", arguments: [
+                        "--config", "openapi-generator-config.yaml",
+                        "--input", "openapi.yaml"
+                    ])
                 ]
+            )
+        )
+
+        // Optional SwiftNIO server executable (not part of default products)
+        targets.append(
+            .executableTarget(
+                name: "SDLKitNIO",
+                dependencies: [
+                    "SDLKit",
+                    .product(name: "NIOCore", package: "swift-nio"),
+                    .product(name: "NIOPosix", package: "swift-nio"),
+                    .product(name: "NIOHTTP1", package: "swift-nio")
+                ],
+                path: "Sources/SDLKitNIO"
             )
         )
 
