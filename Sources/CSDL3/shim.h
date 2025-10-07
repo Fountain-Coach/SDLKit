@@ -48,6 +48,12 @@ typedef struct SDLKit_Event {
   #if __has_include(<SDL3/SDL_vulkan.h>)
     #include <SDL3/SDL_vulkan.h>
   #endif
+  // Ensure opaque struct typedefs are visible to Swift importer
+  typedef struct SDL_Window SDL_Window;
+  typedef struct SDL_Renderer SDL_Renderer;
+  typedef struct SDL_Surface SDL_Surface;
+  typedef struct SDL_Texture SDL_Texture;
+  typedef struct SDL_AudioStream SDL_AudioStream;
   static inline const char *SDLKit_GetError(void) { return SDL_GetError(); }
   static inline int SDLKit_Init(uint32_t flags) { return SDL_Init(flags); }
   static inline SDL_Window *SDLKit_CreateWindow(const char *title, int32_t width, int32_t height, uint32_t flags) {
