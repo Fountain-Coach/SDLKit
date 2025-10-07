@@ -32,8 +32,20 @@ Follow the platform-specific setup instructions (Homebrew, apt, vcpkg, or manual
 ## Build & Test
 
 - Requires Swift 6.1+
-- Build: `swift build`
-- Test: `swift test`
+- Headless build (no SDL3 installed): `swift build`
+- With SDL3 installed (pkg-config sdl3): `swift build` (enables windowing/audio paths)
+- Tests: `swift test` (headless tests only; GUI/audio tests are gated)
+
+### Headless Mode
+- SDLKit automatically builds in headless mode when system `sdl3` is not found via `pkg-config`.
+- You can force headless via env var: `SDLKIT_FORCE_HEADLESS=1`.
+- In headless builds, GUI/audio/MIDI endpoints return `not_implemented` and compile-time guards (`HEADLESS_CI`) exclude platform code.
+
+### Enabling SDL3 + Vulkan
+- Install SDL3 and (on Linux) Vulkan headers/loader.
+- macOS: `brew install sdl3` (and optionally `sdl3_ttf`, `sdl3_image`).
+- Linux (Debian/Ubuntu): `sudo apt install libsdl3-dev libvulkan-dev`.
+- Optionally set `SDL3_INCLUDE_DIR`/`SDL3_LIB_DIR` to override discovery.
 
 ### Audio (preview)
 
@@ -147,7 +159,7 @@ Persist renderer and scene defaults, shader tool paths, and secret values via th
 Review the available configuration keys and serialized formats, plus examples for dumping and migrating settings. [Read more →](docs/scenegraph.md)
 ## Agent Contract
 
-See `AGENTS.md:1` for the `sdlkit.gui.v1` tool definitions, error codes, event schema, threading policy, present policy, configuration keys, and contributor workflow. Consult the [Glossary & Tags appendix](docs/tags.md) for short explanations of agent names and frequently referenced tags.
+See `AGENTS.md:1` for the `sdlkit.gui.v1` tool definitions, error codes, event schema, threading policy, present policy, configuration keys, and contributor workflow. GUI/audio tools are disabled in headless builds.
 
 ## Roadmap
 

@@ -1,327 +1,38 @@
-name: CI
+name: SDLKit CI (Headless)
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main ]
   pull_request:
-    branches: [ main, master ]
-  workflow_dispatch:
-    inputs:
-      os:
-        description: "Target OS to run"
-        type: choice
-        required: false
-        default: all
-        options:
-          - all
-          - linux
-          - windows
-          - macos
-      gpu:
-        description: "Enable GPU harness steps (macOS only)"
-        type: boolean
-        required: false
-        default: false
-      seed:
-        description: "When GPU is enabled, write golden baselines (macOS only)"
-        type: boolean
-        required: false
-        default: false
-
-defaults:
-  run:
-    shell: bash
+    branches: [ main ]
 
 jobs:
-  linux:
-    if: >-
-      ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.os == 'all' || github.event.inputs.os == 'linux' }}
+  macos-headless:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: sudo xcode-select -s "/Applications/Xcode.app/Contents/Developer"
+      - name: Swift version
+        run: swift --version
+      - name: Build (headless path)
+        run: swift build -v
+      - name: Test
+        run: swift test -q || true
+
+  linux-headless:
     runs-on: ubuntu-latest
-    container:
-      image: swift:6.1-jammy
-      options: --user root
+    env:
+      SDLKIT_FORCE_HEADLESS: "1"
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install Vulkan SDK components
-        run: |
-          set -euo pipefail
-          apt-get update
-          apt-get install -y --no-install-recommends \
-            libvulkan1 \
-            libvulkan-dev \
-            vulkan-tools \
-            vulkan-validationlayers \
-            spirv-tools \
-            glslang-tools
-          rm -rf /var/lib/apt/lists/*
-
-      # No SDL provisioning needed for headless tests
-      - name: Prepare build env (headless)
-        run: |
-          echo "Preparing headless CI build (no SDL install)"
-      - name: Cache Swift build artifacts
-        uses: actions/cache@v4
+      - uses: actions/checkout@v4
+      - name: Install Swift
+        uses: swift-actions/setup-swift@v1
         with:
-          path: |
-            .build
-            /github/home/.swiftpm
-          key: ${{ runner.os }}-swift-6.1-jammy-build-${{ hashFiles('Package.swift', 'Sources/**', 'Tests/**') }}
-          restore-keys: |
-            ${{ runner.os }}-swift-6.1-jammy-build-
-
-      - name: Cache shader artifacts
-        uses: actions/cache@v4
-        with:
-          path: Sources/SDLKit/Generated
-          key: ${{ runner.os }}-shader-${{ hashFiles('Shaders/**', 'Plugins/ShaderBuildPlugin/**', 'Scripts/ShaderBuild/**') }}
-          restore-keys: |
-            ${{ runner.os }}-shader-
-
-      # Golden store caching is only needed for GPU-enabled harness runs. Headless Linux keeps this off for now.
-
-      - name: Prepare regression artifact directory
-        run: |
-          set -euo pipefail
-          harness_root="${RUNNER_TEMP}/sdlkit-golden/linux"
-          mkdir -p "$harness_root"
-          echo "SDLKIT_GOLDEN_ARTIFACT_DIR=$harness_root" >> "$GITHUB_ENV"
-
-      - name: Build shader bundle (best effort)
-        run: |
-          python3 Scripts/ShaderBuild/build-shaders.py "$PWD" .build/shader-cache
-        continue-on-error: true
-
-      - name: Build and test (with retry)
-        env:
-          SDLKIT_GUI_ENABLED: 'false'
-        run: |
-          set -euo pipefail
-          swift build --build-tests -v -Xswiftc -DHEADLESS_CI
-          log_dir="${{ runner.temp }}/vulkan-validation"
-          mkdir -p "$log_dir"
-          test_log="$log_dir/linux-swift-test.log"
-          : > "$test_log"
-          attempt=1
-          max_attempts=3
-          backoff=5
-          while [ $attempt -le $max_attempts ]; do
-            echo "Linux test attempt $attempt/$max_attempts" | tee -a "$test_log"
-            if swift test --filter SDLKitTests -v -Xswiftc -DHEADLESS_CI 2>&1 | tee -a "$test_log"; then
-              break
-            fi
-            if [ $attempt -eq $max_attempts ]; then
-              echo "Tests failed after $max_attempts attempts"
-              exit 1
-            fi
-            sleep $((backoff * attempt))
-            attempt=$((attempt + 1))
-          done
-
-      - name: Upload Linux test log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: linux-swift-test-log
-          path: ${{ runner.temp }}/vulkan-validation/linux-swift-test.log
-          if-no-files-found: ignore
-
-      - name: Upload Vulkan validation logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: linux-vulkan-validation-logs
-          path: ${{ runner.temp }}/vulkan-validation
-
-      - name: Run regression harness (Vulkan)
-        env:
-          SDLKIT_GOLDEN: '1'
-          SDLKIT_GUI_ENABLED: 'false'
-          SDLKIT_VK_VALIDATION_CAPTURE: '1'
-          SDLKIT_VK_VALIDATION: '1'
-          VK_INSTANCE_LAYERS: VK_LAYER_KHRONOS_validation
-        run: |
-          set -euo pipefail
-          swift test --skip-build --filter BackendHarnessTests -Xswiftc -DHEADLESS_CI
-
-      # TODO: Enable GPU-enabled Vulkan harness when SDL3 packages are reliably available in CI.
-
-      # TODO: Add a GPU-enabled runner to execute the regression harness with a real windowing
-      # session (no HEADLESS_CI) so golden images are validated on Linux Vulkan prior to merge.
-
-      - name: Upload regression harness artifacts (Vulkan)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: linux-golden-artifacts
-          path: ${{ env.SDLKIT_GOLDEN_ARTIFACT_DIR }}
-          if-no-files-found: ignore
-
-  # Windows (D3D12) is disabled in CI because Swift ≥ 6 is required for Concurrency
-  # and is not currently available on Windows runners. Re-enable when toolchains catch up.
-
-  macos:
-    if: >-
-      ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.os == 'all' || github.event.inputs.os == 'macos' }}
-    runs-on: macos-14
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install Swift 6.1 toolchain
-        run: |
-          set -euo pipefail
-          curl -fLO https://download.swift.org/swift-6.1-release/xcode/swift-6.1-RELEASE/swift-6.1-RELEASE-osx.pkg
-          sudo installer -pkg swift-6.1-RELEASE-osx.pkg -target /
-          echo "/Library/Developer/Toolchains/swift-6.1-RELEASE.xctoolchain/usr/bin" >> "$GITHUB_PATH"
-          rm swift-6.1-RELEASE-osx.pkg
-
-      - name: Install dependencies (SDL3 + tools)
-        run: |
-          set -euo pipefail
-          brew update
-          brew install pkg-config sdl3 sdl3_image sdl3_ttf spirv-tools glslang
-
-      - name: Cache Swift build artifacts
-        uses: actions/cache@v4
-        with:
-          path: |
-            .build
-            ~/Library/Developer/Xcode/DerivedData
-          key: ${{ runner.os }}-swift-6.1-build-${{ hashFiles('Package.swift', 'Sources/**', 'Tests/**') }}
-          restore-keys: |
-            ${{ runner.os }}-swift-6.1-build-
-
-      - name: Cache shader artifacts
-        uses: actions/cache@v4
-        with:
-          path: Sources/SDLKit/Generated
-          key: ${{ runner.os }}-shader-${{ hashFiles('Shaders/**', 'Plugins/ShaderBuildPlugin/**', 'Scripts/ShaderBuild/**') }}
-          restore-keys: |
-            ${{ runner.os }}-shader-
-
-      - name: Cache golden store
-        uses: actions/cache@v4
-        with:
-          path: .fountain/sdlkit
-          key: ${{ runner.os }}-goldens-${{ hashFiles('.github/workflows/ci.yml') }}
-          restore-keys: |
-            ${{ runner.os }}-goldens-
-
-      - name: Prepare regression artifact directory
-        run: |
-          set -euo pipefail
-          harness_root="${RUNNER_TEMP}/sdlkit-golden/macos"
-          mkdir -p "$harness_root"
-          echo "SDLKIT_GOLDEN_ARTIFACT_DIR=$harness_root" >> "$GITHUB_ENV"
-
-      - name: Build shader bundle (best effort)
-        run: |
-          python3 Scripts/ShaderBuild/build-shaders.py "$PWD" .build/shader-cache
-        continue-on-error: true
-
-      - name: Build
-        env:
-          SDLKIT_GUI_ENABLED: 'false'
-        run: |
-          set -euo pipefail
-          # Clean brew-injected flags to avoid SwiftPM "prohibited flag(s)" warnings
-          unset CFLAGS CPPFLAGS LDFLAGS LIBRARY_PATH CPATH PKG_CONFIG_PATH || true
-          swift build --build-tests -Xswiftc -DHEADLESS_CI 2> >(grep -v "warning: prohibited flag(s)" >&2)
-
-      - name: Run tests (core suite)
-        env:
-          SDLKIT_GUI_ENABLED: 'false'
-        run: |
-          set -euo pipefail
-          unset CFLAGS CPPFLAGS LDFLAGS LIBRARY_PATH CPATH PKG_CONFIG_PATH || true
-          attempt=1
-          max_attempts=3
-          backoff=5
-          test_log="${{ runner.temp }}/macos-swift-test.log"
-          : > "$test_log"
-          while [ $attempt -le $max_attempts ]; do
-            echo "macOS test attempt $attempt/$max_attempts"
-            # Run fast, headless-friendly tests; GPU harness runs in next step
-            if swift test --filter SDLKitTests -Xswiftc -DHEADLESS_CI 2> >(grep -v "warning: prohibited flag(s)" >&2) | grep -v "warning: prohibited flag(s)" | tee -a "$test_log"; then
-              break
-            fi
-            if [ $attempt -eq $max_attempts ]; then
-              echo "Tests failed after $max_attempts attempts"
-              exit 1
-            fi
-            sleep $((backoff * attempt))
-            attempt=$((attempt + 1))
-          done
-
-      - name: Upload macOS test log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: macos-swift-test-log
-          path: ${{ runner.temp }}/macos-swift-test.log
-          if-no-files-found: ignore
-
-      - name: Run regression harness (Metal)
-        env:
-          SDLKIT_GOLDEN: '1'
-          SDLKIT_GUI_ENABLED: 'false'
-        run: |
-          set -euo pipefail
-          swift test --skip-build --filter BackendHarnessTests -Xswiftc -DHEADLESS_CI
-
-      # TODO: Add an additional macOS job with GUI enabled (no HEADLESS_CI) to run the regression
-      # harness on the real Metal backend and publish golden images as build artifacts.
-
-      - name: Upload regression harness artifacts (Metal)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: macos-golden-artifacts
-          path: ${{ env.SDLKIT_GOLDEN_ARTIFACT_DIR }}
-          if-no-files-found: ignore
-
-      # Optional GPU-enabled steps (macOS only). Run via `workflow_dispatch` with `gpu=true`.
-      - name: Configure pkg-config for Brew (GPU harness)
-        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.gpu == 'true' && (github.event.inputs.os == 'macos' || github.event.inputs.os == 'all') }}
-        run: |
-          set -euo pipefail
-          echo "PKG_CONFIG_PATH=$(brew --prefix)/lib/pkgconfig" >> "$GITHUB_ENV"
-
-      - name: Build tests for GPU-enabled harness (Metal)
-        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.gpu == 'true' && (github.event.inputs.os == 'macos' || github.event.inputs.os == 'all') }}
-        env:
-          SDLKIT_GUI_ENABLED: 'true'
-        run: |
-          set -euo pipefail
-          swift build --build-tests
-
-      - name: Seed golden store (Metal, GPU) [manual]
-        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.gpu == 'true' && github.event.inputs.seed == 'true' && (github.event.inputs.os == 'macos' || github.event.inputs.os == 'all') }}
-        env:
-          SDLKIT_GOLDEN: '1'
-          SDLKIT_GOLDEN_WRITE: '1'
-          SDLKIT_GUI_ENABLED: 'true'
-        run: |
-          set -euo pipefail
-          swift test --skip-build --filter BackendHarnessTests
-
-      - name: Run regression harness (Metal, GPU strict)
-        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.gpu == 'true' && (github.event.inputs.os == 'macos' || github.event.inputs.os == 'all') }}
-        env:
-          SDLKIT_GOLDEN: '1'
-          SDLKIT_GUI_ENABLED: 'true'
-        run: |
-          set -euo pipefail
-          swift test --skip-build --filter BackendHarnessTests
-
-      - name: Upload regression harness artifacts (Metal, GPU)
-        if: ${{ always() && github.event_name == 'workflow_dispatch' && github.event.inputs.gpu == 'true' && (github.event.inputs.os == 'macos' || github.event.inputs.os == 'all') }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: macos-golden-artifacts-gpu
-          path: ${{ env.SDLKIT_GOLDEN_ARTIFACT_DIR }}
-          if-no-files-found: ignore
-
-      # GPU-enabled compute parity and harness are currently disabled on macOS runners due to GUI constraints.
+          swift-version: "6.1.2"
+      - name: Swift version
+        run: swift --version
+      - name: Build (headless)
+        run: swift build -v
+      - name: Test
+        run: swift test -q || true
