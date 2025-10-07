@@ -3,10 +3,6 @@ import Foundation
 import CSDL3
 #endif
 
-#if canImport(CSDL3) && !HEADLESS_CI
-// Treat SDL_AudioStream as opaque pointer on Swift side for portability
-typealias SDL_AudioStream = OpaquePointer
-#endif
 
 public enum SDLAudioSampleFormat {
     case f32

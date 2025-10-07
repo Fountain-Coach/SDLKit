@@ -19,6 +19,7 @@ public struct SDLKitJSONAgent {
     private static var _nextAudioId: Int = 1
 
     private struct GPUState { let gpu: AudioGPUFeatureExtractor; let frameSize: Int; let hopSize: Int; let melBands: Int; var overlapMono: [Float]; var prevMel: [Float]? }
+    @MainActor
     private enum GPUStore {
         private static var map: [Int: GPUState] = [:]
         static func set(_ id: Int, gpu: AudioGPUFeatureExtractor, frameSize: Int, hopSize: Int, melBands: Int) { map[id] = GPUState(gpu: gpu, frameSize: frameSize, hopSize: hopSize, melBands: melBands, overlapMono: [], prevMel: nil) }
@@ -494,7 +495,7 @@ public struct SDLKitJSONAgent {
                     out = stream.poll(since: since, max: max)
                 }
                 // Derive ms from CPU feat if present; else from GPU proxy (uses hopSize from GPU store, sampleRate from capture spec)
-                let sess = _capStore[req.audio_id]
+                let sess = Self._capStore[req.audio_id]
                 let sampleRate = sess?.cap.spec.sampleRate ?? 48000
                 let hop = sess?.feat?.hopSize ?? GPUStore.get(req.audio_id)?.hopSize ?? 512
                 let msPerFrame = Int((Double(hop) / Double(sampleRate)) * 1000.0)

@@ -10,7 +10,7 @@ final class AudioA2MStream {
     private var events: [MIDIEvent] = []
     private var nextFrameIndex: Int = 0
     private var running = true
-    private let thread: Thread
+    private var thread: Thread?
 
     private let sink: ((MIDIEvent) -> Void)?
 
@@ -24,10 +24,11 @@ final class AudioA2MStream {
         self.featCPU = featCPU
         self.gpuState = gpuState
         self.sink = sink
-        self.thread = Thread { [weak self] in self?.runLoop() }
-        self.thread.name = "SDLKit.A2MStream"
-        self.thread.qualityOfService = .userInitiated
-        self.thread.start()
+        let t = Thread { [weak self] in self?.runLoop() }
+        t.name = "SDLKit.A2MStream"
+        t.qualityOfService = .userInitiated
+        self.thread = t
+        t.start()
     }
 
     func stop() { running = false }
@@ -75,7 +76,13 @@ final class AudioA2MStream {
                     }
                     overlapMono = (idx < mono.count) ? Array(mono[idx..<mono.count]) : []
                     if !windows.isEmpty {
-                        let melFrames = (try? gpu.gpu.process(frames: windows)) ?? []
+                        var melFrames: [[Float]] = []
+                        let group = DispatchGroup(); group.enter()
+                        DispatchQueue.main.async {
+                            melFrames = (try? gpu.gpu.process(frames: windows)) ?? []
+                            group.leave()
+                        }
+                        group.wait()
                         let ev = a2m.process(melFrames: melFrames, startFrameIndex: nextFrameIndex)
                         nextFrameIndex += melFrames.count
                         append(ev)
