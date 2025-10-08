@@ -485,8 +485,10 @@ public struct SDLKitAPIServerAdapter: APIProtocol {
     public func audioCaptureOpen(_ input: Operations.audioCaptureOpen.Input) async throws -> Operations.audioCaptureOpen.Output {
         let req: Data
         switch input.body {
-        case .json(let payload):
+        case .some(.json(let payload)):
             req = try JSONEncoder().encode(payload)
+        case .none:
+            req = Data("{}".utf8)
         }
         let payload = call("/agent/audio/capture/open", body: req)
         return .undocumented(statusCode: 200, payload)
@@ -505,8 +507,10 @@ public struct SDLKitAPIServerAdapter: APIProtocol {
     public func audioPlaybackOpen(_ input: Operations.audioPlaybackOpen.Input) async throws -> Operations.audioPlaybackOpen.Output {
         let req: Data
         switch input.body {
-        case .json(let payload):
+        case .some(.json(let payload)):
             req = try JSONEncoder().encode(payload)
+        case .none:
+            req = Data("{}".utf8)
         }
         let payload = call("/agent/audio/playback/open", body: req)
         return .undocumented(statusCode: 200, payload)
@@ -575,8 +579,10 @@ public struct SDLKitAPIServerAdapter: APIProtocol {
     public func midiStart(_ input: Operations.midiStart.Input) async throws -> Operations.midiStart.Output {
         let req: Data
         switch input.body {
-        case .json(let payload):
+        case .some(.json(let payload)):
             req = try JSONEncoder().encode(payload)
+        case .none:
+            req = Data("{}".utf8)
         }
         let payload = call("/agent/midi/start", body: req)
         return .undocumented(statusCode: 200, payload)
