@@ -4,13 +4,20 @@ import NIOPosix
 import NIOHTTP1
 import SDLKit
 
-final class HTTPHandler: ChannelInboundHandler {
+final class HTTPHandler: ChannelInboundHandler, @unchecked Sendable {
     typealias InboundIn = HTTPServerRequestPart
     typealias OutboundOut = HTTPServerResponsePart
 
     private var bodyData = Data()
     private var currentPath: String?
-    private let agent = SDLKitJSONAgent()
+    // Helper to hop to main actor synchronously
+    private func onMain<T: Sendable>(_ body: @MainActor @escaping () -> T) -> T {
+        var result: T! = nil
+        DispatchQueue.main.sync {
+            result = MainActor.assumeIsolated { body() }
+        }
+        return result
+    }
 
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
         let part = self.unwrapInboundIn(data)
@@ -32,7 +39,7 @@ final class HTTPHandler: ChannelInboundHandler {
             // Route by path; forward to SDLKitJSONAgent
             let reqBody = bodyData
             let path = currentPath ?? "/health"
-            let responseData: Data = agent.handle(path: path, body: reqBody)
+            let responseData: Data = onMain { SDLKitJSONAgent().handle(path: path, body: reqBody) }
             var headers = HTTPHeaders()
             headers.add(name: "content-type", value: "application/json")
             headers.add(name: "content-length", value: String(responseData.count))

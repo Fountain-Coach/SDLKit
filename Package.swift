@@ -79,6 +79,8 @@ let package = Package(
         deps.append(.package(url: "https://github.com/apple/swift-openapi-urlsession.git", from: "1.1.0"))
         // SwiftNIO (opt-in server target)
         deps.append(.package(url: "https://github.com/apple/swift-nio.git", from: "2.60.0"))
+        // Swift Atomics (used in AudioRingBuffer for lock-free paths)
+        deps.append(.package(url: "https://github.com/apple/swift-atomics.git", from: "1.2.0"))
         return deps
     }(),
     targets: {
@@ -182,6 +184,8 @@ let package = Package(
                     deps.append(.product(name: "FountainStore", package: "Fountain-Store"))
                     // Secrets
                     deps.append(.product(name: "SecretStore", package: "swift-secretstore"))
+                    // Lock-free ring buffer support
+                    deps.append(.product(name: "Atomics", package: "swift-atomics"))
                     return deps
                 }(),
                 path: "Sources/SDLKit",
