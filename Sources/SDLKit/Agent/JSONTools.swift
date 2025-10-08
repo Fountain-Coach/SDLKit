@@ -809,7 +809,8 @@ public struct SDLKitJSONAgent {
         let candidates = [
             "sdlkit.gui.v1.yaml",
             "openapi.yaml",
-            "openapi/sdlkit.gui.v1.yaml"
+            "openapi/sdlkit.gui.v1.yaml",
+            "Sources/SDLKitAPI/openapi.yaml"
         ]
         for rel in candidates where !checked.contains(rel) {
             if let entry = fetchFile(at: rel, allowedExtensions: [".yaml", ".yml"], getCache: { externalYAMLCache }, setCache: setYAMLCache) {

@@ -9,11 +9,14 @@ let isLinux = false
 #endif
 
 let env = ProcessInfo.processInfo.environment
+
+func envIsTruthy(_ value: String?) -> Bool {
+    guard let raw = value?.lowercased() else { return false }
+    return raw == "1" || raw == "true" || raw == "yes"
+}
+
+let headlessCI = envIsTruthy(env["HEADLESS_CI"])
 let useYams = (env["SDLKIT_NO_YAMS"] ?? "0") != "1"
-let guiEnabled: Bool = {
-    let raw = (env["SDLKIT_GUI_ENABLED"] ?? "true").lowercased()
-    return !(raw == "0" || raw == "false")
-}()
 
 func pkgConfigExists(_ package: String) -> Bool {
     let process = Process()
@@ -30,8 +33,33 @@ func pkgConfigExists(_ package: String) -> Bool {
     }
 }
 
-let forceStub = (env["SDLKIT_FORCE_HEADLESS"] ?? "0") == "1"
-let forceSystem = (env["SDLKIT_FORCE_SYSTEM_SDL"] ?? "0") == "1"
+let hasVulkan = pkgConfigExists("vulkan")
+let guiOverride = env["SDLKIT_GUI_ENABLED"]
+var guiEnabled: Bool = {
+    if let override = guiOverride {
+        let raw = override.lowercased()
+        return !(raw == "0" || raw == "false" || raw == "no")
+    }
+    if headlessCI { return false }
+    if isLinux && !hasVulkan { return false }
+    return true
+}()
+
+let forceStub: Bool = {
+    let base = headlessCI || envIsTruthy(env["SDLKIT_FORCE_HEADLESS"])
+    if isLinux && !hasVulkan {
+        if guiEnabled && !base && guiOverride != nil {
+            fatalError("""
+            Vulkan development files are required to build SDLKit on Linux. Install the Vulkan SDK (headers, loader, and validation layers) via your distribution's package manager—for example `sudo apt install libvulkan-dev vulkan-validationlayers` on Debian/Ubuntu—then re-run the build.
+            """)
+        }
+        guiEnabled = false
+        return true
+    }
+    return base
+}()
+
+let forceSystem = envIsTruthy(env["SDLKIT_FORCE_SYSTEM_SDL"])
 
 func shouldUseSystemPackage(_ pkg: String) -> Bool {
     if forceStub { return false }
@@ -42,13 +70,6 @@ func shouldUseSystemPackage(_ pkg: String) -> Bool {
 let hasSDL3 = shouldUseSystemPackage("sdl3")
 let hasSDL3Image = shouldUseSystemPackage("sdl3-image")
 let hasSDL3TTF = shouldUseSystemPackage("sdl3-ttf")
-let hasVulkan = pkgConfigExists("vulkan")
-
-if isLinux && !hasVulkan {
-    fatalError("""
-    Vulkan development files are required to build SDLKit on Linux. Install the Vulkan SDK (headers, loader, and validation layers) via your distribution's package manager—for example `sudo apt install libvulkan-dev vulkan-validationlayers` on Debian/Ubuntu—then re-run the build.
-    """)
-}
 
 let package = Package(
     name: "SDLKit",
@@ -176,7 +197,7 @@ let package = Package(
                             deps.append(.target(name: "CSDL3Compat", condition: .when(platforms: [.macOS, .linux])))
                         }
                     }
-                    if isLinux {
+                    if isLinux && hasVulkan && !forceStub {
                         deps.append(.target(name: "CVulkan", condition: .when(platforms: [.linux])))
                     }
                     if useYams { deps.append(.product(name: "Yams", package: "Yams")) }
@@ -220,15 +241,17 @@ let package = Package(
         )
 
         if isLinux {
-            targets.append(
-                .systemLibrary(
-                    name: "CVulkan",
-                    pkgConfig: "vulkan",
-                    providers: [
-                        .apt(["libvulkan-dev"]) // Linux
-                    ]
+            if hasVulkan && !forceStub {
+                targets.append(
+                    .systemLibrary(
+                        name: "CVulkan",
+                        pkgConfig: "vulkan",
+                        providers: [
+                            .apt(["libvulkan-dev"]) // Linux
+                        ]
+                    )
                 )
-            )
+            }
         }
 
         if isLinux {
@@ -263,7 +286,12 @@ let package = Package(
                     deps.append("CSDL3")
                     return deps
                 }(),
-                path: "Tests/SDLKitTests"
+                path: "Tests/SDLKitTests",
+                swiftSettings: {
+                    var defs: [SwiftSetting] = []
+                    if !hasSDL3 { defs.append(.define("HEADLESS_CI")) }
+                    return defs
+                }()
             )
         )
 
@@ -271,7 +299,12 @@ let package = Package(
             .testTarget(
                 name: "SDLKitGraphicsTests",
                 dependencies: ["SDLKit"],
-                path: "Tests/SDLKitGraphicsTests"
+                path: "Tests/SDLKitGraphicsTests",
+                swiftSettings: {
+                    var defs: [SwiftSetting] = []
+                    if !hasSDL3 { defs.append(.define("HEADLESS_CI")) }
+                    return defs
+                }()
             )
         )
 
