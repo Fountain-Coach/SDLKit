@@ -252,6 +252,14 @@ public struct SDLKitAPIServerAdapter: APIProtocol {
             req = try JSONEncoder().encode(payload)
         }
         let payload = call("/agent/gui/drawText", body: req)
+        if let body = payload.body, let data = try? await Data(collecting: body, upTo: .max) {
+            if let ok = try? JSONDecoder().decode(Components.Schemas.Ok.self, from: data) {
+                return .ok(.init(body: .json(ok)))
+            }
+            if let err = try? JSONDecoder().decode(Components.Schemas._Error.self, from: data) {
+                return .notImplemented(.init(body: .json(err)))
+            }
+        }
         return .undocumented(statusCode: 200, payload)
     }
 
@@ -550,6 +558,11 @@ public struct SDLKitAPIServerAdapter: APIProtocol {
             req = try JSONEncoder().encode(payload)
         }
         let payload = call("/agent/audio/devices", body: req)
+        if let body = payload.body, let data = try? await Data(collecting: body, upTo: .max) {
+            if let out = try? JSONDecoder().decode(Operations.audioDevices.Output.Ok.Body.jsonPayload.self, from: data) {
+                return .ok(.init(body: .json(out)))
+            }
+        }
         return .undocumented(statusCode: 200, payload)
     }
 
@@ -572,6 +585,11 @@ public struct SDLKitAPIServerAdapter: APIProtocol {
             req = try JSONEncoder().encode(payload)
         }
         let payload = call("/agent/audio/capture/read", body: req)
+        if let body = payload.body, let data = try? await Data(collecting: body, upTo: .max) {
+            if let out = try? JSONDecoder().decode(Components.Schemas.AudioFrames.self, from: data) {
+                return .ok(.init(body: .json(out)))
+            }
+        }
         return .undocumented(statusCode: 200, payload)
     }
 
@@ -594,6 +612,11 @@ public struct SDLKitAPIServerAdapter: APIProtocol {
             req = try JSONEncoder().encode(payload)
         }
         let payload = call("/agent/audio/playback/sine", body: req)
+        if let body = payload.body, let data = try? await Data(collecting: body, upTo: .max) {
+            if let out = try? JSONDecoder().decode(Components.Schemas.Ok.self, from: data) {
+                return .ok(.init(body: .json(out)))
+            }
+        }
         return .undocumented(statusCode: 200, payload)
     }
 
@@ -604,6 +627,11 @@ public struct SDLKitAPIServerAdapter: APIProtocol {
             req = try JSONEncoder().encode(payload)
         }
         let payload = call("/agent/audio/playback/queue/open", body: req)
+        if let body = payload.body, let data = try? await Data(collecting: body, upTo: .max) {
+            if let out = try? JSONDecoder().decode(Operations.audioPlaybackQueueOpen.Output.Ok.Body.jsonPayload.self, from: data) {
+                return .ok(.init(body: .json(out)))
+            }
+        }
         return .undocumented(statusCode: 200, payload)
     }
 
@@ -614,6 +642,11 @@ public struct SDLKitAPIServerAdapter: APIProtocol {
             req = try JSONEncoder().encode(payload)
         }
         let payload = call("/agent/audio/playback/queue/enqueue", body: req)
+        if let body = payload.body, let data = try? await Data(collecting: body, upTo: .max) {
+            if let out = try? JSONDecoder().decode(Components.Schemas.Ok.self, from: data) {
+                return .ok(.init(body: .json(out)))
+            }
+        }
         return .undocumented(statusCode: 200, payload)
     }
 
@@ -624,6 +657,11 @@ public struct SDLKitAPIServerAdapter: APIProtocol {
             req = try JSONEncoder().encode(payload)
         }
         let payload = call("/agent/audio/playback/play_wav", body: req)
+        if let body = payload.body, let data = try? await Data(collecting: body, upTo: .max) {
+            if let out = try? JSONDecoder().decode(Components.Schemas.Ok.self, from: data) {
+                return .ok(.init(body: .json(out)))
+            }
+        }
         return .undocumented(statusCode: 200, payload)
     }
 
@@ -634,6 +672,11 @@ public struct SDLKitAPIServerAdapter: APIProtocol {
             req = try JSONEncoder().encode(payload)
         }
         let payload = call("/agent/audio/monitor/start", body: req)
+        if let body = payload.body, let data = try? await Data(collecting: body, upTo: .max) {
+            if let out = try? JSONDecoder().decode(Components.Schemas.Ok.self, from: data) {
+                return .ok(.init(body: .json(out)))
+            }
+        }
         return .undocumented(statusCode: 200, payload)
     }
 
@@ -644,6 +687,11 @@ public struct SDLKitAPIServerAdapter: APIProtocol {
             req = try JSONEncoder().encode(payload)
         }
         let payload = call("/agent/audio/monitor/stop", body: req)
+        if let body = payload.body, let data = try? await Data(collecting: body, upTo: .max) {
+            if let out = try? JSONDecoder().decode(Components.Schemas.Ok.self, from: data) {
+                return .ok(.init(body: .json(out)))
+            }
+        }
         return .undocumented(statusCode: 200, payload)
     }
 
@@ -656,18 +704,27 @@ public struct SDLKitAPIServerAdapter: APIProtocol {
             req = Data("{}".utf8)
         }
         let payload = call("/agent/midi/start", body: req)
+        if let body = payload.body, let data = try? await Data(collecting: body, upTo: .max), let ok = try? JSONDecoder().decode(Components.Schemas.Ok.self, from: data) {
+            return .ok(.init(body: .json(ok)))
+        }
         return .undocumented(statusCode: 200, payload)
     }
 
     public func midiStop(_ input: Operations.midiStop.Input) async throws -> Operations.midiStop.Output {
         let req = Data("{}".utf8)
         let payload = call("/agent/midi/stop", body: req)
+        if let body = payload.body, let data = try? await Data(collecting: body, upTo: .max), let ok = try? JSONDecoder().decode(Components.Schemas.Ok.self, from: data) {
+            return .ok(.init(body: .json(ok)))
+        }
         return .undocumented(statusCode: 200, payload)
     }
 
     public func midiDestinations(_ input: Operations.midiDestinations.Input) async throws -> Operations.midiDestinations.Output {
         let req = Data("{}".utf8)
         let payload = call("/agent/midi/destinations", body: req)
+        if let body = payload.body, let data = try? await Data(collecting: body, upTo: .max), let out = try? JSONDecoder().decode(Operations.midiDestinations.Output.Ok.Body.jsonPayload.self, from: data) {
+            return .ok(.init(body: .json(out)))
+        }
         return .undocumented(statusCode: 200, payload)
     }
 
@@ -678,6 +735,9 @@ public struct SDLKitAPIServerAdapter: APIProtocol {
             req = try JSONEncoder().encode(payload)
         }
         let payload = call("/agent/midi/select", body: req)
+        if let body = payload.body, let data = try? await Data(collecting: body, upTo: .max), let ok = try? JSONDecoder().decode(Components.Schemas.Ok.self, from: data) {
+            return .ok(.init(body: .json(ok)))
+        }
         return .undocumented(statusCode: 200, payload)
     }
 
@@ -688,6 +748,9 @@ public struct SDLKitAPIServerAdapter: APIProtocol {
             req = try JSONEncoder().encode(payload)
         }
         let payload = call("/agent/midi/selectByName", body: req)
+        if let body = payload.body, let data = try? await Data(collecting: body, upTo: .max), let ok = try? JSONDecoder().decode(Components.Schemas.Ok.self, from: data) {
+            return .ok(.init(body: .json(ok)))
+        }
         return .undocumented(statusCode: 200, payload)
     }
 
@@ -698,6 +761,9 @@ public struct SDLKitAPIServerAdapter: APIProtocol {
             req = try JSONEncoder().encode(payload)
         }
         let payload = call("/agent/midi/channel", body: req)
+        if let body = payload.body, let data = try? await Data(collecting: body, upTo: .max), let ok = try? JSONDecoder().decode(Components.Schemas.Ok.self, from: data) {
+            return .ok(.init(body: .json(ok)))
+        }
         return .undocumented(statusCode: 200, payload)
     }
 
