@@ -15,7 +15,7 @@ on:
 jobs:
   openapi-build:
     runs-on: macos-latest
-    continue-on-error: true
+    continue-on-error: false
     steps:
       - uses: actions/checkout@v4
       - name: Cache SwiftPM
