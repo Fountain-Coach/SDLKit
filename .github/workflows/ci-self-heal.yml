@@ -2,14 +2,17 @@ name: CI Self-Heal
 
 on:
   workflow_run:
-    workflows: ["CI"]
+    workflows: ["SDLKit CI (Headless)"]
     types: [completed]
 
 jobs:
   rerun-on-failure:
+    # If the observed workflow failed, try to rerun up to 2 times.
     if: >-
       ${{ github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.run_attempt < 3 }}
     runs-on: ubuntu-latest
+    # This helper should never cause a red check; if rerun fails, ignore.
+    continue-on-error: true
     permissions:
       actions: write
     steps:
