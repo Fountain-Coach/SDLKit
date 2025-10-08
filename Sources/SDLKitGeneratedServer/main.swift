@@ -40,7 +40,13 @@ final class NIOHTTPHandler: ChannelInboundHandler {
       let req = HTTPRequest(method: method, scheme: nil, authority: nil, path: path, headerFields: fields)
       let bodyData = Data(bodyBuffer.readableBytesView)
       let body: HTTPBody? = bodyData.isEmpty ? nil : HTTPBody(bodyData)
-      let key = RouteKey(method: head.method.rawValue.uppercased(), path: req.soar_pathOnly.description)
+      let full = head.uri
+      let pOnly: String = {
+        if let q = full.firstIndex(of: "?") { return String(full[..<q]) }
+        if let f = full.firstIndex(of: "#") { return String(full[..<f]) }
+        return full
+      }()
+      let key = RouteKey(method: head.method.rawValue.uppercased(), path: pOnly)
       Task {
         let (resp, respBody) = try await self.routes[key]?(req, body, ServerRequestMetadata()) ?? (HTTPResponse(status: .init(code: 404)), nil)
         var headers = HTTPHeaders()
