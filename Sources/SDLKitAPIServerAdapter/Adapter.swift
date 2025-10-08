@@ -45,6 +45,7 @@ public struct SDLKitAPIServerAdapter: APIProtocol {
             req = try JSONEncoder().encode(payload)
         }
         let payload = call("/agent/gui/window/close", body: req)
+        if let body = payload.body, let data = try? await Data(collecting: body, upTo: .max), let ok = try? JSONDecoder().decode(Components.Schemas.Ok.self, from: data) { return .ok(.init(body: .json(ok))) }
         return .undocumented(statusCode: 200, payload)
     }
 
@@ -55,6 +56,7 @@ public struct SDLKitAPIServerAdapter: APIProtocol {
             req = try JSONEncoder().encode(payload)
         }
         let payload = call("/agent/gui/window/show", body: req)
+        if let body = payload.body, let data = try? await Data(collecting: body, upTo: .max), let ok = try? JSONDecoder().decode(Components.Schemas.Ok.self, from: data) { return .ok(.init(body: .json(ok))) }
         return .undocumented(statusCode: 200, payload)
     }
 
@@ -65,6 +67,7 @@ public struct SDLKitAPIServerAdapter: APIProtocol {
             req = try JSONEncoder().encode(payload)
         }
         let payload = call("/agent/gui/window/hide", body: req)
+        if let body = payload.body, let data = try? await Data(collecting: body, upTo: .max), let ok = try? JSONDecoder().decode(Components.Schemas.Ok.self, from: data) { return .ok(.init(body: .json(ok))) }
         return .undocumented(statusCode: 200, payload)
     }
 
@@ -95,6 +98,7 @@ public struct SDLKitAPIServerAdapter: APIProtocol {
             req = try JSONEncoder().encode(payload)
         }
         let payload = call("/agent/gui/window/setTitle", body: req)
+        if let body = payload.body, let data = try? await Data(collecting: body, upTo: .max), let ok = try? JSONDecoder().decode(Components.Schemas.Ok.self, from: data) { return .ok(.init(body: .json(ok))) }
         return .undocumented(statusCode: 200, payload)
     }
 
@@ -105,6 +109,7 @@ public struct SDLKitAPIServerAdapter: APIProtocol {
             req = try JSONEncoder().encode(payload)
         }
         let payload = call("/agent/gui/window/setPosition", body: req)
+        if let body = payload.body, let data = try? await Data(collecting: body, upTo: .max), let ok = try? JSONDecoder().decode(Components.Schemas.Ok.self, from: data) { return .ok(.init(body: .json(ok))) }
         return .undocumented(statusCode: 200, payload)
     }
 
@@ -115,6 +120,7 @@ public struct SDLKitAPIServerAdapter: APIProtocol {
             req = try JSONEncoder().encode(payload)
         }
         let payload = call("/agent/gui/window/maximize", body: req)
+        if let body = payload.body, let data = try? await Data(collecting: body, upTo: .max), let ok = try? JSONDecoder().decode(Components.Schemas.Ok.self, from: data) { return .ok(.init(body: .json(ok))) }
         return .undocumented(statusCode: 200, payload)
     }
 
@@ -125,6 +131,7 @@ public struct SDLKitAPIServerAdapter: APIProtocol {
             req = try JSONEncoder().encode(payload)
         }
         let payload = call("/agent/gui/window/minimize", body: req)
+        if let body = payload.body, let data = try? await Data(collecting: body, upTo: .max), let ok = try? JSONDecoder().decode(Components.Schemas.Ok.self, from: data) { return .ok(.init(body: .json(ok))) }
         return .undocumented(statusCode: 200, payload)
     }
 
@@ -135,6 +142,7 @@ public struct SDLKitAPIServerAdapter: APIProtocol {
             req = try JSONEncoder().encode(payload)
         }
         let payload = call("/agent/gui/window/restore", body: req)
+        if let body = payload.body, let data = try? await Data(collecting: body, upTo: .max), let ok = try? JSONDecoder().decode(Components.Schemas.Ok.self, from: data) { return .ok(.init(body: .json(ok))) }
         return .undocumented(statusCode: 200, payload)
     }
 
@@ -145,6 +153,7 @@ public struct SDLKitAPIServerAdapter: APIProtocol {
             req = try JSONEncoder().encode(payload)
         }
         let payload = call("/agent/gui/window/center", body: req)
+        if let body = payload.body, let data = try? await Data(collecting: body, upTo: .max), let ok = try? JSONDecoder().decode(Components.Schemas.Ok.self, from: data) { return .ok(.init(body: .json(ok))) }
         return .undocumented(statusCode: 200, payload)
     }
 
@@ -155,6 +164,7 @@ public struct SDLKitAPIServerAdapter: APIProtocol {
             req = try JSONEncoder().encode(payload)
         }
         let payload = call("/agent/gui/window/setFullscreen", body: req)
+        if let body = payload.body, let data = try? await Data(collecting: body, upTo: .max), let ok = try? JSONDecoder().decode(Components.Schemas.Ok.self, from: data) { return .ok(.init(body: .json(ok))) }
         return .undocumented(statusCode: 200, payload)
     }
 
@@ -165,6 +175,7 @@ public struct SDLKitAPIServerAdapter: APIProtocol {
             req = try JSONEncoder().encode(payload)
         }
         let payload = call("/agent/gui/window/setOpacity", body: req)
+        if let body = payload.body, let data = try? await Data(collecting: body, upTo: .max), let ok = try? JSONDecoder().decode(Components.Schemas.Ok.self, from: data) { return .ok(.init(body: .json(ok))) }
         return .undocumented(statusCode: 200, payload)
     }
 
@@ -175,6 +186,7 @@ public struct SDLKitAPIServerAdapter: APIProtocol {
             req = try JSONEncoder().encode(payload)
         }
         let payload = call("/agent/gui/window/setAlwaysOnTop", body: req)
+        if let body = payload.body, let data = try? await Data(collecting: body, upTo: .max), let ok = try? JSONDecoder().decode(Components.Schemas.Ok.self, from: data) { return .ok(.init(body: .json(ok))) }
         return .undocumented(statusCode: 200, payload)
     }
 
@@ -185,6 +197,7 @@ public struct SDLKitAPIServerAdapter: APIProtocol {
             req = try JSONEncoder().encode(payload)
         }
         let payload = call("/agent/gui/clear", body: req)
+        if let body = payload.body, let data = try? await Data(collecting: body, upTo: .max), let ok = try? JSONDecoder().decode(Components.Schemas.Ok.self, from: data) { return .ok(.init(body: .json(ok))) }
         return .undocumented(statusCode: 200, payload)
     }
 
@@ -195,6 +208,7 @@ public struct SDLKitAPIServerAdapter: APIProtocol {
             req = try JSONEncoder().encode(payload)
         }
         let payload = call("/agent/gui/drawRectangle", body: req)
+        if let body = payload.body, let data = try? await Data(collecting: body, upTo: .max), let ok = try? JSONDecoder().decode(Components.Schemas.Ok.self, from: data) { return .ok(.init(body: .json(ok))) }
         return .undocumented(statusCode: 200, payload)
     }
 
@@ -205,6 +219,7 @@ public struct SDLKitAPIServerAdapter: APIProtocol {
             req = try JSONEncoder().encode(payload)
         }
         let payload = call("/agent/gui/drawLine", body: req)
+        if let body = payload.body, let data = try? await Data(collecting: body, upTo: .max), let ok = try? JSONDecoder().decode(Components.Schemas.Ok.self, from: data) { return .ok(.init(body: .json(ok))) }
         return .undocumented(statusCode: 200, payload)
     }
 
@@ -215,6 +230,7 @@ public struct SDLKitAPIServerAdapter: APIProtocol {
             req = try JSONEncoder().encode(payload)
         }
         let payload = call("/agent/gui/drawCircleFilled", body: req)
+        if let body = payload.body, let data = try? await Data(collecting: body, upTo: .max), let ok = try? JSONDecoder().decode(Components.Schemas.Ok.self, from: data) { return .ok(.init(body: .json(ok))) }
         return .undocumented(statusCode: 200, payload)
     }
 
@@ -225,6 +241,7 @@ public struct SDLKitAPIServerAdapter: APIProtocol {
             req = try JSONEncoder().encode(payload)
         }
         let payload = call("/agent/gui/present", body: req)
+        if let body = payload.body, let data = try? await Data(collecting: body, upTo: .max), let ok = try? JSONDecoder().decode(Components.Schemas.Ok.self, from: data) { return .ok(.init(body: .json(ok))) }
         return .undocumented(statusCode: 200, payload)
     }
 
@@ -261,6 +278,9 @@ public struct SDLKitAPIServerAdapter: APIProtocol {
     public func clipboardGet(_ input: Operations.clipboardGet.Input) async throws -> Operations.clipboardGet.Output {
         let req = Data("{}".utf8)
         let payload = call("/agent/gui/clipboard/get", body: req)
+        if let body = payload.body, let data = try? await Data(collecting: body, upTo: .max), let got = try? JSONDecoder().decode(Operations.clipboardGet.Output.Ok.Body.jsonPayload.self, from: data) {
+            return .ok(.init(body: .json(got)))
+        }
         return .undocumented(statusCode: 200, payload)
     }
 
@@ -271,24 +291,34 @@ public struct SDLKitAPIServerAdapter: APIProtocol {
             req = try JSONEncoder().encode(payload)
         }
         let payload = call("/agent/gui/clipboard/set", body: req)
+        if let body = payload.body, let data = try? await Data(collecting: body, upTo: .max), let ok = try? JSONDecoder().decode(Components.Schemas.Ok.self, from: data) { return .ok(.init(body: .json(ok))) }
         return .undocumented(statusCode: 200, payload)
     }
 
     public func getKeyboardState(_ input: Operations.getKeyboardState.Input) async throws -> Operations.getKeyboardState.Output {
         let req = Data("{}".utf8)
         let payload = call("/agent/gui/input/getKeyboardState", body: req)
+        if let body = payload.body, let data = try? await Data(collecting: body, upTo: .max), let ks = try? JSONDecoder().decode(Components.Schemas.KeyboardState.self, from: data) {
+            return .ok(.init(body: .json(ks)))
+        }
         return .undocumented(statusCode: 200, payload)
     }
 
     public func getMouseState(_ input: Operations.getMouseState.Input) async throws -> Operations.getMouseState.Output {
         let req = Data("{}".utf8)
         let payload = call("/agent/gui/input/getMouseState", body: req)
+        if let body = payload.body, let data = try? await Data(collecting: body, upTo: .max), let ms = try? JSONDecoder().decode(Components.Schemas.MouseState.self, from: data) {
+            return .ok(.init(body: .json(ms)))
+        }
         return .undocumented(statusCode: 200, payload)
     }
 
     public func listDisplays(_ input: Operations.listDisplays.Input) async throws -> Operations.listDisplays.Output {
         let req = Data("{}".utf8)
         let payload = call("/agent/gui/display/list", body: req)
+        if let body = payload.body, let data = try? await Data(collecting: body, upTo: .max), let out = try? JSONDecoder().decode(Operations.listDisplays.Output.Ok.Body.jsonPayload.self, from: data) {
+            return .ok(.init(body: .json(out)))
+        }
         return .undocumented(statusCode: 200, payload)
     }
 
@@ -299,6 +329,9 @@ public struct SDLKitAPIServerAdapter: APIProtocol {
             req = try JSONEncoder().encode(payload)
         }
         let payload = call("/agent/gui/display/getInfo", body: req)
+        if let body = payload.body, let data = try? await Data(collecting: body, upTo: .max), let info = try? JSONDecoder().decode(Components.Schemas.DisplayInfo.self, from: data) {
+            return .ok(.init(body: .json(info)))
+        }
         return .undocumented(statusCode: 200, payload)
     }
 
@@ -309,6 +342,7 @@ public struct SDLKitAPIServerAdapter: APIProtocol {
             req = try JSONEncoder().encode(payload)
         }
         let payload = call("/agent/gui/texture/load", body: req)
+        if let body = payload.body, let data = try? await Data(collecting: body, upTo: .max), let ok = try? JSONDecoder().decode(Components.Schemas.Ok.self, from: data) { return .ok(.init(body: .json(ok))) }
         return .undocumented(statusCode: 200, payload)
     }
 
@@ -319,6 +353,7 @@ public struct SDLKitAPIServerAdapter: APIProtocol {
             req = try JSONEncoder().encode(payload)
         }
         let payload = call("/agent/gui/texture/draw", body: req)
+        if let body = payload.body, let data = try? await Data(collecting: body, upTo: .max), let ok = try? JSONDecoder().decode(Components.Schemas.Ok.self, from: data) { return .ok(.init(body: .json(ok))) }
         return .undocumented(statusCode: 200, payload)
     }
 
@@ -329,6 +364,7 @@ public struct SDLKitAPIServerAdapter: APIProtocol {
             req = try JSONEncoder().encode(payload)
         }
         let payload = call("/agent/gui/texture/drawTiled", body: req)
+        if let body = payload.body, let data = try? await Data(collecting: body, upTo: .max), let ok = try? JSONDecoder().decode(Components.Schemas.Ok.self, from: data) { return .ok(.init(body: .json(ok))) }
         return .undocumented(statusCode: 200, payload)
     }
 
@@ -339,6 +375,7 @@ public struct SDLKitAPIServerAdapter: APIProtocol {
             req = try JSONEncoder().encode(payload)
         }
         let payload = call("/agent/gui/texture/drawRotated", body: req)
+        if let body = payload.body, let data = try? await Data(collecting: body, upTo: .max), let ok = try? JSONDecoder().decode(Components.Schemas.Ok.self, from: data) { return .ok(.init(body: .json(ok))) }
         return .undocumented(statusCode: 200, payload)
     }
 
@@ -349,6 +386,7 @@ public struct SDLKitAPIServerAdapter: APIProtocol {
             req = try JSONEncoder().encode(payload)
         }
         let payload = call("/agent/gui/texture/free", body: req)
+        if let body = payload.body, let data = try? await Data(collecting: body, upTo: .max), let ok = try? JSONDecoder().decode(Components.Schemas.Ok.self, from: data) { return .ok(.init(body: .json(ok))) }
         return .undocumented(statusCode: 200, payload)
     }
 
@@ -359,6 +397,9 @@ public struct SDLKitAPIServerAdapter: APIProtocol {
             req = try JSONEncoder().encode(payload)
         }
         let payload = call("/agent/gui/render/getOutputSize", body: req)
+        if let body = payload.body, let data = try? await Data(collecting: body, upTo: .max), let val = try? JSONDecoder().decode(Operations.renderGetOutputSize.Output.Ok.Body.jsonPayload.self, from: data) {
+            return .ok(.init(body: .json(val)))
+        }
         return .undocumented(statusCode: 200, payload)
     }
 
@@ -369,6 +410,9 @@ public struct SDLKitAPIServerAdapter: APIProtocol {
             req = try JSONEncoder().encode(payload)
         }
         let payload = call("/agent/gui/render/getScale", body: req)
+        if let body = payload.body, let data = try? await Data(collecting: body, upTo: .max), let val = try? JSONDecoder().decode(Operations.renderGetScale.Output.Ok.Body.jsonPayload.self, from: data) {
+            return .ok(.init(body: .json(val)))
+        }
         return .undocumented(statusCode: 200, payload)
     }
 
@@ -379,6 +423,7 @@ public struct SDLKitAPIServerAdapter: APIProtocol {
             req = try JSONEncoder().encode(payload)
         }
         let payload = call("/agent/gui/render/setScale", body: req)
+        if let body = payload.body, let data = try? await Data(collecting: body, upTo: .max), let ok = try? JSONDecoder().decode(Components.Schemas.Ok.self, from: data) { return .ok(.init(body: .json(ok))) }
         return .undocumented(statusCode: 200, payload)
     }
 
@@ -389,6 +434,9 @@ public struct SDLKitAPIServerAdapter: APIProtocol {
             req = try JSONEncoder().encode(payload)
         }
         let payload = call("/agent/gui/render/getDrawColor", body: req)
+        if let body = payload.body, let data = try? await Data(collecting: body, upTo: .max), let val = try? JSONDecoder().decode(Operations.renderGetDrawColor.Output.Ok.Body.jsonPayload.self, from: data) {
+            return .ok(.init(body: .json(val)))
+        }
         return .undocumented(statusCode: 200, payload)
     }
 
@@ -399,6 +447,7 @@ public struct SDLKitAPIServerAdapter: APIProtocol {
             req = try JSONEncoder().encode(payload)
         }
         let payload = call("/agent/gui/render/setDrawColor", body: req)
+        if let body = payload.body, let data = try? await Data(collecting: body, upTo: .max), let ok = try? JSONDecoder().decode(Components.Schemas.Ok.self, from: data) { return .ok(.init(body: .json(ok))) }
         return .undocumented(statusCode: 200, payload)
     }
 
@@ -409,6 +458,9 @@ public struct SDLKitAPIServerAdapter: APIProtocol {
             req = try JSONEncoder().encode(payload)
         }
         let payload = call("/agent/gui/render/getViewport", body: req)
+        if let body = payload.body, let data = try? await Data(collecting: body, upTo: .max), let rect = try? JSONDecoder().decode(Components.Schemas.Rect.self, from: data) {
+            return .ok(.init(body: .json(rect)))
+        }
         return .undocumented(statusCode: 200, payload)
     }
 
@@ -419,6 +471,7 @@ public struct SDLKitAPIServerAdapter: APIProtocol {
             req = try JSONEncoder().encode(payload)
         }
         let payload = call("/agent/gui/render/setViewport", body: req)
+        if let body = payload.body, let data = try? await Data(collecting: body, upTo: .max), let ok = try? JSONDecoder().decode(Components.Schemas.Ok.self, from: data) { return .ok(.init(body: .json(ok))) }
         return .undocumented(statusCode: 200, payload)
     }
 
@@ -429,6 +482,9 @@ public struct SDLKitAPIServerAdapter: APIProtocol {
             req = try JSONEncoder().encode(payload)
         }
         let payload = call("/agent/gui/render/getClipRect", body: req)
+        if let body = payload.body, let data = try? await Data(collecting: body, upTo: .max), let rect = try? JSONDecoder().decode(Components.Schemas.Rect.self, from: data) {
+            return .ok(.init(body: .json(rect)))
+        }
         return .undocumented(statusCode: 200, payload)
     }
 
@@ -439,6 +495,7 @@ public struct SDLKitAPIServerAdapter: APIProtocol {
             req = try JSONEncoder().encode(payload)
         }
         let payload = call("/agent/gui/render/setClipRect", body: req)
+        if let body = payload.body, let data = try? await Data(collecting: body, upTo: .max), let ok = try? JSONDecoder().decode(Components.Schemas.Ok.self, from: data) { return .ok(.init(body: .json(ok))) }
         return .undocumented(statusCode: 200, payload)
     }
 
@@ -449,6 +506,7 @@ public struct SDLKitAPIServerAdapter: APIProtocol {
             req = try JSONEncoder().encode(payload)
         }
         let payload = call("/agent/gui/render/disableClipRect", body: req)
+        if let body = payload.body, let data = try? await Data(collecting: body, upTo: .max), let ok = try? JSONDecoder().decode(Components.Schemas.Ok.self, from: data) { return .ok(.init(body: .json(ok))) }
         return .undocumented(statusCode: 200, payload)
     }
 
@@ -459,6 +517,7 @@ public struct SDLKitAPIServerAdapter: APIProtocol {
             req = try JSONEncoder().encode(payload)
         }
         let payload = call("/agent/gui/drawPoints", body: req)
+        if let body = payload.body, let data = try? await Data(collecting: body, upTo: .max), let ok = try? JSONDecoder().decode(Components.Schemas.Ok.self, from: data) { return .ok(.init(body: .json(ok))) }
         return .undocumented(statusCode: 200, payload)
     }
 
@@ -469,6 +528,7 @@ public struct SDLKitAPIServerAdapter: APIProtocol {
             req = try JSONEncoder().encode(payload)
         }
         let payload = call("/agent/gui/drawLines", body: req)
+        if let body = payload.body, let data = try? await Data(collecting: body, upTo: .max), let ok = try? JSONDecoder().decode(Components.Schemas.Ok.self, from: data) { return .ok(.init(body: .json(ok))) }
         return .undocumented(statusCode: 200, payload)
     }
 
@@ -479,6 +539,7 @@ public struct SDLKitAPIServerAdapter: APIProtocol {
             req = try JSONEncoder().encode(payload)
         }
         let payload = call("/agent/gui/drawRects", body: req)
+        if let body = payload.body, let data = try? await Data(collecting: body, upTo: .max), let ok = try? JSONDecoder().decode(Components.Schemas.Ok.self, from: data) { return .ok(.init(body: .json(ok))) }
         return .undocumented(statusCode: 200, payload)
     }
 
