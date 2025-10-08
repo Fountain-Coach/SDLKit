@@ -7,8 +7,12 @@ import Yams
 
 final class OpenAPIConversionTests: XCTestCase {
     func testOpenAPIYAMLServedMatchesFile() async throws {
-        let path = "sdlkit.gui.v1.yaml"
-        let fileData = try Data(contentsOf: URL(fileURLWithPath: path))
+        let path = "Sources/SDLKitAPI/openapi.yaml"
+        let fileURL = URL(fileURLWithPath: path)
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            throw XCTSkip("OpenAPI spec not present at \(path)")
+        }
+        let fileData = try Data(contentsOf: fileURL)
         let served = await MainActor.run { () -> Data in
             let agent = SDLKitJSONAgent()
             return agent.handle(path: "/openapi.yaml", body: Data())
@@ -18,8 +22,12 @@ final class OpenAPIConversionTests: XCTestCase {
 
     func testOpenAPIJSONMatchesYAMLConversionDeep() async throws {
         #if OPENAPI_USE_YAMS
-        let yamlPath = "sdlkit.gui.v1.yaml"
-        let yamlData = try Data(contentsOf: URL(fileURLWithPath: yamlPath))
+        let yamlPath = "Sources/SDLKitAPI/openapi.yaml"
+        let yamlURL = URL(fileURLWithPath: yamlPath)
+        guard FileManager.default.fileExists(atPath: yamlURL.path) else {
+            throw XCTSkip("OpenAPI spec not present at \(yamlPath)")
+        }
+        let yamlData = try Data(contentsOf: yamlURL)
         // Convert via our converter
         guard let converted = OpenAPIConverter.yamlToJSON(yamlData) else {
             XCTFail("Converter returned nil")

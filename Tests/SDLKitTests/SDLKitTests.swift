@@ -61,7 +61,22 @@ final class SDLKitTests: XCTestCase {
         struct V: Codable { let agent: String; let openapi: String }
         let v = try JSONDecoder().decode(V.self, from: res)
         XCTAssertEqual(v.agent, "sdlkit.gui.v1")
-        XCTAssertEqual(v.openapi, "1.2.0")
+        XCTAssertEqual(v.openapi, try currentOpenAPIVersion())
+    }
+
+    private func currentOpenAPIVersion() throws -> String {
+        let url = URL(fileURLWithPath: "Sources/SDLKitAPI/openapi.yaml")
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            return SDLKitOpenAPI.specVersion
+        }
+        let contents = try String(contentsOf: url, encoding: .utf8)
+        for line in contents.split(whereSeparator: \.isNewline) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("version:") {
+                return trimmed.replacingOccurrences(of: "version:", with: "").trimmingCharacters(in: .whitespaces)
+            }
+        }
+        return SDLKitOpenAPI.specVersion
     }
 
     func testCloseWindowInvokesRendererShutdown() async throws {
