@@ -483,8 +483,6 @@ paths:
       tags: [clipboard]
       operationId: clipboardGet
       summary: Get clipboard text
-      requestBody:
-        required: false
       responses:
         "200": { description: Text, content: { application/json: { schema: { type: object, properties: { text: { type: string } } } } } }
   /agent/gui/clipboard/set:
