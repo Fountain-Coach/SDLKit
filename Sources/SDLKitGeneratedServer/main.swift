@@ -66,7 +66,17 @@ final class NIOHTTPHandler: ChannelInboundHandler {
       for f in resp.headerFields { headers.add(name: f.name.canonicalName, value: f.value) }
       let headOut = HTTPResponseHead(version: head.version, status: .init(statusCode: resp.status.code), headers: headers)
       context.write(self.wrapOutboundOut(.head(headOut)), promise: nil)
-      if let b = respBody, let data = try? Data(collecting: b, upTo: .max) {
+      var collected: Data? = nil
+      if let b = respBody {
+        let cSema = DispatchSemaphore(value: 0)
+        Task {
+          let d = try? await Data(collecting: b, upTo: .max)
+          collected = d
+          cSema.signal()
+        }
+        cSema.wait()
+      }
+      if let data = collected {
         var out = context.channel.allocator.buffer(capacity: data.count)
         out.writeBytes(data)
         context.write(self.wrapOutboundOut(.body(.byteBuffer(out))), promise: nil)

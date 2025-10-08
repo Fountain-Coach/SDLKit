@@ -45,9 +45,17 @@ jobs:
       - name: Smoke test NIO server (health/version)
         run: |
           set -euo pipefail
-          swift run -c debug SDLKitNIO &
+          # Pre-build the product to avoid compile time during run
+          swift build -c debug --product SDLKitNIO
+          ./.build/debug/SDLKitNIO &
           srv=$!
-          sleep 2
+          # Wait up to 30s for server to become ready
+          for i in $(seq 1 30); do
+            if curl -sf -X GET http://127.0.0.1:8723/health | grep -q '"ok":true'; then
+              break
+            fi
+            sleep 1
+          done
           curl -sS -X GET http://127.0.0.1:8723/health | grep '"ok":true'
           curl -sS -X GET http://127.0.0.1:8723/version | grep '"agent"' | grep '"openapi"'
           kill $srv || true
@@ -55,9 +63,15 @@ jobs:
       - name: Run generated server and curl health/version
         run: |
           set -euo pipefail
-          swift run -c debug SDLKitGeneratedServer &
+          swift build -c debug --product SDLKitGeneratedServer
+          ./.build/debug/SDLKitGeneratedServer &
           srv=$!
-          sleep 2
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:8724/health | grep -q '"ok":true'; then
+              break
+            fi
+            sleep 1
+          done
           curl -sS http://127.0.0.1:8724/health | grep '"ok":true'
           curl -sS http://127.0.0.1:8724/version | grep '"version":'
           kill $srv || true
