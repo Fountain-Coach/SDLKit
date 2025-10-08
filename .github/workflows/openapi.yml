@@ -40,7 +40,7 @@ jobs:
           set -euo pipefail
           swift run -c debug SDLKitAPISmoke > smoke.txt
           cat smoke.txt
-          grep '"ok": true' smoke.txt
+          grep '"ok":true' smoke.txt
           grep '"version":' smoke.txt
       - name: Smoke test NIO server (health/version)
         run: |
@@ -48,7 +48,7 @@ jobs:
           swift run -c debug SDLKitNIO &
           srv=$!
           sleep 2
-          curl -sS -X GET http://127.0.0.1:8723/health | grep '"ok": true'
+          curl -sS -X GET http://127.0.0.1:8723/health | grep '"ok":true'
           curl -sS -X GET http://127.0.0.1:8723/version | grep '"agent"' | grep '"openapi"'
           kill $srv || true
 
@@ -58,6 +58,6 @@ jobs:
           swift run -c debug SDLKitGeneratedServer &
           srv=$!
           sleep 2
-          curl -sS http://127.0.0.1:8724/health | grep '"ok": true'
+          curl -sS http://127.0.0.1:8724/health | grep '"ok":true'
           curl -sS http://127.0.0.1:8724/version | grep '"version":'
           kill $srv || true
