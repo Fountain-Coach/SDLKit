@@ -33,6 +33,15 @@ jobs:
         run: swift build -v --target SDLKitAPI
       - name: Build NIO server
         run: swift build -v --target SDLKitNIO
+      - name: Build generated-server adapter (compiles only)
+        run: swift build -v --target SDLKitAPIServerAdapter
+      - name: Run adapter smoke (typed health/version)
+        run: |
+          set -euo pipefail
+          swift run -c debug SDLKitAPISmoke > smoke.txt
+          cat smoke.txt
+          grep '"ok": true' smoke.txt
+          grep '"version":' smoke.txt
       - name: Smoke test NIO server (health/version)
         run: |
           set -euo pipefail
