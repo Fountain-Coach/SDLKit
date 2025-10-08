@@ -27,6 +27,14 @@ public struct SDLKitAPIServerAdapter: APIProtocol {
             req = try JSONEncoder().encode(payload)
         }
         let payload = call("/agent/gui/window/open", body: req)
+        if let body = payload.body, let data = try? await Data(collecting: body, upTo: .max) {
+            if let win = try? JSONDecoder().decode(Components.Schemas.WindowId.self, from: data) {
+                return .ok(.init(body: .json(win)))
+            }
+            if let err = try? JSONDecoder().decode(Components.Schemas._Error.self, from: data) {
+                return .notImplemented(.init(body: .json(err)))
+            }
+        }
         return .undocumented(statusCode: 200, payload)
     }
 

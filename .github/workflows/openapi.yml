@@ -51,3 +51,13 @@ jobs:
           curl -sS -X GET http://127.0.0.1:8723/health | grep '"ok": true'
           curl -sS -X GET http://127.0.0.1:8723/version | grep '"agent"' | grep '"openapi"'
           kill $srv || true
+
+      - name: Run generated server and curl health/version
+        run: |
+          set -euo pipefail
+          swift run -c debug SDLKitGeneratedServer &
+          srv=$!
+          sleep 2
+          curl -sS http://127.0.0.1:8724/health | grep '"ok": true'
+          curl -sS http://127.0.0.1:8724/version | grep '"version":'
+          kill $srv || true

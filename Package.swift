@@ -334,6 +334,20 @@ let package = Package(
                 path: "Sources/SDLKitAPIServerAdapter"
             )
         )
+        targets.append(
+            .executableTarget(
+                name: "SDLKitGeneratedServer",
+                dependencies: [
+                    "SDLKitAPIServerAdapter",
+                    "SDLKitAPI",
+                    .product(name: "OpenAPIRuntime", package: "swift-openapi-runtime"),
+                    .product(name: "NIOCore", package: "swift-nio"),
+                    .product(name: "NIOPosix", package: "swift-nio"),
+                    .product(name: "NIOHTTP1", package: "swift-nio")
+                ],
+                path: "Sources/SDLKitGeneratedServer"
+            )
+        )
 
 
 
