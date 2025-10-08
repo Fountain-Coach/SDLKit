@@ -9,9 +9,11 @@ Overview
 OpenAPI (Source of Truth)
 - Spec: `Sources/SDLKitAPI/openapi.yaml` (OpenAPI 3.1)
 - Generator: Apple’s Swift OpenAPI Generator (types + client + server)
-- Dedicated workflow: `SDLKit/.github/workflows/openapi.yml` (non‑blocking)
+- Dedicated workflow: `.github/workflows/openapi.yml` (non‑blocking)
 - Human docs: `docs/agent.md` (mirrors the spec)
-- Optional server: `SDLKitNIO` routes HTTP path → `SDLKitJSONAgent` (manual transport). A generated‑server adapter can be added to conform to the spec’s server interfaces and delegate to the router.
+- Servers:
+  - Manual transport: `SDLKitNIO` routes HTTP path → `SDLKitJSONAgent`.
+  - Generated‑server adapter: `SDLKitAPIServerAdapter` conforms to the generated server protocol and forwards all operations to the JSON agent. It currently returns 200 JSON via the undocumented payload channel to keep the transport type‑agnostic and decoupled from schema shape; this keeps the adapter compiling as the spec evolves.
 
 What’s In, Right Now
 - Windowing: open/close, show/hide, resize, title, position; fetch native handles (CAMetalLayer, HWND, Vulkan surface).
@@ -46,7 +48,7 @@ Key Targets
 - `SDLKit`: the Swift API (window, renderer, audio, JSON agent).
 - `SDLKitTTF`: optional text helpers layered on SDLKit.
 - Demos/Tools: `SDLKitDemo`, `SDLKitGolden`, `SDLKitSettings`, `SDLKitMigrate`.
-- OpenAPI: `SDLKitAPI` (spec-driven generated types/client/server stubs), `SDLKitNIO` (manual HTTP server)
+- OpenAPI: `SDLKitAPI` (spec-driven generated types/client/server stubs), `SDLKitNIO` (manual HTTP server), `SDLKitAPIServerAdapter` (generated‑server adapter)
 
 Build Flags & Env
 - `HEADLESS_CI`: defined when `sdl3` is unavailable → stubs compiled; GUI/audio features become no-ops.
