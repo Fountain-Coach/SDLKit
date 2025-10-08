@@ -48,19 +48,30 @@ final class NIOHTTPHandler: ChannelInboundHandler {
       }()
       let key = RouteKey(method: head.method.rawValue.uppercased(), path: pOnly)
       let routeHandler = self.routes[key]
+      var resp: HTTPResponse = HTTPResponse(status: .init(code: 404))
+      var respBody: HTTPBody? = nil
+      let sema = DispatchSemaphore(value: 0)
       Task {
-        let (resp, respBody) = try await routeHandler?(req, body, ServerRequestMetadata()) ?? (HTTPResponse(status: .init(code: 404)), nil)
-        var headers = HTTPHeaders()
-        for f in resp.headerFields { headers.add(name: f.name.canonicalName, value: f.value) }
-        let headOut = HTTPResponseHead(version: head.version, status: .init(statusCode: resp.status.code), headers: headers)
-        context.write(self.wrapOutboundOut(.head(headOut)), promise: nil)
-        if let b = respBody, let data = try? await Data(collecting: b, upTo: .max) {
-          var out = context.channel.allocator.buffer(capacity: data.count)
-          out.writeBytes(data)
-          context.write(self.wrapOutboundOut(.body(.byteBuffer(out))), promise: nil)
+        if let h = routeHandler {
+          do {
+            let r = try await h(req, body, ServerRequestMetadata())
+            resp = r.0
+            respBody = r.1
+          } catch { resp = HTTPResponse(status: .init(code: 500)); respBody = nil }
         }
-        context.writeAndFlush(self.wrapOutboundOut(.end(nil)), promise: nil)
+        sema.signal()
       }
+      sema.wait()
+      var headers = HTTPHeaders()
+      for f in resp.headerFields { headers.add(name: f.name.canonicalName, value: f.value) }
+      let headOut = HTTPResponseHead(version: head.version, status: .init(statusCode: resp.status.code), headers: headers)
+      context.write(self.wrapOutboundOut(.head(headOut)), promise: nil)
+      if let b = respBody, let data = try? Data(collecting: b, upTo: .max) {
+        var out = context.channel.allocator.buffer(capacity: data.count)
+        out.writeBytes(data)
+        context.write(self.wrapOutboundOut(.body(.byteBuffer(out))), promise: nil)
+      }
+      context.writeAndFlush(self.wrapOutboundOut(.end(nil)), promise: nil)
     }
   }
 }
