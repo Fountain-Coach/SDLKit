@@ -1,6 +1,5 @@
 #if canImport(OpenAPIRuntime) && canImport(SDLKitAPI) && canImport(SDLKit)
 import Foundation
-import Foundation
 import OpenAPIRuntime
 import HTTPTypes
 import SDLKitAPI
