@@ -47,8 +47,9 @@ final class NIOHTTPHandler: ChannelInboundHandler {
         return full
       }()
       let key = RouteKey(method: head.method.rawValue.uppercased(), path: pOnly)
+      let routeHandler = self.routes[key]
       Task {
-        let (resp, respBody) = try await self.routes[key]?(req, body, ServerRequestMetadata()) ?? (HTTPResponse(status: .init(code: 404)), nil)
+        let (resp, respBody) = try await routeHandler?(req, body, ServerRequestMetadata()) ?? (HTTPResponse(status: .init(code: 404)), nil)
         var headers = HTTPHeaders()
         for f in resp.headerFields { headers.add(name: f.name.canonicalName, value: f.value) }
         let headOut = HTTPResponseHead(version: head.version, status: .init(statusCode: resp.status.code), headers: headers)
