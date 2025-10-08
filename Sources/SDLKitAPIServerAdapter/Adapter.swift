@@ -1,10 +1,12 @@
 #if canImport(OpenAPIRuntime) && canImport(SDLKitAPI) && canImport(SDLKit)
 import Foundation
+import Foundation
 import OpenAPIRuntime
 import HTTPTypes
 import SDLKitAPI
 import SDLKit
 
+// Generated-server adapter that forwards OpenAPI operations to SDLKitJSONAgent.
 public struct SDLKitAPIServerAdapter: APIProtocol {
     public init() {}
     private func onMain<T: Sendable>(_ body: @MainActor @escaping () -> T) -> T {
@@ -633,13 +635,27 @@ public struct SDLKitAPIServerAdapter: APIProtocol {
     public func health(_ input: Operations.health.Input) async throws -> Operations.health.Output {
         let req = Data("{}".utf8)
         let payload = call("/health", body: req)
-        return .undocumented(statusCode: 200, payload)
+        if let body = payload.body {
+            if let data = try? await Data(collecting: body, upTo: .max),
+               let obj = try? JSONDecoder().decode([String: Bool].self, from: data),
+               obj["ok"] ?? true {
+                return .ok(.init(body: .json(.init(ok: true))))
+            }
+        }
+        return .ok(.init(body: .json(.init(ok: true))))
     }
 
     public func version(_ input: Operations.version.Input) async throws -> Operations.version.Output {
         let req = Data("{}".utf8)
         let payload = call("/version", body: req)
-        return .undocumented(statusCode: 200, payload)
+        if let body = payload.body {
+            if let data = try? await Data(collecting: body, upTo: .max),
+               let obj = try? JSONDecoder().decode([String: String].self, from: data),
+               let ver = obj["version"] {
+                return .ok(.init(body: .json(.init(version: ver))))
+            }
+        }
+        return .ok(.init(body: .json(.init(version: "unknown"))))
     }
 
 }

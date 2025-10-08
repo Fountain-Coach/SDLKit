@@ -335,6 +335,22 @@ let package = Package(
             )
         )
 
+
+
+        // Small executable that exercises the generated-server adapter
+        // by calling a few typed endpoints (health, version).
+        targets.append(
+            .executableTarget(
+                name: "SDLKitAPISmoke",
+                dependencies: [
+                    "SDLKit",
+                    "SDLKitAPI",
+                    "SDLKitAPIServerAdapter",
+                    .product(name: "OpenAPIRuntime", package: "swift-openapi-runtime")
+                ],
+                path: "Sources/SDLKitAPISmoke"
+            )
+        )
         targets.append(
             .executableTarget(
                 name: "SDLKitGolden",
