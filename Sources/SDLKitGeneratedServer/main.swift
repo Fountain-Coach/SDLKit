@@ -33,16 +33,16 @@ final class NIOHTTPHandler: ChannelInboundHandler {
       }
     case .end:
       guard let head = reqHead else { return }
-      let method = HTTPRequest.Method(head.method.rawValue) ?? .init(unchecked: head.method.rawValue)
+      let method = HTTPRequest.Method(head.method.rawValue) ?? HTTPRequest.Method("GET")!
       let path = head.uri
       var fields = HTTPFields()
       for h in head.headers { if let name = HTTPField.Name(h.name) { fields.append(HTTPField(name: name, value: h.value)) } }
-      let req = HTTPRequest(soar_path: path, method: method, headerFields: fields)
+      let req = HTTPRequest(method: method, scheme: nil, authority: nil, path: path, headerFields: fields)
       let bodyData = Data(bodyBuffer.readableBytesView)
       let body: HTTPBody? = bodyData.isEmpty ? nil : HTTPBody(bodyData)
       let key = RouteKey(method: head.method.rawValue.uppercased(), path: req.soar_pathOnly.description)
       Task {
-        let (resp, respBody) = try await self.routes[key]?(req, body, ServerRequestMetadata()) ?? (HTTPResponse(soar_statusCode: 404), nil)
+        let (resp, respBody) = try await self.routes[key]?(req, body, ServerRequestMetadata()) ?? (HTTPResponse(status: .init(code: 404)), nil)
         var headers = HTTPHeaders()
         for f in resp.headerFields { headers.add(name: f.name.canonicalName, value: f.value) }
         let headOut = HTTPResponseHead(version: head.version, status: .init(statusCode: resp.status.code), headers: headers)
