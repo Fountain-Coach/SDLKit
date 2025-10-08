@@ -321,6 +321,20 @@ let package = Package(
             )
         )
 
+        // Placeholder adapter that will conform to generated server interfaces and
+        // delegate to SDLKitJSONAgent. Not required by default builds.
+        targets.append(
+            .target(
+                name: "SDLKitAPIServerAdapter",
+                dependencies: [
+                    "SDLKit",
+                    "SDLKitAPI",
+                    .product(name: "OpenAPIRuntime", package: "swift-openapi-runtime")
+                ],
+                path: "Sources/SDLKitAPIServerAdapter"
+            )
+        )
+
         targets.append(
             .executableTarget(
                 name: "SDLKitGolden",
