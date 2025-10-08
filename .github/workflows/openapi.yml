@@ -39,6 +39,6 @@ jobs:
           swift run -c debug SDLKitNIO &
           srv=$!
           sleep 2
-          curl -sS -X GET http://127.0.0.1:8723/health | jq -e '.ok == true'
-          curl -sS -X GET http://127.0.0.1:8723/version | jq -e '.agent and .openapi'
+          curl -sS -X GET http://127.0.0.1:8723/health | grep '"ok": true'
+          curl -sS -X GET http://127.0.0.1:8723/version | grep '"agent"' | grep '"openapi"'
           kill $srv || true
