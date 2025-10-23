@@ -161,7 +161,11 @@ typedef struct SDLKit_Event {
   static inline void *SDLKit_MetalLayerForWindow(void *window) {
     #if __has_include(<SDL3/SDL_metal.h>)
       if (!window) return NULL;
-      return SDL_Metal_GetLayer((SDL_Window *)window);
+      // SDL3 Metal API expects a Metal view; create one for the window and
+      // return its CAMetalLayer. Callers do not own the layer.
+      SDL_MetalView view = SDL_Metal_CreateView((SDL_Window *)window);
+      if (!view) return NULL;
+      return (void *)SDL_Metal_GetLayer(view);
     #else
       (void)window;
       return NULL;
