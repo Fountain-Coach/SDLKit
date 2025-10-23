@@ -185,6 +185,18 @@ typedef struct SDLKit_Event {
     #endif
   }
 
+  static inline void *SDLKit_CocoaWindow(void *window) {
+    (void)window;
+    #if defined(SDL_PROP_WINDOW_COCOA_WINDOW_POINTER)
+      if (!window) return NULL;
+      SDL_PropertiesID props = SDL_GetWindowProperties((SDL_Window *)window);
+      if (!props) return NULL;
+      return SDL_GetPointerProperty(props, SDL_PROP_WINDOW_COCOA_WINDOW_POINTER, NULL);
+    #else
+      return NULL;
+    #endif
+  }
+
   static inline bool SDLKit_CreateVulkanSurface(void *window, VkInstance instance, VkSurfaceKHR *surface) {
     #if __has_include(<SDL3/SDL_vulkan.h>)
       if (!window || !surface) {

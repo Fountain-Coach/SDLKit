@@ -155,6 +155,7 @@ public final class SDLWindow {
         // Ensure visibility and focus on macOS by centering and raising.
         SDLKit_CenterWindow(win)
         SDLKit_RaiseWindow(win)
+        SDLKit_activateAppAndWindowIfPossible(win)
         #else
         throw AgentError.sdlUnavailable
         #endif
