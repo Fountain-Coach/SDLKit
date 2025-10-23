@@ -237,6 +237,16 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
         }
     }
 
+    deinit {
+        // Ensure any pending GPU work completes so our completion handler
+        // has a chance to run. Then oversignal to avoid libdispatch complaint
+        // if the completion callback races this destructor on shutdown.
+        if let buffer = lastSubmittedCommandBuffer {
+            buffer.waitUntilCompleted()
+        }
+        for _ in 0..<3 { inflightSemaphore.signal() }
+    }
+
     public func createBuffer(bytes: UnsafeRawPointer?, length: Int, usage: BufferUsage) throws -> BufferHandle {
         guard length > 0 else {
             throw AgentError.invalidArgument("Buffer length must be greater than zero")
@@ -1211,9 +1221,6 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
         }
         // Buffers are created with .storageModeShared; a direct memcpy is sufficient.
         let srcPtr = resource.buffer.contents()
-        guard srcPtr != nil else {
-            throw AgentError.internalError("Metal buffer not CPU-accessible for readback")
-        }
         let toCopy = min(length, resource.length)
         memcpy(dst, srcPtr, toCopy)
         if toCopy < length {
