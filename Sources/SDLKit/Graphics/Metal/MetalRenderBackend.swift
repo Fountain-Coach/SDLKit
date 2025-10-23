@@ -479,31 +479,44 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
             throw AgentError.internalError("Vertex buffer handle not found for mesh")
         }
 
-        let encoder = try obtainRenderEncoder(for: pipelineResource, commandBuffer: commandBuffer)
-        encoder.setRenderPipelineState(pipelineResource.state)
+        // Prepare material constants first so we don't open an encoder if we're going to error.
         let expectedUniformLength = pipelineResource.pushConstantSize
+        var preparedUniforms: Data? = nil
         if expectedUniformLength > 0 {
-            guard let payload = bindings.materialConstants else {
-                let message = "Shader \(pipelineResource.descriptor.shader.rawValue) expects \(expectedUniformLength) bytes of material constants but none were provided."
-                SDLLogger.error("SDLKit.Graphics.Metal", message)
-                throw AgentError.invalidArgument(message)
-            }
-            let byteCount = payload.byteCount
-            guard byteCount == expectedUniformLength else {
-                let message = "Shader \(pipelineResource.descriptor.shader.rawValue) expects \(expectedUniformLength) bytes of material constants but received \(byteCount)."
-                SDLLogger.error("SDLKit.Graphics.Metal", message)
-                throw AgentError.invalidArgument(message)
-            }
-            payload.withUnsafeBytes { bytes in
-                guard let base = bytes.baseAddress else { return }
-                encoder.setVertexBytes(base, length: bytes.count, index: 1)
-                encoder.setFragmentBytes(base, length: bytes.count, index: 1)
+            if let payload = bindings.materialConstants {
+                let byteCount = payload.byteCount
+                guard byteCount == expectedUniformLength else {
+                    let message = "Shader \(pipelineResource.descriptor.shader.rawValue) expects \(expectedUniformLength) bytes of material constants but received \(byteCount)."
+                    SDLLogger.error("SDLKit.Graphics.Metal", message)
+                    throw AgentError.invalidArgument(message)
+                }
+                preparedUniforms = payload
+            } else {
+                // Graceful fallback: provide an identity transform in the first 64 bytes
+                // and zero the remaining bytes.
+                var data = Data(count: expectedUniformLength)
+                var m = float4x4.identity
+                withUnsafeBytes(of: &m) { mat in
+                    let n = min(expectedUniformLength, mat.count)
+                    data.replaceSubrange(0..<n, with: mat.prefix(n))
+                }
+                preparedUniforms = data
             }
         } else if let payload = bindings.materialConstants, payload.byteCount > 0 {
             SDLLogger.warn(
                 "SDLKit.Graphics.Metal",
                 "Material constants (\(payload.byteCount) bytes) provided for shader \(pipelineResource.descriptor.shader.rawValue) which does not declare push constants. Data will be ignored."
             )
+        }
+
+        let encoder = try obtainRenderEncoder(for: pipelineResource, commandBuffer: commandBuffer)
+        encoder.setRenderPipelineState(pipelineResource.state)
+        if let uniforms = preparedUniforms {
+            uniforms.withUnsafeBytes { bytes in
+                guard let base = bytes.baseAddress else { return }
+                encoder.setVertexBytes(base, length: bytes.count, index: 1)
+                encoder.setFragmentBytes(base, length: bytes.count, index: 1)
+            }
         }
         encoder.setVertexBuffer(vertexResource.buffer, offset: 0, index: 0)
 
