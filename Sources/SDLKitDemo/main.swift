@@ -159,8 +159,9 @@ struct DemoApp {
         try showcaseDrawing(windowId: windowId, agent: agent)
         try logNativeHandles(for: platform, windowId: windowId, agent: agent)
 
+        let seconds = Double(ProcessInfo.processInfo.environment["SDLKIT_DEMO_SECONDS"] ?? "8") ?? 8.0
         let start = Date()
-        while Date().timeIntervalSince(start) < 2.0 {
+        while Date().timeIntervalSince(start) < seconds {
             _ = try agent.captureEvent(windowId: windowId, timeoutMs: 100)
         }
     }
