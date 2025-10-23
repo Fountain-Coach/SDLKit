@@ -238,12 +238,8 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
     }
 
     deinit {
-        // Ensure any pending GPU work completes so our completion handler
-        // has a chance to run. Then oversignal to avoid libdispatch complaint
-        // if the completion callback races this destructor on shutdown.
-        if let buffer = lastSubmittedCommandBuffer {
-            buffer.waitUntilCompleted()
-        }
+        // Oversignal to avoid libdispatch complaint if a completion handler
+        // races this destructor and hasn't signaled yet.
         for _ in 0..<3 { inflightSemaphore.signal() }
     }
 
