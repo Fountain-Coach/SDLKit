@@ -297,7 +297,7 @@ enum SDLCore {
             #endif
             // Initialize core and video; if video is unavailable (headless), this may fail at runtime.
             // Callers should handle errors gracefully.
-            if SDLKit_Init(0) != 0 { // 0 => initialize nothing explicitly; subsystems init lazily
+            if SDLKit_Init(0) < 0 { // 0 => initialize nothing explicitly; subsystems init lazily
                 throw AgentError.internalError(SDLCore.lastError())
             }
             Self.initialized = true
