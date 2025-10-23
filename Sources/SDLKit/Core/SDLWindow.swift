@@ -288,6 +288,13 @@ enum SDLCore {
     func ensureInitialized() throws {
         #if canImport(CSDL3) && !HEADLESS_CI
         if !Self.initialized {
+            #if os(macOS)
+            // Provide sane defaults on macOS when not explicitly set to reduce
+            // initialization failures in ad-hoc runs (outside of our launchers).
+            let env = ProcessInfo.processInfo.environment
+            if env["SDL_VIDEODRIVER"] == nil { setenv("SDL_VIDEODRIVER", "cocoa", 1) }
+            if env["SDL_AUDIODRIVER"] == nil { setenv("SDL_AUDIODRIVER", "dummy", 1) }
+            #endif
             // Initialize core and video; if video is unavailable (headless), this may fail at runtime.
             // Callers should handle errors gracefully.
             if SDLKit_Init(0) != 0 { // 0 => initialize nothing explicitly; subsystems init lazily
