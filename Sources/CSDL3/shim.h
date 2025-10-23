@@ -55,7 +55,8 @@ typedef struct SDLKit_Event {
   typedef struct SDL_Texture SDL_Texture;
   typedef struct SDL_AudioStream SDL_AudioStream;
   static inline const char *SDLKit_GetError(void) { return SDL_GetError(); }
-  static inline int SDLKit_Init(uint32_t flags) { return SDL_Init(flags); }
+  // Normalize to 0 on success, -1 on failure to match other wrapper conventions.
+  static inline int SDLKit_Init(uint32_t flags) { return SDL_Init(flags) ? 0 : -1; }
   static inline void *SDLKit_CreateWindow(const char *title, int32_t width, int32_t height, uint32_t flags) {
     return (void *)SDL_CreateWindow(title, width, height, flags);
   }
