@@ -64,6 +64,7 @@ typedef struct SDLKit_Event {
   static inline void SDLKit_DestroyRenderer(void *renderer) { SDL_DestroyRenderer((SDL_Renderer *)renderer); }
   static inline void SDLKit_ShowWindow(void *window) { SDL_ShowWindow((SDL_Window *)window); }
   static inline void SDLKit_HideWindow(void *window) { SDL_HideWindow((SDL_Window *)window); }
+  static inline void SDLKit_RaiseWindow(void *window) { SDL_RaiseWindow((SDL_Window *)window); }
   static inline void SDLKit_SetWindowTitle(void *window, const char *title) { SDL_SetWindowTitle((SDL_Window *)window, title); }
   static inline const char *SDLKit_GetWindowTitle(void *window) { return SDL_GetWindowTitle((SDL_Window *)window); }
   static inline void SDLKit_SetWindowPosition(void *window, int x, int y) { SDL_SetWindowPosition((SDL_Window *)window, x, y); }

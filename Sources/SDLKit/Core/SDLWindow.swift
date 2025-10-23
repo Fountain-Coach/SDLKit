@@ -152,6 +152,9 @@ public final class SDLWindow {
         #if canImport(CSDL3) && !HEADLESS_CI
         guard let win = handle else { throw AgentError.internalError("Window not opened") }
         SDLKit_ShowWindow(win)
+        // Ensure visibility and focus on macOS by centering and raising.
+        SDLKit_CenterWindow(win)
+        SDLKit_RaiseWindow(win)
         #else
         throw AgentError.sdlUnavailable
         #endif
