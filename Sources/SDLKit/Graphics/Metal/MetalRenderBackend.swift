@@ -996,7 +996,25 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
         }
         let url = try module.artifacts.requireMetalLibrary(for: module.id)
         SDLLogger.info("SDLKit.Graphics.Metal", "Loading metallib for \(module.id.rawValue) from \(url.path)")
-        let library = try device.makeLibrary(URL: url)
+        let library: MTLLibrary
+        do {
+            library = try device.makeLibrary(URL: url)
+        } catch {
+            // Fallback: build a minimal inline Metal library for known shaders so
+            // the demo can render even if the prebuilt metallib is incompatible.
+            if let src = inlineMetalSource(for: module.id) {
+                SDLLogger.warn("SDLKit.Graphics.Metal", "Falling back to inline Metal source for \(module.id.rawValue): \(error)")
+                #if canImport(Metal)
+                let opts = MTLCompileOptions()
+                if #available(macOS 12.0, *) { opts.languageVersion = .version3_0 }
+                library = try device.makeLibrary(source: src, options: opts)
+                #else
+                throw error
+                #endif
+            } else {
+                throw error
+            }
+        }
         metalLibraries[module.id] = library
         return library
     }
@@ -1010,6 +1028,64 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
         let library = try device.makeLibrary(URL: url)
         metalLibraries[module.id] = library
         return library
+    }
+
+    // Minimal inline shaders as a safety net when metallib loading fails.
+    private func inlineMetalSource(for id: ShaderID) -> String? {
+        switch id.rawValue {
+        case "unlit_triangle":
+            return """
+            #include <metal_stdlib>
+            using namespace metal;
+
+            struct VSIn {
+                float3 position [[attribute(0)]];
+                float3 color    [[attribute(1)]];
+            };
+            struct VSOut {
+                float4 position [[position]];
+                float3 color;
+            };
+            struct VSUniforms {
+                float4x4 mvp;
+                float4 pad0;
+                float4 pad1;
+            };
+
+            vertex VSOut unlit_triangle_vs(VSIn in [[stage_in]], constant VSUniforms &uni [[buffer(1)]]) {
+                VSOut out;
+                float4 p = float4(in.position, 1.0);
+                out.position = uni.mvp * p;
+                out.color = in.color;
+                return out;
+            }
+
+            fragment float4 unlit_triangle_ps(VSOut in [[stage_in]]) {
+                return float4(in.color, 1.0);
+            }
+            """
+        case "basic_lit":
+            return """
+            #include <metal_stdlib>
+            using namespace metal;
+
+            struct VSIn { float3 position [[attribute(0)]]; float3 normal [[attribute(1)]]; float3 color [[attribute(2)]]; };
+            struct VSOut { float4 position [[position]]; float3 normal; float3 color; };
+            struct VSUniforms { float4x4 mvp; float4 pad0; float4 pad1; };
+
+            vertex VSOut basic_lit_vs(VSIn in [[stage_in]], constant VSUniforms &uni [[buffer(1)]]) {
+                VSOut out; out.position = uni.mvp * float4(in.position, 1.0); out.normal = in.normal; out.color = in.color; return out;
+            }
+            fragment float4 basic_lit_ps(VSOut in [[stage_in]]) {
+                float3 L = normalize(float3(0.3, -0.5, 0.8));
+                float NdotL = max(dot(normalize(in.normal), -L), 0.0);
+                float3 c = in.color * (0.2 + 0.8 * NdotL);
+                return float4(c, 1.0);
+            }
+            """
+        default:
+            return nil
+        }
     }
 
     private static func makeTriangleVertexBuffer(device: MTLDevice) -> (handle: BufferHandle, buffer: MTLBuffer, count: Int)? {
