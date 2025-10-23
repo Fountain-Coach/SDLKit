@@ -7,6 +7,7 @@ import CSDL3
 #endif
 
 @usableFromInline
+@MainActor
 func SDLKit_activateAppAndWindowIfPossible(_ windowHandle: UnsafeMutableRawPointer?) {
     #if os(macOS)
     guard let windowHandle else { return }
@@ -23,4 +24,3 @@ func SDLKit_activateAppAndWindowIfPossible(_ windowHandle: UnsafeMutableRawPoint
     #endif
     #endif
 }
-
