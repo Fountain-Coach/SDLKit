@@ -509,15 +509,17 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
             )
         }
 
+        let hadEncoder = (currentRenderEncoder != nil)
         let encoder = try obtainRenderEncoder(for: pipelineResource, commandBuffer: commandBuffer)
-        encoder.setRenderPipelineState(pipelineResource.state)
-        if let uniforms = preparedUniforms {
-            uniforms.withUnsafeBytes { bytes in
-                guard let base = bytes.baseAddress else { return }
-                encoder.setVertexBytes(base, length: bytes.count, index: 1)
-                encoder.setFragmentBytes(base, length: bytes.count, index: 1)
+        do {
+            encoder.setRenderPipelineState(pipelineResource.state)
+            if let uniforms = preparedUniforms {
+                uniforms.withUnsafeBytes { bytes in
+                    guard let base = bytes.baseAddress else { return }
+                    encoder.setVertexBytes(base, length: bytes.count, index: 1)
+                    encoder.setFragmentBytes(base, length: bytes.count, index: 1)
+                }
             }
-        }
         encoder.setVertexBuffer(vertexResource.buffer, offset: 0, index: 0)
 
         try bindResources(
@@ -552,6 +554,13 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
             )
         } else {
             encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: vertexCount)
+        }
+        } catch {
+            // Ensure encoder is closed on error to satisfy Metal's lifetime rules.
+            if !hadEncoder, let active = currentRenderEncoder {
+                active.endEncoding(); currentRenderEncoder = nil
+            }
+            throw error
         }
     }
 
