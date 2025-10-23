@@ -490,7 +490,7 @@ public final class MetalRenderBackend: RenderBackend, GoldenImageCapturable {
                     SDLLogger.error("SDLKit.Graphics.Metal", message)
                     throw AgentError.invalidArgument(message)
                 }
-                preparedUniforms = payload
+                preparedUniforms = payload.data
             } else {
                 // Graceful fallback: provide an identity transform in the first 64 bytes
                 // and zero the remaining bytes.
