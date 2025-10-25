@@ -227,7 +227,7 @@ public final class AudioFeaturePump: @unchecked Sendable {
         while running {
             // Read one hop worth of frames (blocking-ish)
             var hop = Array(repeating: Float(0), count: hopSize * channels)
-            var got = pump.readFrames(into: &hop)
+            let got = pump.readFrames(into: &hop)
             if got == 0 { continue }
             if got < hopSize {
                 hop.removeSubrange(got*channels..<hop.count)

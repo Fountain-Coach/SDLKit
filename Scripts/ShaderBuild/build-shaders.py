@@ -78,9 +78,23 @@ def resolve_tool(env_key: str, executable: str, package_root: Path) -> Optional[
     if env_key and env_key in os.environ and os.environ[env_key]:
         return os.environ[env_key]
 
+    # Direct PATH lookup
     tool = shutil.which(executable)
     if tool:
         return tool
+
+    # On Apple platforms, prefer xcrun lookup for developer tools like `metal`/`metallib`.
+    try:
+        import platform
+        if platform.system() == "Darwin":
+            xc = shutil.which("xcrun")
+            if xc:
+                probe = subprocess.run([xc, "-f", executable], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+                cand = probe.stdout.strip()
+                if cand and os.path.exists(cand):
+                    return cand
+    except Exception:
+        pass
 
     local = package_root / "External" / "Toolchains" / "bin" / executable
     if local.exists():
@@ -89,13 +103,32 @@ def resolve_tool(env_key: str, executable: str, package_root: Path) -> Optional[
     return None
 
 
-def run_process(executable: Path, *arguments: str) -> subprocess.CompletedProcess:
+def run_process(executable: Path, *arguments: str, env: Optional[dict[str, str]] = None) -> subprocess.CompletedProcess:
+    full_env = os.environ.copy()
+    if env:
+        full_env.update(env)
     return subprocess.run(
         [str(executable), *arguments],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        env=full_env,
     )
+
+
+def macos_deployment_min_flag() -> list[str]:
+    """Returns a conservative macOS deployment target flag for Apple's metal tools.
+
+    We prefer the environment-provided MACOSX_DEPLOYMENT_TARGET when present, falling
+    back to a stable default that is compatible with the package's declared minimum
+    (.macOS(.v13)). This reduces the chance of producing metallibs that fail to load
+    with MTLLibraryErrorDomain(Code=1 "Invalid library file") due to SDK skew.
+    """
+    target = os.environ.get("MACOSX_DEPLOYMENT_TARGET", "13.0").strip()
+    # Basic sanity: require a number-like value "major.minor"
+    if not target or target[0] < '0' or target[0] > '9':
+        target = "13.0"
+    return [f"-mmacosx-version-min={target}"]
 
 
 def ensure_directory(path: Path) -> bool:
@@ -129,14 +162,17 @@ def main() -> int:
 
     dxc = resolve_tool("SDLKIT_SHADER_DXC", "dxc", package_root)
     if not dxc:
-        messages.append("dxc not found on PATH; skipping shader compilation")
-        write_summary(messages, output_dir)
-        return 0
+        messages.append("dxc not found on PATH; skipping DXIL/SPIR-V; attempting native Metal builds if available")
 
     spirv_cross = resolve_tool("SDLKIT_SHADER_SPIRV_CROSS", "spirv-cross", package_root)
     metal = resolve_tool("SDLKIT_SHADER_METAL", "metal", package_root)
     metallib = resolve_tool("SDLKIT_SHADER_METALLIB", "metallib", package_root)
     glslang = resolve_tool("SDLKIT_SHADER_GLSLANG", "glslangValidator", package_root)
+    messages.append(f"toolchain: dxc={(dxc or 'none')}, metal={(metal or 'none')}, metallib={(metallib or 'none')}, spirv-cross={(spirv_cross or 'none')}, glslang={(glslang or 'none')}")
+
+    # Provide a writable module cache for Apple's Metal compiler inside the plugin sandbox
+    metal_module_cache = output_dir / "metal-module-cache"
+    metal_module_cache.mkdir(parents=True, exist_ok=True)
 
     for module in MODULES:
         source_path = package_root / module["source"]
@@ -163,69 +199,75 @@ def main() -> int:
         metallib_file = metal_root / f"{module['name']}.metallib"
         metal_source = package_root / "Shaders" / "graphics" / f"{module['name']}.metal"
 
-        vertex_result = run_process(
-            Path(dxc),
-            "-T",
-            "vs_6_7",
-            "-E",
-            module["vertex_entry"],
-            "-Fo",
-            str(vertex_dxil),
-            str(source_path),
-        )
-        if vertex_result.returncode != 0:
-            messages.append(f"dxc vertex compilation failed for {module['name']}\n{vertex_result.stderr}")
-            continue
+        if dxc:
+            vertex_result = run_process(
+                Path(dxc),
+                "-T",
+                "vs_6_7",
+                "-E",
+                module["vertex_entry"],
+                "-Fo",
+                str(vertex_dxil),
+                str(source_path),
+            )
+            if vertex_result.returncode != 0:
+                messages.append(f"dxc vertex compilation failed for {module['name']}\n{vertex_result.stderr}")
+                continue
 
-        fragment_result = run_process(
-            Path(dxc),
-            "-T",
-            "ps_6_7",
-            "-E",
-            module["fragment_entry"],
-            "-Fo",
-            str(fragment_dxil),
-            str(source_path),
-        )
-        if fragment_result.returncode != 0:
-            messages.append(f"dxc fragment compilation failed for {module['name']}\n{fragment_result.stderr}")
-            continue
+            fragment_result = run_process(
+                Path(dxc),
+                "-T",
+                "ps_6_7",
+                "-E",
+                module["fragment_entry"],
+                "-Fo",
+                str(fragment_dxil),
+                str(source_path),
+            )
+            if fragment_result.returncode != 0:
+                messages.append(f"dxc fragment compilation failed for {module['name']}\n{fragment_result.stderr}")
+                continue
 
-        spirv_vertex = run_process(
-            Path(dxc),
-            "-spirv",
-            "-fvk-use-dx-layout",
-            "-fspv-target-env=vulkan1.2",
-            "-T",
-            "vs_6_7",
-            "-E",
-            module["vertex_entry"],
-            "-Fo",
-            str(vertex_spv),
-            str(source_path),
-        )
-        if spirv_vertex.returncode != 0:
-            messages.append(f"dxc SPIR-V vertex compilation failed for {module['name']}\n{spirv_vertex.stderr}")
+            spirv_vertex = run_process(
+                Path(dxc),
+                "-spirv",
+                "-fvk-use-dx-layout",
+                "-fspv-target-env=vulkan1.2",
+                "-T",
+                "vs_6_7",
+                "-E",
+                module["vertex_entry"],
+                "-Fo",
+                str(vertex_spv),
+                str(source_path),
+            )
+            if spirv_vertex.returncode != 0:
+                messages.append(f"dxc SPIR-V vertex compilation failed for {module['name']}\n{spirv_vertex.stderr}")
 
-        spirv_fragment = run_process(
-            Path(dxc),
-            "-spirv",
-            "-fvk-use-dx-layout",
-            "-fspv-target-env=vulkan1.2",
-            "-T",
-            "ps_6_7",
-            "-E",
-            module["fragment_entry"],
-            "-Fo",
-            str(fragment_spv),
-            str(source_path),
-        )
-        if spirv_fragment.returncode != 0:
-            messages.append(f"dxc SPIR-V fragment compilation failed for {module['name']}\n{spirv_fragment.stderr}")
+            spirv_fragment = run_process(
+                Path(dxc),
+                "-spirv",
+                "-fvk-use-dx-layout",
+                "-fspv-target-env=vulkan1.2",
+                "-T",
+                "ps_6_7",
+                "-E",
+                module["fragment_entry"],
+                "-Fo",
+                str(fragment_spv),
+                str(source_path),
+            )
+            if spirv_fragment.returncode != 0:
+                messages.append(f"dxc SPIR-V fragment compilation failed for {module['name']}\n{spirv_fragment.stderr}")
 
         # Prefer native .metal sources if available
         if metal and metallib and metal_source.exists():
-            metal_result = run_process(Path(metal), str(metal_source), "-o", str(air_file))
+            metal_args = [str(metal_source), "-o", str(air_file)] + macos_deployment_min_flag()
+            metal_env = {
+                "CLANG_MODULE_CACHE_PATH": str(metal_module_cache),
+                "TMPDIR": str(output_dir),
+            }
+            metal_result = run_process(Path(metal), *metal_args, env=metal_env)
             if metal_result.returncode != 0:
                 messages.append(f"metal compilation failed for {module['name']}\n{metal_result.stderr}")
             elif air_file.exists():
@@ -274,7 +316,12 @@ def main() -> int:
                     messages.append(f"Failed to merge MSL sources for {module['name']}: {error}")
 
                 if metal and metallib:
-                    metal_result = run_process(Path(metal), str(combined_msl), "-o", str(air_file))
+                    metal_args = [str(combined_msl), "-o", str(air_file)] + macos_deployment_min_flag()
+                    metal_env = {
+                        "CLANG_MODULE_CACHE_PATH": str(metal_module_cache),
+                        "TMPDIR": str(output_dir),
+                    }
+                    metal_result = run_process(Path(metal), *metal_args, env=metal_env)
                     if metal_result.returncode != 0:
                         messages.append(f"metal compilation failed for {module['name']}\n{metal_result.stderr}")
                     elif air_file.exists():
@@ -304,7 +351,7 @@ def main() -> int:
 
         language = module.get("language", "hlsl")
 
-        if language == "hlsl":
+        if language == "hlsl" and dxc:
             dxil_result = run_process(
                 Path(dxc),
                 "-T",
@@ -362,7 +409,12 @@ def main() -> int:
                 messages.append(f"SPIRV-Cross conversion failed for compute module {module['name']}\n{cross_result.stderr}")
 
         if metal and metallib and msl_path.exists():
-            metal_result = run_process(Path(metal), str(msl_path), "-o", str(air_file))
+            metal_args = [str(msl_path), "-o", str(air_file)] + macos_deployment_min_flag()
+            metal_env = {
+                "CLANG_MODULE_CACHE_PATH": str(metal_module_cache),
+                "TMPDIR": str(output_dir),
+            }
+            metal_result = run_process(Path(metal), *metal_args, env=metal_env)
             if metal_result.returncode != 0:
                 messages.append(f"metal compilation failed for compute module {module['name']}\n{metal_result.stderr}")
             elif air_file.exists():

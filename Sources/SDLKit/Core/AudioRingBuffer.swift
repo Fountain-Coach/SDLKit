@@ -48,7 +48,7 @@ public final class SPSCFloatRingBuffer {
         #else
         lock.lock(); var h = headVal; let t = tailVal; lock.unlock()
         #endif
-        var free = h >= t ? (capacity - (h - t) - 1) : (t - h - 1)
+        let free = h >= t ? (capacity - (h - t) - 1) : (t - h - 1)
         if free <= 0 { return 0 }
         let n = min(count, free)
         let first = min(n, capacity - h)
@@ -127,14 +127,13 @@ public final class SDLAudioChunkedCapturePump: @unchecked Sendable {
     public func stop() { running = false }
 
     public func readFrames(into dstFrames: inout [Float]) -> Int {
-        let samples = dstFrames.count
         return dstFrames.withUnsafeMutableBufferPointer { buf in
             ring.read(into: buf)
         } / channels
     }
 
     private func threadLoop() {
-        var temp = Array(repeating: Float(0), count: 4096)
+        let temp = Array(repeating: Float(0), count: 4096)
         while running {
             let availFrames = capture.availableFrames()
             if availFrames <= 0 {

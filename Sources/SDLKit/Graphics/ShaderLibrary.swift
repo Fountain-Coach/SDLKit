@@ -240,9 +240,10 @@ public final class ShaderLibrary {
             // - D3D12: cbuffer at b0
             // - Metal: constant buffer at [[buffer(1)]] (backend sets it)
             // - Vulkan: push constants (backend sets it)
+            // For the unlit triangle demo, no texture is required.
+            // Keep only the vertex uniform buffer binding; fragment has no mandatory resources.
             bindings: [
-                .vertex: [ BindingSlot(index: 0, kind: .uniformBuffer) ],
-                .fragment: [ BindingSlot(index: 10, kind: .sampledTexture) ]
+                .vertex: [ BindingSlot(index: 0, kind: .uniformBuffer) ]
             ],
             pushConstantSize: pushConstantSize,
             artifacts: artifacts
