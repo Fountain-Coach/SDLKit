@@ -78,7 +78,8 @@ let package = Package(
     ],
     products: {
         var prods: [Product] = [
-            .library(name: "SDLKit", targets: ["SDLKit"]) 
+            .library(name: "SDLKit", targets: ["SDLKit"]),
+            .library(name: "SDLKitAudio", targets: ["SDLKitAudio"]) 
         ]
         if guiEnabled {
             prods.append(.executable(name: "SDLKitDemo", targets: ["SDLKitDemo"]))
@@ -273,6 +274,16 @@ let package = Package(
                 )
             )
         }
+
+        // Cross-platform audio host facade. On macOS it uses AVAudioEngine;
+        // other platforms may plug a different backend in the future.
+        targets.append(
+            .target(
+                name: "SDLKitAudio",
+                dependencies: [],
+                path: "Sources/SDLKitAudio"
+            )
+        )
 
         targets.append(
             .testTarget(
