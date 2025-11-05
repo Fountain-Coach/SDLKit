@@ -91,9 +91,9 @@ let package = Package(
             deps.append(.package(url: "https://github.com/jpsim/Yams.git", from: "5.1.0"))
         }
         // FountainStore for persistence (golden references, configs, etc.)
-        deps.append(.package(path: "External/Fountain-Store"))
+        deps.append(.package(url: "https://github.com/Fountain-Coach/Fountain-Store.git", from: "0.2.0"))
         // SecretStore for secure secret persistence
-        deps.append(.package(path: "External/swift-secretstore"))
+        deps.append(.package(url: "https://github.com/Fountain-Coach/swift-secretstore.git", exact: "0.1.0"))
         // OpenAPI generator & runtimes (opt-in target only)
         deps.append(.package(url: "https://github.com/apple/swift-openapi-generator.git", from: "1.3.2"))
         deps.append(.package(url: "https://github.com/apple/swift-openapi-runtime.git", from: "1.1.0"))
